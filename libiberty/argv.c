@@ -124,6 +124,7 @@ consume_whitespace (const char **input)
     }
 }
 
+/*input字符串是否全为空字符*/
 static int
 only_whitespace (const char* input)
 {
@@ -175,6 +176,7 @@ returned, as appropriate.
 
 char **buildargv (const char *input)
 {
+  /*解析input中指明的参数*/
   char *arg;
   char *copybuf;
   int squote = 0;
@@ -193,18 +195,20 @@ char **buildargv (const char *input)
       do
 	{
 	  /* Pick off argv[argc] */
-	  consume_whitespace (&input);
+	  consume_whitespace (&input);/*跳过前导空格字符*/
 
 	  if ((maxargc == 0) || (argc >= (maxargc - 1)))
 	    {
 	      /* argv needs initialization, or expansion */
 	      if (argv == NULL)
 		{
+	          /*初次申请nargv*/
 		  maxargc = INITIAL_MAXARGC;
 		  nargv = (char **) xmalloc (maxargc * sizeof (char *));
 		}
 	      else
 		{
+	          /*增大nargv*/
 		  maxargc *= 2;
 		  nargv = (char **) xrealloc (argv, maxargc * sizeof (char *));
 		}
@@ -217,6 +221,7 @@ char **buildargv (const char *input)
 	    {
 	      if (ISSPACE (*input) && !squote && !dquote && !bsquote)
 		{
+	          /*遇到空字符，且不处于 单引号，双引号，转议状态中，则当前单个参数复制结束，跳出*/
 		  break;
 		}
 	      else
@@ -228,32 +233,35 @@ char **buildargv (const char *input)
 		    }
 		  else if (*input == '\\')
 		    {
-		      bsquote = 1;
+		      bsquote = 1;/*指明遇到转义*/
 		    }
 		  else if (squote)
 		    {
+		      /*单引号处理*/
 		      if (*input == '\'')
 			{
-			  squote = 0;
+			  squote = 0;/*单引号结束*/
 			}
 		      else
 			{
-			  *arg++ = *input;
+			  *arg++ = *input;/*单引号未结束，直接复制*/
 			}
 		    }
 		  else if (dquote)
 		    {
+		      /*双引号处理*/
 		      if (*input == '"')
 			{
-			  dquote = 0;
+			  dquote = 0;/*双引号结束*/
 			}
 		      else
 			{
-			  *arg++ = *input;
+			  *arg++ = *input;/*双引号未结束，直接复制*/
 			}
 		    }
 		  else
 		    {
+		      /*检查是否首次遇到 单引号，双引号*/
 		      if (*input == '\'')
 			{
 			  squote = 1;
@@ -270,11 +278,13 @@ char **buildargv (const char *input)
 		  input++;
 		}
 	    }
+	  /*填写分析成功的一个参数*/
 	  *arg = EOS;
 	  argv[argc] = xstrdup (copybuf);
 	  argc++;
 	  argv[argc] = NULL;
 
+	  /*跳过后置的空字符*/
 	  consume_whitespace (&input);
 	}
       while (*input != EOS);
@@ -363,7 +373,7 @@ operating system to free the memory when the program exits.
 */
 
 void
-expandargv (int *argcp, char ***argvp)
+expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
 {
   /* The argument we are currently processing.  */
   int i = 0;
@@ -398,7 +408,7 @@ expandargv (int *argcp, char ***argvp)
       struct stat sb;
 #endif
       /* We are only interested in options of the form "@file".  */
-      filename = (*argvp)[i];
+      filename = (*argvp)[i];/*选项中以@开头的文件名称*/
       if (filename[0] != '@')
 	continue;
       /* If we have iterated too many times then stop.  */
@@ -408,6 +418,7 @@ expandargv (int *argcp, char ***argvp)
 	  xexit (1);
 	}
 #ifdef S_ISDIR
+      /*文件不得为目录，这里跳过了'@'符*/
       if (stat (filename+1, &sb) < 0)
 	continue;
       if (S_ISDIR(sb.st_mode))
@@ -422,13 +433,13 @@ expandargv (int *argcp, char ***argvp)
 	continue;
       if (fseek (f, 0L, SEEK_END) == -1)
 	goto error;
-      pos = ftell (f);
+      pos = ftell (f);/*跳到文件结尾，获知文件大小*/
       if (pos == -1)
 	goto error;
-      if (fseek (f, 0L, SEEK_SET) == -1)
+      if (fseek (f, 0L, SEEK_SET) == -1)/*返回文件起始位置*/
 	goto error;
       buffer = (char *) xmalloc (pos * sizeof (char) + 1);
-      len = fread (buffer, sizeof (char), pos, f);
+      len = fread (buffer, sizeof (char), pos, f);/*读取所有内容*/
       if (len != (size_t) pos
 	  /* On Windows, fread may return a value smaller than POS,
 	     due to CR/LF->CR translation when reading text files.
@@ -442,6 +453,7 @@ expandargv (int *argcp, char ***argvp)
 	 instead.  */
       if (only_whitespace (buffer))
 	{
+          /*buffer为空，参数置为空*/
 	  file_argv = (char **) xmalloc (sizeof (char *));
 	  file_argv[0] = NULL;
 	}
@@ -451,17 +463,19 @@ expandargv (int *argcp, char ***argvp)
       /* If *ARGVP is not already dynamically allocated, copy it.  */
       if (*argvp == original_argv)
 	*argvp = dupargv (*argvp);
+
       /* Count the number of arguments.  */
       file_argc = 0;
       while (file_argv[file_argc])
 	++file_argc;
+
       /* Free the original option's memory.  */
       free ((*argvp)[i]);
       /* Now, insert FILE_ARGV into ARGV.  The "+1" below handles the
 	 NULL terminator at the end of ARGV.  */ 
       *argvp = ((char **) 
 		xrealloc (*argvp, 
-			  (*argcp + file_argc + 1) * sizeof (char *)));
+			  (*argcp + file_argc + 1) * sizeof (char *)));/*加入file_argv*/
       memmove (*argvp + i + file_argc, *argvp + i + 1, 
 	       (*argcp - i) * sizeof (char *));
       memcpy (*argvp + i, file_argv, file_argc * sizeof (char *));

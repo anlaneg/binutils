@@ -125,6 +125,7 @@ byte_put_big_endian (unsigned char * field, elf_vma value, int size)
     }
 }
 
+/*函数指针，按哪种字节序读取*/
 elf_vma (*byte_get) (const unsigned char *, int);
 
 elf_vma

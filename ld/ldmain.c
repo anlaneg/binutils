@@ -187,6 +187,7 @@ ld_bfd_error_handler (const char *fmt, va_list ap)
   (*default_bfd_error_handler) (fmt, ap);
 }
 
+/*ld main函数*/
 int
 main (int argc, char **argv)
 {
@@ -588,6 +589,7 @@ get_sysroot (int argc, char **argv)
   const char *path = NULL;
 
   for (i = 1; i < argc; i++)
+      /*取sysroot对应的路径*/
     if (CONST_STRNEQ (argv[i], "--sysroot="))
       path = argv[i] + strlen ("--sysroot=");
 
@@ -615,6 +617,7 @@ get_emulation (int argc, char **argv)
   char *emulation;
   int i;
 
+  //取LDEMULATION环境变量
   emulation = getenv (EMULATION_ENVIRON);
   if (emulation == NULL)
     emulation = DEFAULT_EMULATION;

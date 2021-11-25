@@ -195,14 +195,14 @@ struct dump_list_entry
 
 typedef struct filedata
 {
-  const char *         file_name;
-  FILE *               handle;
-  bfd_size_type        file_size;
-  Elf_Internal_Ehdr    file_header;
-  Elf_Internal_Shdr *  section_headers;
-  Elf_Internal_Phdr *  program_headers;
-  char *               string_table;
-  unsigned long        string_table_length;
+  const char *         file_name;/*文件路径*/
+  FILE *               handle;/*文件句柄*/
+  bfd_size_type        file_size;/*文件大小*/
+  Elf_Internal_Ehdr    file_header;/*elf文件头信息*/
+  Elf_Internal_Shdr *  section_headers;/*section段信息*/
+  Elf_Internal_Phdr *  program_headers;/*program header信息*/
+  char *               string_table;/*string table*/
+  unsigned long        string_table_length;/*string table长度*/
   /* A dynamic array of flags indicating for which sections a dump of
      some kind has been requested.  It is reset on a per-object file
      basis and then initialised from the cmdline_dump_sects array,
@@ -657,6 +657,7 @@ printable_section_name_from_index (Filedata * filedata, unsigned long ndx)
 static Elf_Internal_Shdr *
 find_section (Filedata * filedata, const char * name)
 {
+    /*查找指定名称的section header*/
   unsigned int i;
 
   if (filedata->section_headers == NULL)
@@ -4947,6 +4948,7 @@ get_64bit_program_headers (Filedata * filedata, Elf_Internal_Phdr * pheaders)
   if (!phdrs)
     return FALSE;
 
+  /*填充program header*/
   for (i = 0, internal = pheaders, external = phdrs;
        i < filedata->file_header.e_phnum;
        i++, internal++, external++)
@@ -4982,6 +4984,7 @@ get_program_headers (Filedata * filedata)
       * (is_32bit_elf ? sizeof (Elf32_External_Phdr) : sizeof (Elf64_External_Phdr))
       >= filedata->file_size)
     {
+      /*文件长度不得小于program header大小*/
       error (_("Too many program headers - %#x - the file is not that big\n"),
 	     filedata->file_header.e_phnum);
       return FALSE;
@@ -5336,6 +5339,7 @@ offset_from_vma (Filedata * filedata, bfd_vma vma, bfd_size_type size)
 static bfd_boolean
 get_32bit_section_headers (Filedata * filedata, bfd_boolean probe)
 {
+    /*取section header信息*/
   Elf32_External_Shdr * shdrs;
   Elf_Internal_Shdr *   internal;
   unsigned int          i;
@@ -6055,10 +6059,12 @@ process_section_headers (Filedata * filedata)
   if (filedata->file_header.e_shstrndx != SHN_UNDEF
        && filedata->file_header.e_shstrndx < filedata->file_header.e_shnum)
     {
+      /*依据section string index取得对应的section header*/
       section = filedata->section_headers + filedata->file_header.e_shstrndx;
 
       if (section->sh_size != 0)
 	{
+          /*读取string table*/
 	  filedata->string_table = (char *) get_data (NULL, filedata, section->sh_offset,
 						      1, section->sh_size,
 						      _("string table"));
@@ -19047,10 +19053,12 @@ get_file_header (Filedata * filedata)
     default:
     case ELFDATANONE:
     case ELFDATA2LSB:
+      /*小端读写*/
       byte_get = byte_get_little_endian;
       byte_put = byte_put_little_endian;
       break;
     case ELFDATA2MSB:
+        /*大端读写*/
       byte_get = byte_get_big_endian;
       byte_put = byte_put_big_endian;
       break;
@@ -19062,6 +19070,7 @@ get_file_header (Filedata * filedata)
   /* Read in the rest of the header.  */
   if (is_32bit_elf)
     {
+      /*32位elf文件处理*/
       Elf32_External_Ehdr ehdr32;
 
       if (fread (ehdr32.e_type, sizeof (ehdr32) - EI_NIDENT, 1, filedata->handle) != 1)
@@ -19651,8 +19660,9 @@ process_file (char * file_name)
   char armag[SARMAG];
   bfd_boolean ret = TRUE;
 
+  /*确保可执行文件存在*/
   if (stat (file_name, &statbuf) < 0)
-    {
+
       if (errno == ENOENT)
 	error (_("'%s': No such file\n"), file_name);
       else
@@ -19661,6 +19671,7 @@ process_file (char * file_name)
       return FALSE;
     }
 
+  /*必须为普通文件*/
   if (! S_ISREG (statbuf.st_mode))
     {
       error (_("'%s' is not an ordinary file\n"), file_name);
@@ -19683,6 +19694,7 @@ process_file (char * file_name)
       return FALSE;
     }
 
+  /*读取magic number*/
   if (fread (armag, SARMAG, 1, filedata->handle) != 1)
     {
       error (_("%s: Failed to read file's magic number\n"), file_name);
@@ -19712,6 +19724,7 @@ process_file (char * file_name)
       rewind (filedata->handle);
       archive_file_size = archive_file_offset = 0;
 
+      /*处理obj文件*/
       if (! process_object (filedata))
 	ret = FALSE;
     }
