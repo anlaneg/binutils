@@ -1134,10 +1134,12 @@ captured_main_1 (struct captured_main_args *context)
       switch (cmdarg_p.type)
 	{
 	case CMDARG_FILE:
+		/*来自文件的命令*/
 	  ret = catch_command_errors (source_script, cmdarg_p.string,
 				      !batch_flag);
 	  break;
 	case CMDARG_COMMAND:
+		/*来自命令行命令*/
 	  ret = catch_command_errors (execute_command, cmdarg_p.string,
 				      !batch_flag);
 	  break;

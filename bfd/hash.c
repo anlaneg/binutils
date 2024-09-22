@@ -365,7 +365,7 @@ static unsigned long bfd_default_hash_table_size = DEFAULT_SIZE;
 /* Create a new hash table, given a number of entries.  */
 
 bfd_boolean
-bfd_hash_table_init_n (struct bfd_hash_table *table,
+bfd_hash_table_init_n (struct bfd_hash_table *table/*hash表*/,
 		       struct bfd_hash_entry *(*newfunc) (struct bfd_hash_entry *,
 							  struct bfd_hash_table *,
 							  const char *),
@@ -378,6 +378,7 @@ bfd_hash_table_init_n (struct bfd_hash_table *table,
   alloc *= sizeof (struct bfd_hash_entry *);
   if (alloc / sizeof (struct bfd_hash_entry *) != size)
     {
+	  /*size过大*/
       bfd_set_error (bfd_error_no_memory);
       return FALSE;
     }
@@ -385,6 +386,7 @@ bfd_hash_table_init_n (struct bfd_hash_table *table,
   table->memory = (void *) objalloc_create ();
   if (table->memory == NULL)
     {
+	  /*申请失败*/
       bfd_set_error (bfd_error_no_memory);
       return FALSE;
     }

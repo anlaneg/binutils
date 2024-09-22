@@ -167,7 +167,7 @@ static void
 mri_emul (void)
 {
   interactive = isatty (fileno (stdin));
-  yyparse ();
+  yyparse ();/*语法分析处理*/
 }
 
 /* If COUNT is 0, then FUNCTION is called once on each entry.  If nonzero,
@@ -282,6 +282,7 @@ usage (int help)
 #endif
   s = help ? stdout : stderr;
 
+  /*显示命令首行*/
   fprintf (s, command_line, program_name);
 
   /* xgettext:c-format */
@@ -388,7 +389,7 @@ normalize (const char *file, bfd *abfd)
   const char *filename;
 
   if (full_pathname)
-    return file;
+    return file;/*全路径生效，直接返回file*/
 
   filename = lbasename (file);
 
@@ -396,6 +397,7 @@ normalize (const char *file, bfd *abfd)
       && abfd != NULL
       && strlen (filename) > abfd->xvec->ar_max_namelen)
     {
+	  /*文件名称过长，将名称截断*/
       char *s;
 
       /* Space leak.  */
@@ -500,6 +502,7 @@ decode_options (int argc, char **argv)
 	  show_help = 1;
 	  break;
         case 'd':
+        	/*删除操作*/
           operation = del;
           operation_alters_arch = TRUE;
           break;
@@ -678,6 +681,7 @@ ranlib_main (int argc, char **argv)
 
 int main (int, char **);
 
+/*ar命令入口*/
 int
 main (int argc, char **argv)
 {
@@ -707,10 +711,12 @@ main (int argc, char **argv)
 
   if (is_ranlib < 0)
     {
+	  /*取program_name的basename*/
       const char *temp = lbasename (program_name);
 
       if (strlen (temp) >= 6
 	  && FILENAME_CMP (temp + strlen (temp) - 6, "ranlib") == 0)
+    	  /*文件是否以'ranlib'结尾*/
 	is_ranlib = 1;
       else
 	is_ranlib = 0;
@@ -738,9 +744,11 @@ main (int argc, char **argv)
 
   argv = decode_options (argc, argv);
 
+  /*help处理*/
   if (show_help)
     usage (1);
 
+  /*显示版本*/
   if (show_version)
     print_version ("ar");
 
@@ -837,6 +845,7 @@ main (int argc, char **argv)
 	  break;
 
 	case del:
+		/*自arch中移除掉files*/
 	  if (files != NULL)
 	    delete_members (arch, files);
 	  else
@@ -1279,6 +1288,7 @@ delete_members (bfd *arch, char **files_to_delete)
 	  if (FILENAME_CMP (normalize (*files_to_delete, arch),
 			    (*current_ptr_ptr)->filename) == 0)
 	    {
+		  /*名称匹配*/
 	      ++match_count;
 	      if (counted_name_mode
 		  && match_count != counted_name_counter)
@@ -1291,13 +1301,16 @@ delete_members (bfd *arch, char **files_to_delete)
 		  found = TRUE;
 		  something_changed = TRUE;
 		  if (verbose)
+			  /*指明移除此file*/
 		    printf ("d - %s\n",
 			    *files_to_delete);
+		  /*指到链表后面*/
 		  *current_ptr_ptr = ((*current_ptr_ptr)->archive_next);
 		  goto next_file;
 		}
 	    }
 
+	  /*切换到下一个文件*/
 	  current_ptr_ptr = &((*current_ptr_ptr)->archive_next);
 	}
 
@@ -1311,6 +1324,7 @@ delete_members (bfd *arch, char **files_to_delete)
     }
 
   if (something_changed)
+	  /*有文件被移除，重写archive*/
     write_archive (arch);
   else
     output_filename = NULL;

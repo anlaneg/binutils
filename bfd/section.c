@@ -1309,6 +1309,7 @@ bfd_set_section_flags (bfd *abfd ATTRIBUTE_UNUSED,
 		       sec_ptr section,
 		       flagword flags)
 {
+	/*设置指定section的flags*/
   section->flags = flags;
   return TRUE;
 }

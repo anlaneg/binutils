@@ -326,6 +326,7 @@ listing_newline (char *ps)
 
   /* PR 21977 - use the physical file name not the logical one unless high
      level source files are being included in the listing.  */
+  /*取当前待解析文件及行号*/
   if (listing & LISTING_HLL)
     file = as_where (&line);
   else

@@ -573,6 +573,7 @@ execute_command (const char *p, int from_tty)
       /* If trace-commands is set then this will print this command.  */
       print_command_trace ("%s", p);
 
+      /*查询cmd对应的cmd_list_element*/
       c = lookup_cmd (&cmd, cmdlist, "", 0, 1);
       p = cmd;
 
@@ -610,7 +611,7 @@ execute_command (const char *p, int from_tty)
 	}
 
       /* If this command has been pre-hooked, run the hook first.  */
-      execute_cmd_pre_hook (c);
+      execute_cmd_pre_hook (c);/*执行cmd的pre_hook（是另一个命令）*/
 
       if (c->deprecated_warn_user)
 	deprecated_cmd_warning (line);
@@ -619,8 +620,10 @@ execute_command (const char *p, int from_tty)
       if (c->theclass == class_user && c->user_commands)
 	execute_user_command (c, arg);
       else if (c->type == set_cmd)
+    	  /*set类命令*/
 	do_set_command (arg, from_tty, c);
       else if (c->type == show_cmd)
+    	  /*显示类命令*/
 	do_show_command (arg, from_tty, c);
       else if (!cmd_func_p (c))
 	error (_("That is not a command, just a help topic."));

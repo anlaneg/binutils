@@ -100,6 +100,7 @@ get_run_time (void)
   struct rusage rusage;
 
   getrusage (RUSAGE_SELF, &rusage);
+  /*当前进程在用户态时间+当前进程在内核态时间（usec)*/
   return (rusage.ru_utime.tv_sec * 1000000 + rusage.ru_utime.tv_usec
 	  + rusage.ru_stime.tv_sec * 1000000 + rusage.ru_stime.tv_usec);
 #else /* ! HAVE_GETRUSAGE */

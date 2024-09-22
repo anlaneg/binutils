@@ -78,7 +78,7 @@ unsigned int max_user_call_depth;
 
 /* Chain containing all defined commands.  */
 
-struct cmd_list_element *cmdlist;
+struct cmd_list_element *cmdlist;/*记录所有gdb命令*/
 
 /* Chain containing all defined info subcommands.  */
 
@@ -1374,14 +1374,15 @@ valid_command_p (const char *command)
   c = lookup_cmd_1 (& command, cmdlist, NULL, 1);
 
   if (c == NULL || c == (struct cmd_list_element *) -1)
+	  /*没有查找到cmd*/
     return FALSE;
 
   /* This is the slightly tricky part.
      lookup_cmd_1 will return a pointer to the last part of COMMAND
      to match, leaving COMMAND pointing at the remainder.  */
   while (*command == ' ' || *command == '\t')
-    ++command;
-  return *command == '\0';
+    ++command;/*忽略结尾的空字符*/
+  return *command == '\0';/*cmd是否结束*/
 }
 
 /* Called when "alias" was incorrectly used.  */

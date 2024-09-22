@@ -624,21 +624,25 @@ add_path (const char *dirname, char **which_path, int parse_separators)
 }
 
 
+/*info source命令处理*/
 static void
 info_source_command (const char *ignore, int from_tty)
 {
-  struct symtab *s = current_source_symtab;
+  struct symtab *s = current_source_symtab;/*当前符号表*/
   struct compunit_symtab *cust;
 
   if (!s)
     {
+	  /*当前没有source file*/
       printf_filtered (_("No current source file.\n"));
       return;
     }
 
   cust = SYMTAB_COMPUNIT (s);
+  /*当前源文件名称*/
   printf_filtered (_("Current source file is %s\n"), s->filename);
   if (SYMTAB_DIRNAME (s) != NULL)
+	  /*编译目录名称*/
     printf_filtered (_("Compilation directory is %s\n"), SYMTAB_DIRNAME (s));
   if (s->fullname)
     printf_filtered (_("Located in %s\n"), s->fullname);
@@ -1903,6 +1907,7 @@ Setting the value to an empty string sets it to $cdir:$cwd, the default."),
 			    show_directories_command,
 			    &setlist, &showlist);
 
+  /*添加info source命令*/
   add_info ("source", info_source_command,
 	    _("Information about the current source file."));
 

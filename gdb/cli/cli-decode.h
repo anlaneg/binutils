@@ -46,8 +46,8 @@ cmd_types;
 
 struct cmd_list_element
   {
-    cmd_list_element (const char *name_, enum command_class theclass_,
-		      const char *doc_)
+    cmd_list_element (const char *name_/*命令名称*/, enum command_class theclass_,
+		      const char *doc_/*命令帮助信息*/)
       : name (name_),
 	theclass (theclass_),
 	cmd_deprecated (0),
@@ -77,7 +77,7 @@ struct cmd_list_element
     struct cmd_list_element *next = nullptr;
 
     /* Name of this command.  */
-    const char *name;
+    const char *name;/*命令的名称*/
 
     /* Command class; class values are chosen by application program.  */
     enum command_class theclass;
@@ -110,7 +110,7 @@ struct cmd_list_element
 
     /* Flag that specifies if this command is already running its hook.  */
     /* Prevents the possibility of hook recursion.  */
-    unsigned int hook_in : 1;
+    unsigned int hook_in : 1;/*标记此cmd已经运行了它的hook，防止重复调用*/
 
     /* For prefix commands only:
        nonzero means do not get an error if subcommand is not
@@ -156,7 +156,7 @@ struct cmd_list_element
        First line is brief documentation; remaining lines form, with it,
        the full documentation.  First line should end with a period.
        Entire string should also end with a period, not a newline.  */
-    const char *doc;
+    const char *doc;/*命令的帮助文档*/
 
     /* For set/show commands.  A method for printing the output to the
        specified stream.  */
@@ -170,7 +170,7 @@ struct cmd_list_element
     void (*pre_show_hook) (struct cmd_list_element *c) = nullptr;
 
     /* Hook for another command to be executed before this command.  */
-    struct cmd_list_element *hook_pre = nullptr;
+    struct cmd_list_element *hook_pre = nullptr;/*执行命令前此设置的命令将被调用*/
 
     /* Hook for another command to be executed after this command.  */
     struct cmd_list_element *hook_post = nullptr;

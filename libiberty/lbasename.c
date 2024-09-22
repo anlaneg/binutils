@@ -50,6 +50,7 @@ unix_lbasename (const char *name)
 {
   const char *base;
 
+  /*跳过路径，取basename*/
   for (base = name; *name; name++)
     if (IS_UNIX_DIR_SEPARATOR (*name))
       base = name + 1;
@@ -73,6 +74,7 @@ dos_lbasename (const char *name)
   return base;
 }
 
+/*取路径的basename*/
 const char *
 lbasename (const char *name)
 {

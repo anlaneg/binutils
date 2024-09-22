@@ -105,9 +105,9 @@ static int keep_it = 0;
 
 segT reg_section;
 segT expr_section;
-segT text_section;
-segT data_section;
-segT bss_section;
+segT text_section;/*代码段*/
+segT data_section;/*数据段*/
+segT bss_section;/*bss段*/
 
 /* Name of listing file.  */
 static char *listing_filename = NULL;
@@ -1143,9 +1143,9 @@ perform_an_assembly_pass (int argc, char ** argv)
 #ifndef OBJ_MACH_O
   /* Create the standard sections, and those the assembler uses
      internally.  */
-  text_section = subseg_new (TEXT_SECTION_NAME, 0);
-  data_section = subseg_new (DATA_SECTION_NAME, 0);
-  bss_section = subseg_new (BSS_SECTION_NAME, 0);
+  text_section = subseg_new (TEXT_SECTION_NAME, 0);/*创建代码段*/
+  data_section = subseg_new (DATA_SECTION_NAME, 0);/*创建数据段*/
+  bss_section = subseg_new (BSS_SECTION_NAME, 0);/*创建bss段*/
   /* @@ FIXME -- we're setting the RELOC flag so that sections are assumed
      to have relocs, otherwise we don't find out in time.  */
   applicable = bfd_applicable_section_flags (stdoutput);
@@ -1198,6 +1198,7 @@ perform_an_assembly_pass (int argc, char ** argv)
 }
 
 
+/*gnu as命令入口*/
 int
 main (int argc, char ** argv)
 {
@@ -1232,13 +1233,14 @@ main (int argc, char ** argv)
 
   START_PROGRESS (myname, 0);
 
+  /*默认输出文件名称*/
 #ifndef OBJ_DEFAULT_OUTPUT_FILE_NAME
 #define OBJ_DEFAULT_OUTPUT_FILE_NAME "a.out"
 #endif
 
   out_file_name = OBJ_DEFAULT_OUTPUT_FILE_NAME;
 
-  hex_init ();
+  hex_init ();/*16进制映射表初始化*/
   if (bfd_init () != BFD_INIT_MAGIC)
     as_fatal (_("libbfd ABI mismatch"));
   bfd_set_error_program_name (myname);
@@ -1250,7 +1252,7 @@ main (int argc, char ** argv)
   PROGRESS (1);
   /* Call parse_args before any of the init/begin functions
      so that switches like --hash-size can be honored.  */
-  parse_args (&argc, &argv);
+  parse_args (&argc, &argv);/*参数解析*/
 
   if (argc > 1 && stat (out_file_name, &sob) == 0)
     {
@@ -1383,7 +1385,7 @@ main (int argc, char ** argv)
       char warn_msg[50];
       char err_msg[50];
 
-      write_object_file ();
+      write_object_file ();/*写obj文件*/
 
       n_warns = had_warnings ();
       n_errs = had_errors ();

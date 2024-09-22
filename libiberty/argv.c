@@ -208,10 +208,11 @@ char **buildargv (const char *input)
 		}
 	      else
 		{
-	          /*增大nargv*/
+	          /*当前参数数超过maxargc,增大nargv*/
 		  maxargc *= 2;
 		  nargv = (char **) xrealloc (argv, maxargc * sizeof (char *));
 		}
+	      /*重新初始化argv,并初始化argv[argc]=NULL*/
 	      argv = nargv;
 	      argv[argc] = NULL;
 	    }
@@ -228,8 +229,8 @@ char **buildargv (const char *input)
 		{
 		  if (bsquote)
 		    {
-		      bsquote = 0;
-		      *arg++ = *input;
+		      bsquote = 0;/*关闭转义*/
+		      *arg++ = *input;/*复制被转议字符*/
 		    }
 		  else if (*input == '\\')
 		    {
@@ -278,9 +279,9 @@ char **buildargv (const char *input)
 		  input++;
 		}
 	    }
-	  /*填写分析成功的一个参数*/
-	  *arg = EOS;
-	  argv[argc] = xstrdup (copybuf);
+
+	  *arg = EOS;/*参数置结尾符*/
+	  argv[argc] = xstrdup (copybuf);/*填写分析成功的一个参数*/
 	  argc++;
 	  argv[argc] = NULL;
 
@@ -408,8 +409,9 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
       struct stat sb;
 #endif
       /* We are only interested in options of the form "@file".  */
-      filename = (*argvp)[i];/*选项中以@开头的文件名称*/
+      filename = (*argvp)[i];
       if (filename[0] != '@')
+          /*选项中不以@开头的参数，在此处将被忽略*/
 	continue;
       /* If we have iterated too many times then stop.  */
       if (-- iteration_limit == 0)
@@ -418,7 +420,7 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
 	  xexit (1);
 	}
 #ifdef S_ISDIR
-      /*文件不得为目录，这里跳过了'@'符*/
+      /*参数指定的文件名称，不得为目录，如是，则退出处理*/
       if (stat (filename+1, &sb) < 0)
 	continue;
       if (S_ISDIR(sb.st_mode))
@@ -430,21 +432,27 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
       /* Read the contents of the file.  */
       f = fopen (++filename, "r");
       if (!f)
+          /*如果此文件打开失败，则忽略*/
 	continue;
       if (fseek (f, 0L, SEEK_END) == -1)
+          /*跳文件结尾失败，关闭后尝试其它文件*/
 	goto error;
-      pos = ftell (f);/*跳到文件结尾，获知文件大小*/
+      /*跳到文件结尾，获知文件大小*/
+      pos = ftell (f);
       if (pos == -1)
 	goto error;
-      if (fseek (f, 0L, SEEK_SET) == -1)/*返回文件起始位置*/
+      /*返回文件起始位置*/
+      if (fseek (f, 0L, SEEK_SET) == -1)
 	goto error;
+      /*读取文件所有内容*/
       buffer = (char *) xmalloc (pos * sizeof (char) + 1);
-      len = fread (buffer, sizeof (char), pos, f);/*读取所有内容*/
+      len = fread (buffer, sizeof (char), pos, f);
       if (len != (size_t) pos
 	  /* On Windows, fread may return a value smaller than POS,
 	     due to CR/LF->CR translation when reading text files.
 	     That does not in-and-of itself indicate failure.  */
 	  && ferror (f))
+          /*读取内容失败*/
 	goto error;
       /* Add a NUL terminator.  */
       buffer[len] = '\0';
@@ -459,7 +467,7 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
 	}
       else
 	/* Parse the string.  */
-	file_argv = buildargv (buffer);
+	file_argv = buildargv (buffer);/*将buffer拆解成argv形式*/
       /* If *ARGVP is not already dynamically allocated, copy it.  */
       if (*argvp == original_argv)
 	*argvp = dupargv (*argvp);
@@ -467,7 +475,7 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
       /* Count the number of arguments.  */
       file_argc = 0;
       while (file_argv[file_argc])
-	++file_argc;
+	++file_argc;/*获得参数数目*/
 
       /* Free the original option's memory.  */
       free ((*argvp)[i]);
@@ -481,7 +489,7 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
       memcpy (*argvp + i, file_argv, file_argc * sizeof (char *));
       /* The original option has been replaced by all the new
 	 options.  */
-      *argcp += file_argc - 1;
+      *argcp += file_argc - 1;/*参数数目也增加*/
       /* Free up memory allocated to process the response file.  We do
 	 not use freeargv because the individual options in FILE_ARGV
 	 are now in the main ARGV.  */

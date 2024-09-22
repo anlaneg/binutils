@@ -351,6 +351,7 @@ extern unsigned int xcrc32 (const unsigned char *, int, unsigned int);
 /* Scalar allocators.  */
 
 #define XALLOCA(T)		((T *) alloca (sizeof (T)))
+/*新申请一对象*/
 #define XNEW(T)			((T *) xmalloc (sizeof (T)))
 #define XCNEW(T)		((T *) xcalloc (1, sizeof (T)))
 #define XDUP(T, P)		((T *) xmemdup ((P), sizeof (T), sizeof (T)))

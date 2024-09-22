@@ -457,6 +457,7 @@ try_open (const char *name, bfd_boolean *sysrooted)
 {
   FILE *result;
 
+  /*打开文件$name*/
   result = fopen (name, "r");
 
   if (result != NULL)
@@ -548,6 +549,7 @@ ldfile_find_command_file (const char *name,
       /* First try raw name.  */
       result = try_open (name, sysrooted);
       if (result != NULL)
+          /*打开文件成功，返回*/
 	return result;
     }
 
@@ -593,6 +595,7 @@ ldfile_open_command_file_1 (const char *name, bfd_boolean default_only)
   FILE *ldlex_input_stack;
   bfd_boolean sysrooted;
 
+  /*打开此文件*/
   ldlex_input_stack = ldfile_find_command_file (name, default_only, &sysrooted);
 
   if (ldlex_input_stack == NULL)
@@ -602,6 +605,7 @@ ldfile_open_command_file_1 (const char *name, bfd_boolean default_only)
       return;
     }
 
+  /*传入flex要分析的文件*/
   lex_push_file (ldlex_input_stack, name, sysrooted);
 
   lineno = 1;

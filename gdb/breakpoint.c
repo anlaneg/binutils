@@ -15620,6 +15620,7 @@ Set breakpoint at specified location.\n"
 BREAK_ARGS_HELP ("break")));
   set_cmd_completer (c, location_completer);
 
+  /*添加break别名'b'*/
   add_com_alias ("b", "break", class_run, 1);
   add_com_alias ("br", "break", class_run, 1);
   add_com_alias ("bre", "break", class_run, 1);
@@ -15730,6 +15731,7 @@ If REGEX is given, only stop for libraries matching the regular expression."),
 		     CATCH_PERMANENT,
 		     CATCH_TEMPORARY);
 
+  /*添加watch命令*/
   c = add_com ("watch", class_breakpoint, watch_command, _("\
 Set a watchpoint for an expression.\n\
 Usage: watch [-l|-location] EXPRESSION\n\

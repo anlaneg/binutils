@@ -59,10 +59,12 @@ _bfd_new_bfd (void)
 {
   bfd *nbfd;
 
+  /*申请nbfd结构体*/
   nbfd = (bfd *) bfd_zmalloc (sizeof (bfd));
   if (nbfd == NULL)
     return NULL;
 
+  /*分配nbfd id号*/
   if (bfd_use_reserved_id)
     {
       nbfd->id = --bfd_reserved_id_counter;
@@ -71,6 +73,7 @@ _bfd_new_bfd (void)
   else
     nbfd->id = bfd_id_counter++;
 
+  /*申请objalloc*/
   nbfd->memory = objalloc_create ();
   if (nbfd->memory == NULL)
     {
@@ -693,6 +696,7 @@ _maybe_make_executable (bfd * abfd)
 	{
 	  unsigned int mask = umask (0);
 
+	  /*修改文件权限*/
 	  umask (mask);
 	  chmod (abfd->filename,
 		 (0777

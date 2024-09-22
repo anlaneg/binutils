@@ -68,7 +68,9 @@ extern "C" {
 #define IS_DOS_ABSOLUTE_PATH(f) IS_ABSOLUTE_PATH_1 (1, f)
 #define HAS_DOS_DRIVE_SPEC(f) HAS_DRIVE_SPEC_1 (1, f)
 
+/*检查unix目录分隔符*/
 #define IS_UNIX_DIR_SEPARATOR(c) IS_DIR_SEPARATOR_1 (0, c)
+/*检查是否为绝对路径*/
 #define IS_UNIX_ABSOLUTE_PATH(f) IS_ABSOLUTE_PATH_1 (0, f)
 
 /* Note that when DOS_BASED is true, IS_ABSOLUTE_PATH accepts d:foo as
@@ -80,6 +82,7 @@ extern "C" {
   (IS_DIR_SEPARATOR_1 (dos_based, (f)[0])		 \
    || HAS_DRIVE_SPEC_1 (dos_based, f))
 
+/*文件名称匹配*/
 extern int filename_cmp (const char *s1, const char *s2);
 #define FILENAME_CMP(s1, s2)	filename_cmp(s1, s2)
 

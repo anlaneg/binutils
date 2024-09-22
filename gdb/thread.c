@@ -1940,6 +1940,7 @@ _initialize_thread (void)
 {
   static struct cmd_list_element *thread_apply_list = NULL;
 
+  /*添加info threads命令*/
   add_info ("threads", info_threads_command,
 	    _("Display currently known threads.\n\
 Usage: info threads [-gid] [ID]...\n\
@@ -1989,6 +1990,7 @@ Apply a command to all frames of all threads (ignoring errors and empty output).
 Usage: tfaas COMMAND\n\
 shortcut for 'thread apply all -s frame apply all -s COMMAND'"));
 
+  /*设置thread名称*/
   add_cmd ("name", class_run, thread_name_command,
 	   _("Set the current thread's name.\n\
 Usage: thread name [NAME]\n\

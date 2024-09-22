@@ -19662,7 +19662,7 @@ process_file (char * file_name)
 
   /*确保可执行文件存在*/
   if (stat (file_name, &statbuf) < 0)
-
+    {
       if (errno == ENOENT)
 	error (_("'%s': No such file\n"), file_name);
       else

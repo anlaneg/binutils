@@ -112,8 +112,8 @@ set_cmd_cfunc (struct cmd_list_element *cmd, cmd_const_cfunc_ftype *cfunc)
   if (cfunc == NULL)
     cmd->func = NULL;
   else
-    cmd->func = do_const_cfunc;
-  cmd->function.const_cfunc = cfunc;
+    cmd->func = do_const_cfunc;/*经do_const_cfunc转一手*/
+  cmd->function.const_cfunc = cfunc;/*设置此命令对应的处理函数*/
 }
 
 static void
@@ -193,6 +193,7 @@ static struct cmd_list_element *
 do_add_cmd (const char *name, enum command_class theclass,
 	    const char *doc, struct cmd_list_element **list)
 {
+	/*申请一个cmd entry*/
   struct cmd_list_element *c = new struct cmd_list_element (name, theclass,
 							    doc);
   struct cmd_list_element *p, *iter;
@@ -214,11 +215,13 @@ do_add_cmd (const char *name, enum command_class theclass,
 
   if (*list == NULL || strcmp ((*list)->name, name) >= 0)
     {
+	  /*当前命令位于list首元素*/
       c->next = *list;
       *list = c;
     }
   else
     {
+	  /*按命令名称找合适的位置，将元素存入*/
       p = *list;
       while (p->next && strcmp (p->next->name, name) <= 0)
 	{
@@ -231,6 +234,7 @@ do_add_cmd (const char *name, enum command_class theclass,
   return c;
 }
 
+/*创建cmd_list_element并将其加入到list中*/
 struct cmd_list_element *
 add_cmd (const char *name, enum command_class theclass,
 	 const char *doc, struct cmd_list_element **list)
@@ -247,7 +251,7 @@ add_cmd (const char *name, enum command_class theclass,
 	 const char *doc, struct cmd_list_element **list)
 {
   cmd_list_element *result = do_add_cmd (name, theclass, doc, list);
-  set_cmd_cfunc (result, fun);
+  set_cmd_cfunc (result, fun);/*设置cmd对应的func*/
   return result;
 }
 
@@ -844,13 +848,14 @@ delete_cmd (const char *name, struct cmd_list_element **list,
 
   for (iter = *previous_chain_ptr; iter; iter = *previous_chain_ptr)
     {
+	  /*命令是否匹配*/
       if (strcmp (iter->name, name) == 0)
 	{
 	  if (iter->destroyer)
 	    iter->destroyer (iter, iter->context);
 	  if (iter->hookee_pre)
 	    iter->hookee_pre->hook_pre = 0;
-	  *prehook = iter->hook_pre;
+	  *prehook = iter->hook_pre;/*记录别名对应的prehook*/
 	  *prehookee = iter->hookee_pre;
 	  if (iter->hookee_post)
 	    iter->hookee_post->hook_post = 0;
@@ -869,6 +874,7 @@ delete_cmd (const char *name, struct cmd_list_element **list,
 	      struct cmd_list_element **prevp = &iter->cmd_pointer->aliases;
 	      struct cmd_list_element *a = *prevp;
 
+	      /*添加到alias列表中*/
 	      while (a != iter)
 		{
 		  prevp = &a->alias_chain;
@@ -910,9 +916,9 @@ add_info_alias (const char *name, const char *oldname, int abbrev_flag)
 /* Add an element to the list of commands.  */
 
 struct cmd_list_element *
-add_com (const char *name, enum command_class theclass,
-	 cmd_const_cfunc_ftype *fun,
-	 const char *doc)
+add_com (const char *name/*gdb命令名称*/, enum command_class theclass,
+	 cmd_const_cfunc_ftype *fun/*命令解析函数*/,
+	 const char *doc/*命令帮助文档*/)
 {
   return add_cmd (name, theclass, fun, doc, &cmdlist);
 }
@@ -1274,25 +1280,27 @@ help_cmd_list (struct cmd_list_element *list, enum command_class theclass,
 
 static struct cmd_list_element *
 find_cmd (const char *command, int len, struct cmd_list_element *clist,
-	  int ignore_help_classes, int *nfound)
+	  int ignore_help_classes, int *nfound/*发现了多少个命令*/)
 {
   struct cmd_list_element *found, *c;
 
   found = NULL;
   *nfound = 0;
+  /*遍历cmd list,查找command对应的cmd_list_element*/
   for (c = clist; c; c = c->next)
-    if (!strncmp (command, c->name, len)
-	&& (!ignore_help_classes || c->func))
+    if (!strncmp (command, c->name, len)/*command匹配*/
+	&& (!ignore_help_classes || c->func/*命令处理函数*/))
       {
 	found = c;
 	(*nfound)++;
 	if (c->name[len] == '\0')
 	  {
+		/*命令完全匹配*/
 	    *nfound = 1;
 	    break;
 	  }
       }
-  return found;
+  return found;/*返回最后一个匹配的cmd*/
 }
 
 /* Return the length of command name in TEXT.  */
@@ -1314,8 +1322,10 @@ find_command_name_length (const char *text)
   /* Recognize '!' as a single character command so that, e.g., "!ls"
      works as expected.  */
   if (*p == '!')
+	  /*首个字符为'!'时，认为其为一个命令*/
     return 1;
 
+  /*跳过容许的字符，获知具体长度*/
   while (isalnum (*p) || *p == '-' || *p == '_'
 	 /* Characters used by TUI specific commands.  */
 	 || *p == '+' || *p == '<' || *p == '>' || *p == '$')
@@ -1397,14 +1407,16 @@ lookup_cmd_1 (const char **text, struct cmd_list_element *clist,
   struct cmd_list_element *found, *c;
   const char *line = *text;
 
+  /*忽略前导的空字符*/
   while (**text == ' ' || **text == '\t')
     (*text)++;
 
   /* Identify the name of the command.  */
-  len = find_command_name_length (*text);
+  len = find_command_name_length (*text);/*取text指定命令的长度*/
 
   /* If nothing but whitespace, return 0.  */
   if (len == 0)
+	  /*长度为0，无效cmd*/
     return 0;
 
   /* *text and p now bracket the first command word to lookup (and
@@ -1412,20 +1424,23 @@ lookup_cmd_1 (const char **text, struct cmd_list_element *clist,
 
 
   command = (char *) alloca (len + 1);
-  memcpy (command, *text, len);
+  memcpy (command, *text, len);/*复制command*/
   command[len] = '\0';
 
   /* Look it up.  */
+  /*利用构造的cmd查询对应的cmd_list_element*/
   found = 0;
   nfound = 0;
   found = find_cmd (command, len, clist, ignore_help_classes, &nfound);
 
   /* If nothing matches, we have a simple failure.  */
   if (nfound == 0)
+	  /*没有查询到命令*/
     return 0;
 
   if (nfound > 1)
     {
+	  /*查询的命令大于1个*/
       if (result_list != NULL)
 	/* Will be modified in calling routine
 	   if we know what the prefix command is.  */
@@ -1435,7 +1450,7 @@ lookup_cmd_1 (const char **text, struct cmd_list_element *clist,
 
   /* We've matched something on this list.  Move text pointer forward.  */
 
-  *text += len;
+  *text += len;/*使text更新并指向参数*/
 
   if (found->cmd_pointer)
     {
@@ -1602,6 +1617,7 @@ lookup_cmd (const char **line, struct cmd_list_element *list,
   else
     {
       if (c->type == set_cmd && **line != '\0' && !isspace (**line))
+    	  /*cmd查找到了，但需要参数，却没有提供*/
         error (_("Argument must be preceded by space."));
 
       /* We've got something.  It may still not be what the caller

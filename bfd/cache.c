@@ -630,6 +630,7 @@ bfd_open_file (bfd *abfd)
 	  if (stat (abfd->filename, &s) == 0 && s.st_size != 0)
 	    unlink_if_ordinary (abfd->filename);
 #endif
+	  /*打开文件*/
 	  abfd->iostream = _bfd_real_fopen (abfd->filename, FOPEN_WUB);
 	  abfd->opened_once = TRUE;
 	}

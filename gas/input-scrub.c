@@ -236,12 +236,14 @@ input_scrub_end (void)
 char *
 input_scrub_new_file (const char *filename)
 {
-  input_file_open (filename, !flag_no_comments);
+  input_file_open (filename, !flag_no_comments);/*打开文件*/
+  /*设置文件名称*/
   physical_input_file = filename[0] ? filename : _("{standard input}");
+  /*设置行号*/
   physical_input_line = 0;
 
   partial_size = 0;
-  return (buffer_start + BEFORE_SIZE);
+  return (buffer_start + BEFORE_SIZE);/*返回固定位置*/
 }
 
 /* Include a file from the current file.  Save our state, cause it to
@@ -513,8 +515,8 @@ as_where (unsigned int *linep)
       && (linep == NULL || logical_input_line >= 0))
     {
       if (linep != NULL)
-	*linep = logical_input_line;
-      return logical_input_file;
+	*linep = logical_input_line;/*设置当前行号*/
+      return logical_input_file;/*返回当前inpu文件名称*/
     }
 
   return as_where_physical (linep);

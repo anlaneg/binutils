@@ -1853,6 +1853,7 @@ subsegs_finish (void)
 {
   asection *s;
 
+  /*遍历所有section,逐个处理*/
   for (s = stdoutput->sections; s; s = s->next)
     subsegs_finish_section (s);
 }

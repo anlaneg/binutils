@@ -1336,7 +1336,7 @@ struct symtab
 
   /* Name of this source file.  This pointer is never NULL.  */
 
-  const char *filename;
+  const char *filename;/*源文件名称*/
 
   /* Total number of lines found in source file.  */
 

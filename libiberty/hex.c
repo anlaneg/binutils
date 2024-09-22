@@ -159,6 +159,7 @@ void
 hex_init (void)
 {
 #ifndef HEX_TABLE_INITIALIZED
+	/*初始化16进制映射表*/
   int i;
 
   for (i=0; i<_hex_array_size; i++)

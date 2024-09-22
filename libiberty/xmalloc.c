@@ -106,6 +106,7 @@ static char *first_break = NULL;
 void
 xmalloc_set_program_name (const char *s)
 {
+    /*记录当前程序名称*/
   name = s;
 #ifdef HAVE_SBRK
   /* Win32 ports other than cygwin32 don't have brk() */

@@ -184,6 +184,7 @@ list_supported_targets (const char *name, FILE *f)
   else
     fprintf (f, _("%s: supported targets:"), name);
 
+  /*显示支持的target名称*/
   targ_names = bfd_target_list ();
   for (t = 0; targ_names[t] != NULL; t++)
     fprintf (f, " %s", targ_names[t]);

@@ -92,10 +92,11 @@ struct ld_option
   const char *arg;
   /* The documentation string.  If this is NULL, this is a synonym for
      the previous option.  */
-  const char *doc;
+  const char *doc;/*帮助文档*/
   enum control_enum control;
 };
 
+/*ld支持的选项*/
 static const struct ld_option ld_options[] =
 {
   { {NULL, required_argument, NULL, '\0'},
@@ -1889,6 +1890,7 @@ help (void)
   printf (_("Usage: %s [options] file...\n"), program_name);
 
   printf (_("Options:\n"));
+  /*显示ld的帮助选项*/
   for (i = 0; i < OPTION_COUNT; i++)
     {
       if (ld_options[i].doc != NULL)

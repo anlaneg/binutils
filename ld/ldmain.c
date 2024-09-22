@@ -203,11 +203,13 @@ main (int argc, char **argv)
   bindtextdomain (PACKAGE, LOCALEDIR);
   textdomain (PACKAGE);
 
+  /*记录当前程序名称*/
   program_name = argv[0];
   xmalloc_set_program_name (program_name);
 
   START_PROGRESS (program_name, 0);
 
+  /*展开argv中的@符指定的文件设置的参数*/
   expandargv (&argc, &argv);
 
   if (bfd_init () != BFD_INIT_MAGIC)
@@ -247,6 +249,7 @@ main (int argc, char **argv)
      a different target.  The macro TARGET is defined by Makefile.  */
   if (!bfd_set_default_target (TARGET))
     {
+      /*设置默认target失败*/
       einfo (_("%X%P: can't set BFD default target to `%s': %E\n"), TARGET);
       xexit (1);
     }
@@ -329,8 +332,10 @@ main (int argc, char **argv)
   if (saved_script_handle == NULL
       && command_line.default_script != NULL)
     {
+      /*设置了默认的ld脚本*/
       ldfile_open_command_file (command_line.default_script);
       parser_input = input_script;
+      /*送解析器*/
       yyparse ();
     }
 
@@ -594,12 +599,15 @@ get_sysroot (int argc, char **argv)
       path = argv[i] + strlen ("--sysroot=");
 
   if (!path)
+      /*如果无sysroot，取BINDIR*/
     path = get_relative_sysroot (BINDIR);
 
   if (!path)
+      /*如果无BINDIR，取TOOLBINDIR*/
     path = get_relative_sysroot (TOOLBINDIR);
 
   if (!path)
+      /*取TARGET_SYSTEM_ROOT*/
     path = TARGET_SYSTEM_ROOT;
 
   if (IS_DIR_SEPARATOR (*path) && path[1] == 0)

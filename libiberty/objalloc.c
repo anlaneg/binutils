@@ -88,10 +88,12 @@ objalloc_create (void)
   struct objalloc *ret;
   struct objalloc_chunk *chunk;
 
+  /*来一个objalloc*/
   ret = (struct objalloc *) malloc (sizeof *ret);
   if (ret == NULL)
     return NULL;
 
+  /*申请chunks内存*/
   ret->chunks = (PTR) malloc (CHUNK_SIZE);
   if (ret->chunks == NULL)
     {

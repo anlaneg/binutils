@@ -988,7 +988,7 @@ plugin_load_plugins (void)
   while (curplug)
     {
       if (curplug->n_args > max_args)
-	max_args = curplug->n_args;
+	max_args = curplug->n_args;/*找curplug中最大的参数数目*/
       curplug = curplug->next;
     }
 
@@ -1003,6 +1003,7 @@ plugin_load_plugins (void)
       enum ld_plugin_status rv;
       ld_plugin_onload onloadfn;
 
+      /*取onload,_onload接口*/
       onloadfn = (ld_plugin_onload) dlsym (curplug->dlhandle, "onload");
       if (!onloadfn)
 	onloadfn = (ld_plugin_onload) dlsym (curplug->dlhandle, "_onload");
@@ -1011,7 +1012,7 @@ plugin_load_plugins (void)
 	       curplug->name, dlerror ());
       set_tv_plugin_args (curplug, &my_tv[tv_header_size]);
       called_plugin = curplug;
-      rv = (*onloadfn) (my_tv);
+      rv = (*onloadfn) (my_tv);/*触发onload接口*/
       called_plugin = NULL;
       if (rv != LDPS_OK)
 	einfo (_("%F%P: %s: plugin error: %d\n"), curplug->name, rv);

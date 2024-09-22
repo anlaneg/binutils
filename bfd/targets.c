@@ -1391,6 +1391,7 @@ find_target (const char *name)
   const bfd_target * const *target;
   const struct targmatch *match;
 
+  /*遍历bfd target,如果name匹配，则返回target*/
   for (target = &bfd_target_vector[0]; *target != NULL; target++)
     if (strcmp (name, (*target)->name) == 0)
       return *target;
@@ -1402,6 +1403,7 @@ find_target (const char *name)
     {
       if (fnmatch (match->triplet, name, 0) == 0)
 	{
+      /*名称匹配，如果match->vector为NULL，忽略继续匹配*/
 	  while (match->vector == NULL)
 	    ++match;
 	  return match->vector;
@@ -1432,12 +1434,14 @@ bfd_set_default_target (const char *name)
 
   if (bfd_default_vector[0] != NULL
       && strcmp (name, bfd_default_vector[0]->name) == 0)
+	  /*与bfd_default_vecotr[0]内容一致，直接返回true*/
     return TRUE;
 
   target = find_target (name);
   if (target == NULL)
     return FALSE;
 
+  /*设置默认target*/
   bfd_default_vector[0] = target;
   return TRUE;
 }
@@ -1638,6 +1642,7 @@ bfd_target_list (void)
   const bfd_target * const *target;
   const  char **name_list, **name_ptr;
 
+  /*获知vector长度*/
   for (target = &bfd_target_vector[0]; *target != NULL; target++)
     vec_length++;
 
@@ -1647,11 +1652,13 @@ bfd_target_list (void)
   if (name_list == NULL)
     return NULL;
 
+  /*收集target名称*/
   for (target = &bfd_target_vector[0]; *target != NULL; target++)
     if (target == &bfd_target_vector[0]
 	|| *target != bfd_target_vector[0])
       *name_ptr++ = (*target)->name;
 
+  /*返回名称列表*/
   *name_ptr = NULL;
   return name_list;
 }

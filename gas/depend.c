@@ -64,9 +64,11 @@ register_dependency (const char *filename)
   for (dep = dep_chain; dep != NULL; dep = dep->next)
     {
       if (!filename_cmp (filename, dep->file))
+    	  /*已包含了对此文件的依赖，直接返回*/
 	return;
     }
 
+  /*新增dependency，并将其挂接在链表头*/
   dep = XNEW (struct dependency);
   dep->file = xstrdup (filename);
   dep->next = dep_chain;

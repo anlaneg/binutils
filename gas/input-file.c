@@ -122,29 +122,33 @@ input_file_open (const char *filename,
 
   preprocess = pre;
 
+  /*filename不得为空*/
   gas_assert (filename != 0);	/* Filename may not be NULL.  */
   if (filename[0])
     {
+	  /*打开此文件*/
       f_in = fopen (filename, FOPEN_RT);
-      file_name = filename;
+      file_name = filename;/*记录当前文件名称*/
     }
   else
     {
       /* Use stdin for the input file.  */
-      f_in = stdin;
+      f_in = stdin;/*读取标准输入*/
       /* For error messages.  */
       file_name = _("{standard input}");
     }
 
   if (f_in == NULL)
     {
+	  /*打开文件失败，直接返回*/
       as_bad (_("can't open %s for reading: %s"),
 	      file_name, xstrerror (errno));
       return;
     }
 
-  c = getc (f_in);
+  c = getc (f_in);/*自此文件读取一个字符*/
 
+  /*检查文件是否error,如有则直接返回*/
   if (ferror (f_in))
     {
       as_bad (_("can't read from %s: %s"),
@@ -158,6 +162,7 @@ input_file_open (const char *filename,
   /* Check for an empty input file.  */
   if (feof (f_in))
     {
+	  /*已达到文件结尾，关闭并返回*/
       fclose (f_in);
       f_in = NULL;
       return;
@@ -166,34 +171,46 @@ input_file_open (const char *filename,
 
   if (c == '#')
     {
+	  /*遇到注释字符，检查后面的字符，确认是否为preprocess*/
       /* Begins with comment, may not want to preprocess.  */
-      c = getc (f_in);
+      c = getc (f_in);/*遇到了'#'，再get一个字符*/
       if (c == 'N')
 	{
-	  if (fgets (buf, sizeof (buf), f_in)
-	      && !strncmp (buf, "O_APP", 5) && ISSPACE (buf[5]))
+    	  /*遇到'#N'*/
+	  if (fgets (buf, sizeof (buf), f_in)/*尝试读取一行，最多80字符*/
+	      && !strncmp (buf, "O_APP", 5) && ISSPACE (buf[5])/*遇到'#NO_APP '*/)
+		  /*遇到'#NO_APP ',指明preprocess为零*/
 	    preprocess = 0;
 	  if (!strchr (buf, '\n'))
+		  /*遇到'#N'后，我们尝试读了一行，最终因为太长，没有返回完整的行，我们回退'#'*/
 	    ungetc ('#', f_in);	/* It was longer.  */
 	  else
+		  /*遇到'#N'后，我们尝试读了一行，回退行尾的'\n'*/
 	    ungetc ('\n', f_in);
 	}
       else if (c == 'A')
 	{
+    	  /*遇到‘#A’*/
 	  if (fgets (buf, sizeof (buf), f_in)
 	      && !strncmp (buf, "PP", 2) && ISSPACE (buf[2]))
+		  /*遇到'#APP ',指明preprocess为1*/
 	    preprocess = 1;
 	  if (!strchr (buf, '\n'))
+		  /*遇到'#N'后，我们尝试读了一行，最终因为太长，没有返回完整的行，我们回退'#'*/
 	    ungetc ('#', f_in);
 	  else
+		  /*遇到'#N'后，我们尝试读了一行，回退行尾的'\n'*/
 	    ungetc ('\n', f_in);
 	}
       else if (c == '\n')
+    	  /*遇到'#\n',回退字符'\n'*/
 	ungetc ('\n', f_in);
       else
+    	  /*遇到其它字符，回退‘#’号，刚get的字符被丢弃了*/
 	ungetc ('#', f_in);
     }
   else
+	  /*遇到非'#'字符，回退这个字符*/
     ungetc (c, f_in);
 }
 

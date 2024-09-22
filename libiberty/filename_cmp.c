@@ -59,6 +59,7 @@ filename_cmp (const char *s1, const char *s2)
     && !defined(HAVE_CASE_INSENSITIVE_FILE_SYSTEM)
   return strcmp(s1, s2);
 #else
+  /*不区分大小写路径*/
   for (;;)
     {
       int c1 = *s1;
