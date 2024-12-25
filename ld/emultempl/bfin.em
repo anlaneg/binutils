@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+#   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -19,18 +19,19 @@
 # MA 02110-1301, USA.
 #
 
-# This file is sourced from elf32.em, and defines extra bfin-elf
+# This file is sourced from elf.em, and defines extra bfin-elf
 # specific routines.
 #
 fragment <<EOF
 
 #include "elf-bfd.h"
+#include "elf32-bfin.h"
 
 /* Whether to put code in Blackfin L1 SRAM.  */
-extern bfd_boolean elf32_bfin_code_in_l1;
+extern bool elf32_bfin_code_in_l1;
 
 /* Whether to put (writable) data in Blackfin L1 SRAM.  */
-extern bfd_boolean elf32_bfin_data_in_l1;
+extern bool elf32_bfin_data_in_l1;
 
 EOF
 
@@ -38,11 +39,6 @@ EOF
 # Define some shell vars to insert bits of code into the standard elf
 # parse_args and list_options functions.
 #
-PARSE_AND_LIST_PROLOGUE='
-#define OPTION_CODE_IN_L1		300
-#define OPTION_DATA_IN_L1		301
-'
-
 PARSE_AND_LIST_LONGOPTS='
   { "code-in-l1", no_argument, NULL, OPTION_CODE_IN_L1 },
   { "data-in-l1", no_argument, NULL, OPTION_DATA_IN_L1 },
@@ -57,9 +53,9 @@ PARSE_AND_LIST_OPTIONS='
 
 PARSE_AND_LIST_ARGS_CASES='
     case OPTION_CODE_IN_L1:
-      elf32_bfin_code_in_l1 = TRUE;
+      elf32_bfin_code_in_l1 = true;
       break;
     case OPTION_DATA_IN_L1:
-      elf32_bfin_data_in_l1 = TRUE;
+      elf32_bfin_data_in_l1 = true;
       break;
 '

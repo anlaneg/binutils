@@ -1,6 +1,6 @@
 /* GDB routines for supporting auto-loaded Guile scripts.
 
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,9 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "top.h"
-#include "gdbcmd.h"
 #include "objfiles.h"
 #include "cli/cli-cmds.h"
 #include "auto-load.h"
@@ -30,7 +28,7 @@
    set auto-load guile-scripts on|off
    This is true if we should auto-load associated Guile scripts when an
    objfile is opened, false otherwise.  */
-static int auto_load_guile_scripts = 1;
+static bool auto_load_guile_scripts = true;
 
 /* "show" command for the auto_load_guile_scripts configuration variable.  */
 
@@ -38,13 +36,12 @@ static void
 show_auto_load_guile_scripts (struct ui_file *file, int from_tty,
 			      struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Auto-loading of Guile scripts is %s.\n"), value);
+  gdb_printf (file, _("Auto-loading of Guile scripts is %s.\n"), value);
 }
 
-/* Return non-zero if auto-loading Guile scripts is enabled.
-   This is the extension_language_script_ops.auto_load_enabled "method".  */
+/* See guile-internal.h.  */
 
-int
+bool
 gdbscm_auto_load_enabled (const struct extension_language_defn *extlang)
 {
   return auto_load_guile_scripts;
@@ -55,7 +52,8 @@ gdbscm_auto_load_enabled (const struct extension_language_defn *extlang)
 static void
 info_auto_load_guile_scripts (const char *pattern, int from_tty)
 {
-  auto_load_info_scripts (pattern, from_tty, &extension_language_guile);
+  auto_load_info_scripts (current_program_space, pattern, from_tty,
+			  &extension_language_guile);
 }
 
 void
@@ -63,8 +61,8 @@ gdbscm_initialize_auto_load (void)
 {
   add_setshow_boolean_cmd ("guile-scripts", class_support,
 			   &auto_load_guile_scripts, _("\
-Set the debugger's behaviour regarding auto-loaded Guile scripts."), _("\
-Show the debugger's behaviour regarding auto-loaded Guile scripts."), _("\
+Set the debugger's behavior regarding auto-loaded Guile scripts."), _("\
+Show the debugger's behavior regarding auto-loaded Guile scripts."), _("\
 If enabled, auto-loaded Guile scripts are loaded when the debugger reads\n\
 an executable or shared library.\n\
 This options has security implications for untrusted inferiors."),

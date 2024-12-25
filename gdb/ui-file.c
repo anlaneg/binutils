@@ -1,6 +1,6 @@
 /* UI_FILE - a generic STDIO like output stream.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,11 +19,13 @@
 
 /* Implement the ``struct ui_file'' object.  */
 
-#include "defs.h"
 #include "ui-file.h"
-#include "gdb_obstack.h"
-#include "gdb_select.h"
-#include "common/filestuff.h"
+#include "gdbsupport/gdb_obstack.h"
+#include "gdbsupport/gdb_select.h"
+#include "gdbsupport/filestuff.h"
+#include "cli-out.h"
+#include "cli/cli-style.h"
+#include <chrono>
 
 null_file null_stream;
 
@@ -39,32 +41,121 @@ ui_file::printf (const char *format, ...)
   va_list args;
 
   va_start (args, format);
-  vfprintf_unfiltered (this, format, args);
+  vprintf (format, args);
   va_end (args);
 }
 
 void
 ui_file::putstr (const char *str, int quoter)
 {
-  fputstr_unfiltered (str, quoter, this);
+  while (*str)
+    printchar (*str++, quoter, false);
 }
 
 void
-ui_file::putstrn (const char *str, int n, int quoter)
+ui_file::putstrn (const char *str, int n, int quoter, bool async_safe)
 {
-  fputstrn_unfiltered (str, n, quoter, fputc_unfiltered, this);
+  for (int i = 0; i < n; i++)
+    printchar (str[i], quoter, async_safe);
 }
 
-int
+void
 ui_file::putc (int c)
 {
-  return fputc_unfiltered (c, this);
+  char copy = (char) c;
+  write (&copy, 1);
 }
 
 void
 ui_file::vprintf (const char *format, va_list args)
 {
-  vfprintf_unfiltered (this, format, args);
+  ui_out_flags flags = disallow_ui_out_field;
+  cli_ui_out (this, flags).vmessage (m_applied_style, format, args);
+}
+
+/* See ui-file.h.  */
+
+void
+ui_file::emit_style_escape (const ui_file_style &style)
+{
+  if (can_emit_style_escape () && style != m_applied_style)
+    {
+      m_applied_style = style;
+      this->puts (style.to_ansi ().c_str ());
+    }
+}
+
+/* See ui-file.h.  */
+
+void
+ui_file::reset_style ()
+{
+  if (can_emit_style_escape ())
+    {
+      m_applied_style = ui_file_style ();
+      this->puts (m_applied_style.to_ansi ().c_str ());
+    }
+}
+
+/* See ui-file.h.  */
+
+void
+ui_file::printchar (int c, int quoter, bool async_safe)
+{
+  char buf[4];
+  int out = 0;
+
+  c &= 0xFF;			/* Avoid sign bit follies */
+
+  if (c < 0x20			 /* Low control chars */
+      || (c >= 0x7F && c < 0xA0) /* DEL, High controls */
+      || (sevenbit_strings && c >= 0x80))
+    {				/* high order bit set */
+      buf[out++] = '\\';
+
+      switch (c)
+	{
+	case '\n':
+	  buf[out++] = 'n';
+	  break;
+	case '\b':
+	  buf[out++] = 'b';
+	  break;
+	case '\t':
+	  buf[out++] = 't';
+	  break;
+	case '\f':
+	  buf[out++] = 'f';
+	  break;
+	case '\r':
+	  buf[out++] = 'r';
+	  break;
+	case '\033':
+	  buf[out++] = 'e';
+	  break;
+	case '\007':
+	  buf[out++] = 'a';
+	  break;
+	default:
+	  {
+	    buf[out++] = '0' + ((c >> 6) & 0x7);
+	    buf[out++] = '0' + ((c >> 3) & 0x7);
+	    buf[out++] = '0' + ((c >> 0) & 0x7);
+	    break;
+	  }
+	}
+    }
+  else
+    {
+      if (quoter != 0 && (c == '\\' || c == quoter))
+	buf[out++] = '\\';
+      buf[out++] = c;
+    }
+
+  if (async_safe)
+    this->write_async_safe (buf, out);
+  else
+    this->write (buf, out);
 }
 
 
@@ -89,44 +180,28 @@ null_file::write_async_safe (const char *buf, long sizeof_buf)
 
 
 
-void
-gdb_flush (struct ui_file *file)
-{
-  file->flush ();
-}
+/* true if the gdb terminal supports styling, and styling is enabled.  */
 
-int
-ui_file_isatty (struct ui_file *file)
+static bool
+term_cli_styling ()
 {
-  return file->isatty ();
-}
+  if (!cli_styling)
+    return false;
 
-void
-ui_file_write (struct ui_file *file,
-		const char *buf,
-		long length_buf)
-{
-  file->write (buf, length_buf);
-}
-
-void
-ui_file_write_async_safe (struct ui_file *file,
-			  const char *buf,
-			  long length_buf)
-{
-  file->write_async_safe (buf, length_buf);
-}
-
-long
-ui_file_read (struct ui_file *file, char *buf, long length_buf)
-{
-  return file->read (buf, length_buf);
-}
-
-void
-fputs_unfiltered (const char *buf, struct ui_file *file)
-{
-  file->puts (buf);
+  const char *term = getenv ("TERM");
+  /* Windows doesn't by default define $TERM, but can support styles
+     regardless.  */
+#ifndef _WIN32
+  if (term == nullptr || !strcmp (term, "dumb"))
+    return false;
+#else
+  /* But if they do define $TERM, let us behave the same as on Posix
+     platforms, for the benefit of programs which invoke GDB as their
+     back-end.  */
+  if (term && !strcmp (term, "dumb"))
+    return false;
+#endif
+  return true;
 }
 
 
@@ -138,6 +213,22 @@ void
 string_file::write (const char *buf, long length_buf)
 {
   m_string.append (buf, length_buf);
+}
+
+/* See ui-file.h.  */
+
+bool
+string_file::term_out ()
+{
+  return m_term_out;
+}
+
+/* See ui-file.h.  */
+
+bool
+string_file::can_emit_style_escape ()
+{
+  return m_term_out && term_cli_styling ();
 }
 
 
@@ -236,6 +327,12 @@ stdio_file::write_async_safe (const char *buf, long length_buf)
 void
 stdio_file::puts (const char *linebuffer)
 {
+  /* This host-dependent function (with implementations in
+     posix-hdep.c and mingw-hdep.c) is given the opportunity to
+     process the output first in host-dependent way.  If it does, it
+     should return non-zero, to avoid calling fputs below.  */
+  if (gdb_console_fputs (linebuffer, m_file))
+    return;
   /* Calling error crashes when we are called from the exception framework.  */
   if (fputs (linebuffer, m_file))
     {
@@ -249,6 +346,15 @@ stdio_file::isatty ()
   return ::isatty (m_fd);
 }
 
+/* See ui-file.h.  */
+
+bool
+stdio_file::can_emit_style_escape ()
+{
+  return (this->isatty ()
+	  && term_cli_styling ());
+}
+
 
 
 /* This is the implementation of ui_file method 'write' for stderr.
@@ -257,7 +363,7 @@ stdio_file::isatty ()
 void
 stderr_file::write (const char *buf, long length_buf)
 {
-  gdb_flush (gdb_stdout);
+  gdb_stdout->flush ();
   stdio_file::write (buf, length_buf);
 }
 
@@ -267,7 +373,7 @@ stderr_file::write (const char *buf, long length_buf)
 void
 stderr_file::puts (const char *linebuffer)
 {
-  gdb_flush (gdb_stdout);
+  gdb_stdout->flush ();
   stdio_file::puts (linebuffer);
 }
 
@@ -277,20 +383,13 @@ stderr_file::stderr_file (FILE *stream)
 
 
 
-tee_file::tee_file (ui_file *one, bool close_one,
-		    ui_file *two, bool close_two)
+tee_file::tee_file (ui_file *one, ui_file *two)
   : m_one (one),
-    m_two (two),
-    m_close_one (close_one),
-    m_close_two (close_two)
+    m_two (two)
 {}
 
 tee_file::~tee_file ()
 {
-  if (m_close_one)
-    delete m_one;
-  if (m_close_two)
-    delete m_two;
 }
 
 void
@@ -325,4 +424,81 @@ bool
 tee_file::isatty ()
 {
   return m_one->isatty ();
+}
+
+/* See ui-file.h.  */
+
+bool
+tee_file::term_out ()
+{
+  return m_one->term_out ();
+}
+
+/* See ui-file.h.  */
+
+bool
+tee_file::can_emit_style_escape ()
+{
+  return (m_one->term_out ()
+	  && term_cli_styling ());
+}
+
+/* See ui-file.h.  */
+
+void
+no_terminal_escape_file::write (const char *buf, long length_buf)
+{
+  std::string copy (buf, length_buf);
+  this->puts (copy.c_str ());
+}
+
+/* See ui-file.h.  */
+
+void
+no_terminal_escape_file::puts (const char *buf)
+{
+  while (*buf != '\0')
+    {
+      const char *esc = strchr (buf, '\033');
+      if (esc == nullptr)
+	break;
+
+      int n_read = 0;
+      if (!skip_ansi_escape (esc, &n_read))
+	++esc;
+
+      this->stdio_file::write (buf, esc - buf);
+      buf = esc + n_read;
+    }
+
+  if (*buf != '\0')
+    this->stdio_file::write (buf, strlen (buf));
+}
+
+void
+timestamped_file::write (const char *buf, long len)
+{
+  if (debug_timestamp)
+    {
+      /* Print timestamp if previous print ended with a \n.  */
+      if (m_needs_timestamp)
+	{
+	  using namespace std::chrono;
+
+	  steady_clock::time_point now = steady_clock::now ();
+	  seconds s = duration_cast<seconds> (now.time_since_epoch ());
+	  microseconds us = duration_cast<microseconds> (now.time_since_epoch () - s);
+	  std::string timestamp = string_printf ("%ld.%06ld ",
+						 (long) s.count (),
+						 (long) us.count ());
+	  m_stream->puts (timestamp.c_str ());
+	}
+
+      /* Print the message.  */
+      m_stream->write (buf, len);
+
+      m_needs_timestamp = (len > 0 && buf[len - 1] == '\n');
+    }
+  else
+    m_stream->write (buf, len);
 }

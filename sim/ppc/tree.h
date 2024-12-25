@@ -35,7 +35,7 @@
    This function accepts a printf style formatted string as the
    argument that describes the entry.  Any properties or interrupt
    connections added to a device tree using this function are marked
-   as having a permenant disposition.  When the tree is (re)
+   as having a permanent disposition.  When the tree is (re)
    initialized they will be restored to their initial value.
 
    */
@@ -48,7 +48,7 @@ EXTERN_TREE\
 (device *) tree_parse
 (device *root,
  const char *fmt,
- ...) __attribute__ ((format (printf, 2, 3)));
+ ...) ATTRIBUTE_PRINTF_2;
 
 
 INLINE_TREE\

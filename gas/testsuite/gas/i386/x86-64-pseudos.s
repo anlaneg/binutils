@@ -6,9 +6,9 @@ _start:
 	{vex3} {load} vmovaps %xmm7,%xmm2
 	{vex3} {store} vmovaps %xmm7,%xmm2
 	vmovaps %xmm7,%xmm2
-	{vex2} vmovaps %xmm7,%xmm2
-	{vex2} {load} vmovaps %xmm7,%xmm2
-	{vex2} {store} vmovaps %xmm7,%xmm2
+	{vex} vmovaps %xmm7,%xmm2
+	{vex} {load} vmovaps %xmm7,%xmm2
+	{vex} {store} vmovaps %xmm7,%xmm2
 	{vex3} vmovaps (%rax),%xmm2
 	vmovaps (%rax),%xmm2
 	{vex2} vmovaps (%rax),%xmm2
@@ -16,6 +16,11 @@ _start:
 	{disp32} vmovaps (%rax),%xmm2
 	{evex} {disp8} vmovaps (%rax),%xmm2
 	{evex} {disp32} vmovaps (%rax),%xmm2
+
+	{vex} {disp8} vmovaps 128(%rax),%xmm2
+	{vex} {disp32} vmovaps 128(%rax),%xmm2
+	{evex} {disp8} vmovaps 128(%rax),%xmm2
+	{evex} {disp32} vmovaps 128(%rax),%xmm2
 
 	mov %rcx, %rax
 	{load} mov %rcx, %rax
@@ -129,6 +134,85 @@ _start:
 	{load} xor (%rdi), %eax
 	{store} xor %eax, (%rdi)
 	{store} xor (%rdi), %eax
+	{load}  add    %r31,(%r8),%r16
+	{load}	add    (%r8),%r31,%r16
+	{store} add    %r31,(%r8),%r16
+	{store}	add    (%r8),%r31,%r16
+	{load} 	sub    %r15d,(%r8),%r18d
+	{load}	sub    (%r8),%r15d,%r18d
+	{store} sub    %r15d,(%r8),%r18d
+	{store} sub    (%r8),%r15d,%r18d
+	{load} 	sbb    %r15d,(%r8),%r18d
+	{load}	sbb    (%r8),%r15d,%r18d
+	{store} sbb    %r15d,(%r8),%r18d
+	{store} sbb    (%r8),%r15d,%r18d
+	{load} 	and    %r15d,(%r8),%r18d
+	{load}	and    (%r8),%r15d,%r18d
+	{store} and    %r15d,(%r8),%r18d
+	{store} and    (%r8),%r15d,%r18d
+	{load} 	or     %r15d,(%r8),%r18d
+	{load}	or     (%r8),%r15d,%r18d
+	{store} or     %r15d,(%r8),%r18d
+	{store} or     (%r8),%r15d,%r18d
+	{load} 	xor    %r15d,(%r8),%r18d
+	{load}	xor    (%r8),%r15d,%r18d
+	{store} xor    %r15d,(%r8),%r18d
+	{store} xor    (%r8),%r15d,%r18d
+	{load} 	adc    %r15d,(%r8),%r18d
+	{load}	adc    (%r8),%r15d,%r18d
+	{store} adc    %r15d,(%r8),%r18d
+	{store} adc    (%r8),%r15d,%r18d
+
+	{store} add    %r31,%r8,%r16
+	{load}  add    %r31,%r8,%r16
+	{store} sub    %r15b,%r17b,%r18b
+	{load}	sub    %r15b,%r17b,%r18b
+	{store}	sbb    %r15b,%r17b,%r18b
+	{load}	sbb    %r15b,%r17b,%r18b
+	{store}	and    %r15b,%r17b,%r18b
+	{load}	and    %r15b,%r17b,%r18b
+	{store}	or     %r15b,%r17b,%r18b
+	{load}	or     %r15b,%r17b,%r18b
+	{store}	xor    %r15b,%r17b,%r18b
+	{load}	xor    %r15b,%r17b,%r18b
+	{store}	adc    %r15b,%r17b,%r18b
+	{load}	adc    %r15b,%r17b,%r18b
+
+	.irp m, mov, adc, add, and, cmp, or, sbb, sub, test, xor
+	\m	$0x12, %al
+	\m	$0x345, %eax
+	{load} \m $0x12, %al		# bogus for MOV
+	{load} \m $0x345, %eax		# bogus for MOV
+	{store} \m $0x12, %al
+	{store} \m $0x345, %eax
+	.endr
+
+	# There should be no effect of the pseudo-prefixes on any of these.
+	mov	$0x123456789, %rcx
+	{load} mov $0x123456789, %rcx
+	{store} mov $0x123456789, %rcx
+	movabs	$0x12345678, %rcx
+	{load} movabs $0x12345678, %rcx
+	{store} movabs $0x12345678, %rcx
+
+	.irp m, push, pop, bswap
+	\m	%rcx
+	{load} \m %rcx			# bogus for POP
+	{store} \m %rcx			# bogus for PUSH
+	.endr
+
+	xchg	%ecx, %esi
+	xchg	%esi, %ecx
+	{load} xchg %ecx, %esi
+	{store} xchg %ecx, %esi
+
+	xchg	%eax, %esi
+	{load} xchg %eax, %esi
+	{store} xchg %eax, %esi
+
+	xchg	%ecx, %eax
+	{load} xchg %ecx, %eax
+	{store} xchg %ecx, %eax
 
 	fadd %st, %st
 	{load} fadd %st, %st
@@ -305,6 +389,11 @@ _start:
 	{disp8} movaps 128(%rax),%xmm2
 	{disp32} movaps 128(%rax),%xmm2
 	{rex} mov %al,%ah
+	{rex} shl %cl, %eax
+	{rex} movabs 1, %al
+	{rex} cmp %cl, %dl
+	{rex} mov $1, %bl
+	{rex} crc32 %cl, %eax
 	{rex} movl %eax,%ebx
 	{rex} movl %eax,%r14d
 	{rex} movl %eax,(%r8)
@@ -314,9 +403,34 @@ _start:
 	{rex} movaps (%r8),%xmm2
 	{rex} phaddw (%rcx),%mm0
 	{rex} phaddw (%r8),%mm0
-	{rex} vmovaps %xmm7,%xmm2
-	{rex} vmovaps %xmm17,%xmm2
-	{rex} rorx $7,%eax,%ebx
+	{rex2} mov %al,%ah
+	{rex2} shl %cl, %eax
+	{rex2} cmp %cl, %dl
+	{rex2} mov $1, %bl
+	{rex2} movl %eax,%ebx
+	{rex2} movl %eax,%r14d
+	{rex2} movl %eax,(%r8)
+	{rex2} movaps %xmm7,%xmm2
+	{rex2} movaps %xmm7,%xmm12
+	{rex2} movaps (%rcx),%xmm2
+	{rex2} movaps (%r8),%xmm2
+	{rex2} pmullw %mm0,%mm6
+
+	movb (%rbp),%al
+	{disp8} movb (%rbp),%al
+	{disp32} movb (%rbp),%al
+
+	movb (%ebp),%al
+	{disp8} movb (%ebp),%al
+	{disp32} movb (%ebp),%al
+
+	movb (%r13),%al
+	{disp8} movb (%r13),%al
+	{disp32} movb (%r13),%al
+
+	movb (%r13d),%al
+	{disp8} movb (%r13d),%al
+	{disp32} movb (%r13d),%al
 
 	.intel_syntax noprefix
 	{vex3} vmovaps xmm2,xmm7
@@ -333,6 +447,12 @@ _start:
 	{disp32} vmovaps xmm2,XMMWORD PTR [rax]
 	{evex} {disp8} vmovaps xmm2,XMMWORD PTR [rax]
 	{evex} {disp32} vmovaps xmm2,XMMWORD PTR [rax]
+
+	{vex} {disp8} vmovaps xmm2,XMMWORD PTR [rax+128]
+	{vex} {disp32} vmovaps xmm2,XMMWORD PTR [rax+128]
+	{evex} {disp8} vmovaps xmm2,XMMWORD PTR [rax+128]
+	{evex} {disp32} vmovaps xmm2,XMMWORD PTR [rax+128]
+
 	mov rax,rcx
 	{load} mov rax,rcx
 	{store} mov rax,rcx
@@ -357,6 +477,30 @@ _start:
 	{rex} movaps xmm2,XMMWORD PTR [r8]
 	{rex} phaddw mm0,QWORD PTR [rcx]
 	{rex} phaddw mm0,QWORD PTR [r8]
-	{rex} vmovaps xmm2,xmm7
-	{rex} vmovaps xmm2,xmm17
-	{rex} rorx ebx,eax,0x7
+	{rex2} mov ah,al
+	{rex2} mov ebx,eax
+	{rex2} mov r14d,eax
+	{rex2} mov DWORD PTR [r8],eax
+	{rex2} movaps xmm2,xmm7
+	{rex2} movaps xmm12,xmm7
+	{rex2} movaps xmm2,XMMWORD PTR [rcx]
+	{rex2} movaps xmm2,XMMWORD PTR [r8]
+	{rex2} pmullw mm6,mm0
+
+	mov al, BYTE PTR [rbp]
+	{disp8} mov al, BYTE PTR [rbp]
+	{disp32} mov al, BYTE PTR [rbp]
+
+	mov al, BYTE PTR [ebp]
+	{disp8} mov al, BYTE PTR [ebp]
+	{disp32} mov al, BYTE PTR [ebp]
+
+	mov al, BYTE PTR [r13]
+	{disp8} mov al, BYTE PTR [r13]
+	{disp32} mov al, BYTE PTR [r13]
+
+	mov al, BYTE PTR [r13]
+	{disp8} mov al, BYTE PTR [r13d]
+	{disp32} mov al, BYTE PTR [r13d]
+
+	.insn {rex} 0x8a, al, cl

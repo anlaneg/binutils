@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2024 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
    Namespace support contributed by David Carlton.
@@ -19,16 +19,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef CP_SUPPORT_H
-#define CP_SUPPORT_H
-
-/* We need this for 'domain_enum', alas...  */
+#ifndef GDB_CP_SUPPORT_H
+#define GDB_CP_SUPPORT_H
 
 #include "symtab.h"
-#include "common/vec.h"
-#include "common/gdb_vecs.h"
-#include "gdb_obstack.h"
-#include "common/array-view.h"
+#include "gdbsupport/gdb_obstack.h"
+#include "gdbsupport/array-view.h"
 #include <vector>
 
 /* Opaque declarations.  */
@@ -61,32 +57,30 @@ struct using_direct;
 
 struct demangle_parse_info
 {
-  demangle_parse_info ();
-
-  ~demangle_parse_info ();
-
-  /* The memory used during the parse.  */
-  struct demangle_info *info;
-
   /* The result of the parse.  */
-  struct demangle_component *tree;
+  struct demangle_component *tree = nullptr;
 
-  /* Any temporary memory used during typedef replacement.  */
-  struct obstack obstack;
+  /* Any memory used during processing.  */
+  auto_obstack obstack;
+
+  /* Any other objects referred to by this object, and whose storage
+     lifetime must be linked.  */
+  std::vector<std::unique_ptr<demangle_parse_info>> infos;
 };
 
 
 /* Functions from cp-support.c.  */
 
-extern std::string cp_canonicalize_string (const char *string);
+extern gdb::unique_xmalloc_ptr<char> cp_canonicalize_string
+  (const char *string);
 
-extern std::string cp_canonicalize_string_no_typedefs (const char *string);
+extern gdb::unique_xmalloc_ptr<char> cp_canonicalize_string_no_typedefs
+  (const char *string);
 
 typedef const char *(canonicalization_ftype) (struct type *, void *);
 
-extern std::string cp_canonicalize_string_full (const char *string,
-						canonicalization_ftype *finder,
-						void *data);
+extern gdb::unique_xmalloc_ptr<char> cp_canonicalize_string_full
+  (const char *string, canonicalization_ftype *finder, void *data);
 
 extern char *cp_class_name_from_physname (const char *physname);
 
@@ -99,7 +93,7 @@ extern unsigned int cp_entire_prefix_len (const char *name);
 extern gdb::unique_xmalloc_ptr<char> cp_func_name (const char *full_name);
 
 extern gdb::unique_xmalloc_ptr<char> cp_remove_params
-  (const char *demanged_name);
+  (const char *demangled_name);
 
 /* DEMANGLED_NAME is the name of a function, (optionally) including
    parameters and (optionally) a return type.  Return the name of the
@@ -118,7 +112,7 @@ extern void add_symbol_overload_list_adl
    std::vector<symbol *> *overload_list);
 
 extern struct type *cp_lookup_rtti_type (const char *name,
-					 struct block *block);
+					 const struct block *block);
 
 /* Produce an unsigned hash value from SEARCH_NAME that is compatible
    with cp_symbol_name_matches.  Only the last component in
@@ -127,8 +121,7 @@ extern struct type *cp_lookup_rtti_type (const char *name,
    "function" or "bar::function" in all namespaces is possible.  */
 extern unsigned int cp_search_name_hash (const char *search_name);
 
-/* Implement the "la_get_symbol_name_matcher" language_defn method for
-   C++.  */
+/* Implement the "get_symbol_name_matcher" language_defn method for C++.  */
 extern symbol_name_matcher_ftype *cp_get_symbol_name_matcher
   (const lookup_name_info &lookup_name);
 
@@ -144,27 +137,28 @@ extern struct block_symbol cp_lookup_symbol_nonlocal
      (const struct language_defn *langdef,
       const char *name,
       const struct block *block,
-      const domain_enum domain);
+      const domain_search_flags domain);
 
 extern struct block_symbol
   cp_lookup_symbol_namespace (const char *the_namespace,
 			      const char *name,
 			      const struct block *block,
-			      const domain_enum domain);
+			      const domain_search_flags domain);
 
-extern struct block_symbol cp_lookup_symbol_imports_or_template
+extern struct block_symbol cp_lookup_symbol_imports
      (const char *scope,
       const char *name,
       const struct block *block,
-      const domain_enum domain);
+      const domain_search_flags domain);
 
 extern struct block_symbol
   cp_lookup_nested_symbol (struct type *parent_type,
 			   const char *nested_name,
 			   const struct block *block,
-			   const domain_enum domain);
+			   const domain_search_flags domain);
 
-struct type *cp_lookup_transparent_type (const char *name);
+struct type *cp_lookup_transparent_type (const char *name,
+					 domain_search_flags flags);
 
 /* See description in cp-namespace.c.  */
 
@@ -176,23 +170,42 @@ struct type *cp_find_type_baseclass_by_name (struct type *parent_type,
 extern std::unique_ptr<demangle_parse_info> cp_demangled_name_to_comp
      (const char *demangled_name, std::string *errmsg);
 
+/* Convert RESULT to a string.  ESTIMATED_LEN is used only as a guide
+   to the length of the result.  */
+
 extern gdb::unique_xmalloc_ptr<char> cp_comp_to_string
   (struct demangle_component *result, int estimated_len);
 
 extern void cp_merge_demangle_parse_infos (struct demangle_parse_info *,
 					   struct demangle_component *,
-					   struct demangle_parse_info *);
+					   std::unique_ptr<demangle_parse_info>);
 
 /* The list of "maint cplus" commands.  */
 
 extern struct cmd_list_element *maint_cplus_cmd_list;
 
+/* Wrappers for bfd and libiberty demangling entry points.  Note they
+   all force DMGL_VERBOSE so that callers don't need to.  This is so
+   that GDB consistently uses DMGL_VERBOSE throughout -- we want
+   libiberty's demangler to expand standard substitutions to their
+   full template name.  */
+
 /* A wrapper for bfd_demangle.  */
 
-char *gdb_demangle (const char *name, int options);
+gdb::unique_xmalloc_ptr<char> gdb_demangle (const char *name, int options);
 
-/* Like gdb_demangle, but suitable for use as la_sniff_from_mangled_name.  */
+/* A wrapper for cplus_demangle_print.  */
 
-int gdb_sniff_from_mangled_name (const char *mangled, char **demangled);
+extern char *gdb_cplus_demangle_print (int options,
+				       struct demangle_component *tree,
+				       int estimated_length,
+				       size_t *p_allocated_size);
 
-#endif /* CP_SUPPORT_H */
+/* Find an instance of the character C in the string S that is outside
+   of all parenthesis pairs, single-quoted strings, and double-quoted
+   strings.  Also, ignore the char within a template name, like a ','
+   within foo<int, int>.  */
+
+extern const char *find_toplevel_char (const char *s, char c);
+
+#endif /* GDB_CP_SUPPORT_H */

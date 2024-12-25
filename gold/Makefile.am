@@ -1,6 +1,6 @@
 ## Process this file with automake to generate Makefile.in
 #
-#  Copyright (C) 2006-2019 Free Software Foundation, Inc.
+#  Copyright (C) 2006-2024 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,8 +34,8 @@ ZLIBINC = @zlibinc@
 THREADFLAGS = @PTHREAD_CFLAGS@
 THREADLIBS = @PTHREAD_LIBS@
 
-AM_CFLAGS = $(WARN_CFLAGS) $(LFS_CFLAGS) $(RANDOM_SEED_CFLAGS) $(ZLIBINC) $(THREADFLAGS)
-AM_CXXFLAGS = $(WARN_CXXFLAGS) $(LFS_CFLAGS) $(RANDOM_SEED_CFLAGS) $(ZLIBINC) $(THREADFLAGS)
+AM_CFLAGS = $(WARN_CFLAGS) $(LFS_CFLAGS) $(RANDOM_SEED_CFLAGS) $(ZLIBINC) $(ZSTD_CFLAGS) $(THREADFLAGS)
+AM_CXXFLAGS = $(WARN_CXXFLAGS) $(LFS_CFLAGS) $(RANDOM_SEED_CFLAGS) $(ZLIBINC) $(ZSTD_CFLAGS) $(THREADFLAGS) $(JANSSON_CFLAGS)
 AM_LDFLAGS = $(THREADFLAGS)
 
 AM_CPPFLAGS = \
@@ -187,7 +187,7 @@ libgold_a_LIBADD = $(LIBOBJS)
 sources_var = main.cc
 deps_var = $(TARGETOBJS) libgold.a $(LIBIBERTY) $(LIBINTL_DEP)
 ldadd_var = $(TARGETOBJS) libgold.a $(LIBIBERTY) $(GOLD_LDADD) $(LIBINTL) \
-	 $(THREADLIBS) $(LIBDL) $(ZLIB)
+	 $(THREADLIBS) $(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 ldflags_var = $(GOLD_LDFLAGS)
 
 ld_new_SOURCES = $(sources_var)
@@ -201,12 +201,12 @@ incremental_dump_SOURCES = incremental-dump.cc
 incremental_dump_DEPENDENCIES = $(TARGETOBJS) libgold.a $(LIBIBERTY) \
 	$(LIBINTL_DEP)
 incremental_dump_LDADD = $(TARGETOBJS) libgold.a $(LIBIBERTY) $(LIBINTL) \
-	 $(THREADLIBS) $(LIBDL) $(ZLIB)
+	 $(THREADLIBS) $(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 
 dwp_SOURCES = dwp.cc
 dwp_DEPENDENCIES = libgold.a $(LIBIBERTY) $(LIBINTL_DEP)
 dwp_LDADD = libgold.a $(LIBIBERTY) $(GOLD_LDADD) $(LIBINTL) $(THREADLIBS) \
-	$(LIBDL) $(ZLIB)
+	$(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 dwp_LDFLAGS = $(GOLD_LDFLAGS)
 
 CONFIG_STATUS_DEPENDENCIES = $(srcdir)/../bfd/development.sh
@@ -242,10 +242,6 @@ install-exec-local: ld-new$(EXEEXT)
 	    || $(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) ld-new$(EXEEXT) $(DESTDIR)$(tooldir)/bin/ld$(EXEEXT); \
 	  fi; \
 	fi
-
-# We want install to imply install-info as per GNU standards, despite
-# the cygnus option.
-install-data-local: install-info
 
 POTFILES= $(CCFILES) $(HFILES) $(TARGETSOURCES)
 
@@ -284,10 +280,17 @@ editcc2 = -e 's/\([^ ]*\)\(.*\)/\1 -Bgcctestdir2\/\2/'
 ld2_LINK = `echo $(CXXLD) | sed $(editcc2)`\
 	$(AM_CXXFLAGS) $(CXXFLAGS) $(ld2_LDFLAGS) $(LDFLAGS) -o $@
 
+TEST_READELF = $(top_builddir)/../binutils/readelf
+
+# Skip this for LTO build due to different build IDs.
 bootstrap-test: ld2
 	rm -f $@
 	echo "#!/bin/sh" > $@
-	echo "cmp ld1 ld2" >> $@
+	if $(TEST_READELF) -SW main.$(OBJEXT) | grep "gnu.lto" > /dev/null; then \
+	  echo true >> $@; \
+	else \
+	  echo "cmp ld1 ld2" >> $@; \
+	fi
 	chmod +x $@
 
 libgold-1-r.o: gcctestdir1/ld libgold.a
@@ -314,10 +317,15 @@ editcc2r = -e 's/\([^ ]*\)\(.*\)/\1 -Bgcctestdir2-r\/\2/'
 ld2_r_LINK = `echo $(CXXLD) | sed $(editcc2r)`\
 	$(AM_CXXFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@
 
+# Skip this for LTO build due to different build IDs.
 bootstrap-test-r: ld2-r
 	rm -f $@
 	echo "#!/bin/sh" > $@
-	echo "cmp ld1-r ld2-r" >> $@
+	if $(TEST_READELF) -SW main.$(OBJEXT) | grep "gnu.lto" > /dev/null; then \
+	  echo true >> $@; \
+	else \
+	  echo "cmp ld1-r ld2-r" >> $@; \
+	fi
 	chmod +x $@
 
 check_PROGRAMS = ld1 ld2 ld1-r ld2-r

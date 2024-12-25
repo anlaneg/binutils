@@ -99,6 +99,14 @@ cdqe
 movsx rax, eax
 movsx rax, ax
 movsx rax, al
+retf
+retf 16
+retfw
+retfw 2
+retfd
+retfd 4
+retfq
+retfq 8
 bar:
 .att_syntax
 #testcase for symbol references.
@@ -200,8 +208,6 @@ cmpxchg16b oword ptr [rax]
 	movsx	%ax, %esi
 	movsx	%ax, %rsi
 	movsx	%eax, %rsi
-	movsx	(%rax), %edx
-	movsx	(%rax), %rdx
 	movsx	(%rax), %dx
 	movsbl	(%rax), %edx
 	movsbq	(%rax), %rdx
@@ -214,8 +220,6 @@ cmpxchg16b oword ptr [rax]
 	movzx	%al, %rsi
 	movzx	%ax, %esi
 	movzx	%ax, %rsi
-	movzx	(%rax), %edx
-	movzx	(%rax), %rdx
 	movzx	(%rax), %dx
 	movzb	(%rax), %edx
 	movzb	(%rax), %rdx
@@ -269,8 +273,6 @@ cmpxchg16b oword ptr [rax]
 
 .att_syntax
 movsx (%rax),%ax
-movsx (%rax),%eax
-movsx (%rax),%rax
 movsxb	(%rax), %dx
 movsxb	(%rax), %edx
 movsxb	(%rax), %rdx
@@ -279,8 +281,6 @@ movsxw	(%rax), %rdx
 movsxl	(%rax), %rdx
 movsxd (%rax),%rax
 movzx (%rax),%ax
-movzx (%rax),%eax
-movzx (%rax),%rax
 movzxb	(%rax), %dx
 movzxb	(%rax), %edx
 movzxb	(%rax), %rdx
@@ -307,3 +307,88 @@ movzx rax, WORD PTR [rax]
 
 movnti dword ptr [rax], eax
 movnti qword ptr [rax], rax
+
+mov eax, tr1
+mov tr0, rcx
+
+	.att_syntax
+	lar    %dx,%dx
+	lar    %dx,%edx
+	lar    %dx,%rdx
+	lar    %edx,%edx
+	lar    %rdx,%rdx
+	lar    (%rdx),%dx
+	lar    (%rdx),%edx
+	lar    (%rdx),%rdx
+
+	lldt   %dx
+	lldt   %edx
+	lldt   %rdx
+	lldt   (%rdx)
+
+	lsl    %dx,%dx
+	lsl    %dx,%edx
+	lsl    %dx,%rdx
+	lsl    %edx,%edx
+	lsl    %rdx,%rdx
+	lsl    (%rdx),%dx
+	lsl    (%rdx),%edx
+	lsl    (%rdx),%rdx
+
+	ltr    %dx
+	ltr    %edx
+	ltr    %rdx
+	ltr    (%rdx)
+
+	verr   %dx
+	verr   %edx
+	verr   %rdx
+	verr   (%rdx)
+
+	verw   %dx
+	verw   %edx
+	verw   %rdx
+	verw   (%rdx)
+
+	.intel_syntax noprefix
+	lar    dx,dx
+	lar    edx,dx
+	lar    rdx,dx
+	lar    edx,edx
+	lar    rdx,rdx
+	lar    dx,WORD PTR [rdx]
+	lar    edx,WORD PTR [rdx]
+	lar    rdx,WORD PTR [rdx]
+
+	lldt   dx
+	lldt   edx
+	lldt   rdx
+	lldt   [rdx]
+	lldt   word ptr [rdx]
+
+	lsl    dx,dx
+	lsl    edx,dx
+	lsl    rdx,dx
+	lsl    edx,edx
+	lsl    rdx,rdx
+	lsl    dx,WORD PTR [rdx]
+	lsl    edx,WORD PTR [rdx]
+	lsl    rdx,WORD PTR [rdx]
+
+	ltr    dx
+	ltr    edx
+	ltr    rdx
+	ltr    [rdx]
+	ltr    word ptr [rdx]
+
+	verr   dx
+	verr   edx
+	verr   rdx
+	verr   [rdx]
+	verr   word ptr [rdx]
+
+	verw   dx
+	verw   edx
+	verw   rdx
+	verw   [rdx]
+	verw   word ptr [rdx]

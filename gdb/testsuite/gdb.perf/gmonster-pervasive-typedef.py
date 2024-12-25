@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2019 Free Software Foundation, Inc.
+# Copyright (C) 2015-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,9 +17,8 @@
 # typedef used pervasively.  This exercises the perf regression introduced by
 # the original patch to pr 16253.
 
-from perftest import perftest
-from perftest import measure
-from perftest import utils
+from perftest import measure, perftest, utils
+
 
 class PervasiveTypedef(perftest.TestCaseWithBasicMeasurements):
     def __init__(self, name, run_names, binfile):
@@ -37,8 +36,7 @@ class PervasiveTypedef(perftest.TestCaseWithBasicMeasurements):
 
     def execute_test(self):
         for run in self.run_names:
-            self.this_run_binfile = "%s-%s" % (self.binfile,
-                                               utils.convert_spaces(run))
+            self.this_run_binfile = "%s-%s" % (self.binfile, utils.convert_spaces(run))
             iteration = 5
             while iteration > 0:
                 self.measure.measure(self.func, run)

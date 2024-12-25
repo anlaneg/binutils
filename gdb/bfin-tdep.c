@@ -1,6 +1,6 @@
 /* Target-dependent code for Analog Devices Blackfin processor, for GDB.
 
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
 
    Contributed by Analog Devices, Inc.
 
@@ -19,7 +19,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "inferior.h"
 #include "gdbcore.h"
 #include "arch-utils.h"
@@ -30,8 +30,8 @@
 #include "trad-frame.h"
 #include "dis-asm.h"
 #include "sim-regno.h"
-#include "gdb/sim-bfin.h"
-#include "dwarf2-frame.h"
+#include "sim/sim-bfin.h"
+#include "dwarf2/frame.h"
 #include "symtab.h"
 #include "elf-bfd.h"
 #include "elf/bfin.h"
@@ -288,7 +288,7 @@ bfin_alloc_frame_cache (void)
 }
 
 static struct bfin_frame_cache *
-bfin_frame_cache (struct frame_info *this_frame, void **this_cache)
+bfin_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct bfin_frame_cache *cache;
   int i;
@@ -340,7 +340,7 @@ bfin_frame_cache (struct frame_info *this_frame, void **this_cache)
 }
 
 static void
-bfin_frame_this_id (struct frame_info *this_frame,
+bfin_frame_this_id (const frame_info_ptr &this_frame,
 		    void **this_cache,
 		    struct frame_id *this_id)
 {
@@ -355,7 +355,7 @@ bfin_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-bfin_frame_prev_register (struct frame_info *this_frame,
+bfin_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_cache,
 			  int regnum)
 {
@@ -374,6 +374,7 @@ bfin_frame_prev_register (struct frame_info *this_frame,
 
 static const struct frame_unwind bfin_frame_unwind =
 {
+  "bfin prologue",
   NORMAL_FRAME,
   default_frame_unwind_stop_reason,
   bfin_frame_this_id,
@@ -464,7 +465,7 @@ bfin_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 
    /* TODO:
       Dwarf2 uses entry point value AFTER some register initializations.
-      We should perhaps skip such asssignments as well (R6 = R1, ...).  */
+      We should perhaps skip such assignments as well (R6 = R1, ...).  */
 
   return pc;
 }
@@ -508,9 +509,9 @@ bfin_push_dummy_call (struct gdbarch *gdbarch,
 
   for (i = nargs - 1; i >= 0; i--)
     {
-      struct type *value_type = value_enclosing_type (args[i]);
+      struct type *value_type = args[i]->enclosing_type ();
 
-      total_len += (TYPE_LENGTH (value_type) + 3) & ~3;
+      total_len += align_up (value_type->length (), 4);
     }
 
   /* At least twelve bytes of stack space must be allocated for the function's
@@ -524,12 +525,12 @@ bfin_push_dummy_call (struct gdbarch *gdbarch,
 
   for (i = nargs - 1; i >= 0; i--)
     {
-      struct type *value_type = value_enclosing_type (args[i]);
+      struct type *value_type = args[i]->enclosing_type ();
       struct type *arg_type = check_typedef (value_type);
-      int container_len = (TYPE_LENGTH (arg_type) + 3) & ~3;
+      int container_len = align_up (arg_type->length (), 4);
 
       sp -= container_len;
-      write_memory (sp, value_contents (args[i]), container_len);
+      write_memory (sp, args[i]->contents ().data (), container_len);
     }
 
   /* Initialize R0, R1, and R2 to the first 3 words of parameters.  */
@@ -597,7 +598,7 @@ bfin_sw_breakpoint_from_kind (struct gdbarch *gdbarch, int kind, int *size)
 
   *size = kind;
 
-  if (strcmp (target_shortname, "sim") == 0)
+  if (strcmp (target_shortname (), "sim") == 0)
     return bfin_sim_breakpoint;
   else
     return bfin_breakpoint;
@@ -611,7 +612,7 @@ bfin_extract_return_value (struct type *type,
   struct gdbarch *gdbarch = regs->arch ();
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   bfd_byte *valbuf = dst;
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
   ULONGEST tmp;
   int regno = BFIN_R0_REGNUM;
 
@@ -640,7 +641,7 @@ bfin_store_return_value (struct type *type,
      registers starting with R0.  This will always be a multiple of
      the register size.  */
 
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
   int regno = BFIN_R0_REGNUM;
 
   gdb_assert (len <= 8);
@@ -667,7 +668,7 @@ bfin_return_value (struct gdbarch *gdbarch,
 		   gdb_byte *readbuf,
 		   const gdb_byte *writebuf)
 {
-  if (TYPE_LENGTH (type) > 8)
+  if (type->length () > 8)
     return RETURN_VALUE_STRUCT_CONVENTION;
 
   if (readbuf)
@@ -695,8 +696,7 @@ bfin_pseudo_register_read (struct gdbarch *gdbarch, readable_regcache *regcache,
   enum register_status status;
 
   if (regnum != BFIN_CC_REGNUM)
-    internal_error (__FILE__, __LINE__,
-		    _("invalid register number %d"), regnum);
+    internal_error (_("invalid register number %d"), regnum);
 
   /* Extract the CC bit from the ASTAT register.  */
   status = regcache->raw_read (BFIN_ASTAT_REGNUM, buf);
@@ -715,8 +715,7 @@ bfin_pseudo_register_write (struct gdbarch *gdbarch, struct regcache *regcache,
   gdb_byte buf[BFIN_MAX_REGISTER_SIZE];
 
   if (regnum != BFIN_CC_REGNUM)
-    internal_error (__FILE__, __LINE__,
-		    _("invalid register number %d"), regnum);
+    internal_error (_("invalid register number %d"), regnum);
 
   /* Overlay the CC bit in the ASTAT register.  */
   regcache->raw_read (BFIN_ASTAT_REGNUM, buf);
@@ -725,7 +724,7 @@ bfin_pseudo_register_write (struct gdbarch *gdbarch, struct regcache *regcache,
 }
 
 static CORE_ADDR
-bfin_frame_base_address (struct frame_info *this_frame, void **this_cache)
+bfin_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct bfin_frame_cache *cache = bfin_frame_cache (this_frame, this_cache);
 
@@ -733,7 +732,7 @@ bfin_frame_base_address (struct frame_info *this_frame, void **this_cache)
 }
 
 static CORE_ADDR
-bfin_frame_local_address (struct frame_info *this_frame, void **this_cache)
+bfin_frame_local_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct bfin_frame_cache *cache = bfin_frame_cache (this_frame, this_cache);
 
@@ -741,7 +740,7 @@ bfin_frame_local_address (struct frame_info *this_frame, void **this_cache)
 }
 
 static CORE_ADDR
-bfin_frame_args_address (struct frame_info *this_frame, void **this_cache)
+bfin_frame_args_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct bfin_frame_cache *cache = bfin_frame_cache (this_frame, this_cache);
 
@@ -756,32 +755,17 @@ static const struct frame_base bfin_frame_base =
   bfin_frame_args_address
 };
 
-static struct frame_id
-bfin_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  CORE_ADDR sp;
-
-  sp = get_frame_register_unsigned (this_frame, BFIN_SP_REGNUM);
-
-  return frame_id_build (sp, get_frame_pc (this_frame));
-}
-
-static CORE_ADDR
-bfin_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, BFIN_PC_REGNUM);
-}
-
 static CORE_ADDR
 bfin_frame_align (struct gdbarch *gdbarch, CORE_ADDR address)
 {
-  return (address & ~0x3);
+  return align_down (address, 4);
 }
 
 enum bfin_abi
 bfin_abi (struct gdbarch *gdbarch)
 {
-  return gdbarch_tdep (gdbarch)->bfin_abi;
+  bfin_gdbarch_tdep *tdep = gdbarch_tdep<bfin_gdbarch_tdep> (gdbarch);
+  return tdep->bfin_abi;
 }
 
 /* Initialize the current architecture based on INFO.  If possible,
@@ -794,8 +778,6 @@ bfin_abi (struct gdbarch *gdbarch)
 static struct gdbarch *
 bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch_tdep *tdep;
-  struct gdbarch *gdbarch;
   enum bfin_abi abi;
 
   abi = BFIN_ABI_FLAT;
@@ -806,19 +788,25 @@ bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
        arches != NULL;
        arches = gdbarch_list_lookup_by_info (arches->next, &info))
     {
-      if (gdbarch_tdep (arches->gdbarch)->bfin_abi != abi)
+      bfin_gdbarch_tdep *tdep
+	= gdbarch_tdep<bfin_gdbarch_tdep> (arches->gdbarch);
+
+      if (tdep->bfin_abi != abi)
 	continue;
+
       return arches->gdbarch;
     }
 
-  tdep = XCNEW (struct gdbarch_tdep);
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new bfin_gdbarch_tdep));
+  bfin_gdbarch_tdep *tdep = gdbarch_tdep<bfin_gdbarch_tdep> (gdbarch);
 
   tdep->bfin_abi = abi;
 
   set_gdbarch_num_regs (gdbarch, BFIN_NUM_REGS);
   set_gdbarch_pseudo_register_read (gdbarch, bfin_pseudo_register_read);
-  set_gdbarch_pseudo_register_write (gdbarch, bfin_pseudo_register_write);
+  set_gdbarch_deprecated_pseudo_register_write (gdbarch,
+						bfin_pseudo_register_write);
   set_gdbarch_num_pseudo_regs (gdbarch, BFIN_NUM_PSEUDO_REGS);
   set_gdbarch_sp_regnum (gdbarch, BFIN_SP_REGNUM);
   set_gdbarch_pc_regnum (gdbarch, BFIN_PC_REGNUM);
@@ -826,7 +814,6 @@ bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_dwarf2_reg_to_regnum (gdbarch, bfin_reg_to_regnum);
   set_gdbarch_register_name (gdbarch, bfin_register_name);
   set_gdbarch_register_type (gdbarch, bfin_register_type);
-  set_gdbarch_dummy_id (gdbarch, bfin_dummy_id);
   set_gdbarch_push_dummy_call (gdbarch, bfin_push_dummy_call);
   set_gdbarch_believe_pcc_promotion (gdbarch, 1);
   set_gdbarch_return_value (gdbarch, bfin_return_value);
@@ -836,7 +823,6 @@ bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_sw_breakpoint_from_kind (gdbarch, bfin_sw_breakpoint_from_kind);
   set_gdbarch_decr_pc_after_break (gdbarch, 2);
   set_gdbarch_frame_args_skip (gdbarch, 8);
-  set_gdbarch_unwind_pc (gdbarch, bfin_unwind_pc);
   set_gdbarch_frame_align (gdbarch, bfin_frame_align);
 
   /* Hook in ABI-specific overrides, if they have been registered.  */
@@ -851,8 +837,9 @@ bfin_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   return gdbarch;
 }
 
+void _initialize_bfin_tdep ();
 void
-_initialize_bfin_tdep (void)
+_initialize_bfin_tdep ()
 {
-  register_gdbarch_init (bfd_arch_bfin, bfin_gdbarch_init);
+  gdbarch_register (bfd_arch_bfin, bfin_gdbarch_init);
 }

@@ -1,4 +1,4 @@
-# Copyright 2012-2019 Free Software Foundation, Inc.
+# Copyright 2012-2024 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,8 @@
 
 load_lib "ada.exp"
 
+require allow_ada_tests
+
 standard_ada_testfile a
 
 if {[gdb_compile_ada "${srcfile}" "${binfile}" executable [list debug ]] != "" } {
@@ -24,8 +26,7 @@ if {[gdb_compile_ada "${srcfile}" "${binfile}" executable [list debug ]] != "" }
 clean_restart ${testfile}
 
 set bp_location [gdb_get_line_number "STOP" ${testdir}/a.adb]
-if ![runto "a.adb:$bp_location" ] then {
-  perror "Couldn't run ${testfile}"
+if {![runto "a.adb:$bp_location"]} {
   return
 }
 
@@ -72,3 +73,8 @@ gdb_test "print rws" \
 
 gdb_test "set variable www := \"1#2#3#4#5#\"" \
          "cannot assign arrays of different length"
+
+# However, reassigning an array of a different length should work when
+# the LHS is a convenience variable.
+gdb_test_no_output "set variable \$str := \"1234\""
+gdb_test_no_output "set variable \$str := \"12345\""

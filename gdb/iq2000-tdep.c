@@ -1,7 +1,7 @@
 /* Target-dependent code for the IQ2000 architecture, for GDB, the GNU
    Debugger.
 
-   Copyright (C) 2000-2019 Free Software Foundation, Inc.
+   Copyright (C) 2000-2024 Free Software Foundation, Inc.
 
    Contributed by Red Hat.
 
@@ -20,11 +20,11 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "gdbtypes.h"
 #include "value.h"
 #include "dis-asm.h"
@@ -89,13 +89,13 @@ iq2000_pointer_to_address (struct gdbarch *gdbarch,
 			   struct type * type, const gdb_byte * buf)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  enum type_code target = TYPE_CODE (TYPE_TARGET_TYPE (type));
+  enum type_code target = type->target_type ()->code ();
   CORE_ADDR addr
-    = extract_unsigned_integer (buf, TYPE_LENGTH (type), byte_order);
+    = extract_unsigned_integer (buf, type->length (), byte_order);
 
   if (target == TYPE_CODE_FUNC
       || target == TYPE_CODE_METHOD
-      || TYPE_CODE_SPACE (TYPE_TARGET_TYPE (type)))
+      || TYPE_CODE_SPACE (type->target_type ()))
     addr = insn_addr_from_ptr (addr);
 
   return addr;
@@ -109,11 +109,11 @@ iq2000_address_to_pointer (struct gdbarch *gdbarch,
 			   struct type *type, gdb_byte *buf, CORE_ADDR addr)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  enum type_code target = TYPE_CODE (TYPE_TARGET_TYPE (type));
+  enum type_code target = type->target_type ()->code ();
 
   if (target == TYPE_CODE_FUNC || target == TYPE_CODE_METHOD)
     addr = insn_ptr_from_addr (addr);
-  store_unsigned_integer (buf, TYPE_LENGTH (type), byte_order, addr);
+  store_unsigned_integer (buf, type->length (), byte_order, addr);
 }
 
 /* Real register methods: */
@@ -135,8 +135,7 @@ iq2000_register_name (struct gdbarch *gdbarch, int regnum)
       "r30", "r31",
       "pc"
     };
-  if (regnum < 0 || regnum >= E_NUM_REGS)
-    return NULL;
+  static_assert (ARRAY_SIZE (names) == E_NUM_REGS);
   return names[regnum];
 }
 
@@ -199,7 +198,7 @@ static CORE_ADDR
 iq2000_scan_prologue (struct gdbarch *gdbarch,
 		      CORE_ADDR scan_start,
 		      CORE_ADDR scan_end,
-		      struct frame_info *fi,
+		      const frame_info_ptr &fi,
 		      struct iq2000_frame_cache *cache)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -239,7 +238,7 @@ iq2000_scan_prologue (struct gdbarch *gdbarch,
     {
       LONGEST insn = read_memory_unsigned_integer (pc, 4, byte_order);
       /* Skip any instructions writing to (sp) or decrementing the
-         SP.  */
+	 SP.  */
       if ((insn & 0xffe00000) == 0xac200000)
 	{
 	  /* sw using SP/%1 as base.  */
@@ -298,8 +297,8 @@ iq2000_scan_prologue (struct gdbarch *gdbarch,
 	}
 
       /* Unknown instruction encountered in frame.  Bail out?
-         1) If we have a subsequent line symbol, we can keep going.
-         2) If not, we need to bail out and quit scanning instructions.  */
+	 1) If we have a subsequent line symbol, we can keep going.
+	 2) If not, we need to bail out and quit scanning instructions.  */
 
       if (fi && sal.end && (pc < sal.end)) /* Keep scanning.  */
 	continue;
@@ -359,7 +358,7 @@ iq2000_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 }
 
 static struct iq2000_frame_cache *
-iq2000_frame_cache (struct frame_info *this_frame, void **this_cache)
+iq2000_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct iq2000_frame_cache *cache;
@@ -392,7 +391,7 @@ iq2000_frame_cache (struct frame_info *this_frame, void **this_cache)
 }
 
 static struct value *
-iq2000_frame_prev_register (struct frame_info *this_frame, void **this_cache,
+iq2000_frame_prev_register (const frame_info_ptr &this_frame, void **this_cache,
 			    int regnum)
 {
   struct iq2000_frame_cache *cache = iq2000_frame_cache (this_frame,
@@ -406,13 +405,13 @@ iq2000_frame_prev_register (struct frame_info *this_frame, void **this_cache,
 
   if (regnum < E_NUM_REGS && cache->saved_regs[regnum] != -1)
     return frame_unwind_got_memory (this_frame, regnum,
-                                    cache->saved_regs[regnum]);
+				    cache->saved_regs[regnum]);
 
   return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
 static void
-iq2000_frame_this_id (struct frame_info *this_frame, void **this_cache,
+iq2000_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		      struct frame_id *this_id)
 {
   struct iq2000_frame_cache *cache = iq2000_frame_cache (this_frame,
@@ -426,6 +425,7 @@ iq2000_frame_this_id (struct frame_info *this_frame, void **this_cache,
 }
 
 static const struct frame_unwind iq2000_frame_unwind = {
+  "iq2000 prologue",
   NORMAL_FRAME,
   default_frame_unwind_stop_reason,
   iq2000_frame_this_id,
@@ -435,26 +435,7 @@ static const struct frame_unwind iq2000_frame_unwind = {
 };
 
 static CORE_ADDR
-iq2000_unwind_sp (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, E_SP_REGNUM);
-}   
-
-static CORE_ADDR
-iq2000_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, E_PC_REGNUM);
-}
-
-static struct frame_id
-iq2000_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  CORE_ADDR sp = get_frame_register_unsigned (this_frame, E_SP_REGNUM);
-  return frame_id_build (sp, get_frame_pc (this_frame));
-}
-
-static CORE_ADDR
-iq2000_frame_base_address (struct frame_info *this_frame, void **this_cache)
+iq2000_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct iq2000_frame_cache *cache = iq2000_frame_cache (this_frame,
 							 this_cache);
@@ -500,7 +481,7 @@ static void
 iq2000_store_return_value (struct type *type, struct regcache *regcache,
 			   const void *valbuf)
 {
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
   int regno = E_FN_RETURN_REGNUM;
 
   while (len > 0)
@@ -523,9 +504,9 @@ iq2000_store_return_value (struct type *type, struct regcache *regcache,
 static int
 iq2000_use_struct_convention (struct type *type)
 {
-  return ((TYPE_CODE (type) == TYPE_CODE_STRUCT)
-	  || (TYPE_CODE (type) == TYPE_CODE_UNION))
-	 && TYPE_LENGTH (type) > 8;
+  return ((type->code () == TYPE_CODE_STRUCT)
+	  || (type->code () == TYPE_CODE_UNION))
+	 && type->length () > 8;
 }
 
 /* Function: extract_return_value
@@ -546,7 +527,7 @@ iq2000_extract_return_value (struct type *type, struct regcache *regcache,
      returned in a register, and if larger than 8 bytes, it is 
      returned in a stack location which is pointed to by the same
      register.  */
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
 
   if (len <= (2 * 4))
     {
@@ -574,7 +555,7 @@ iq2000_extract_return_value (struct type *type, struct regcache *regcache,
       ULONGEST return_buffer;
       regcache_cooked_read_unsigned (regcache, E_FN_RETURN_REGNUM,
 				     &return_buffer);
-      read_memory (return_buffer, valbuf, TYPE_LENGTH (type));
+      read_memory (return_buffer, valbuf, type->length ());
     }
 }
 
@@ -616,26 +597,26 @@ iq2000_pass_8bytetype_by_address (struct type *type)
   struct type *ftype;
 
   /* Skip typedefs.  */
-  while (TYPE_CODE (type) == TYPE_CODE_TYPEDEF)
-    type = TYPE_TARGET_TYPE (type);
+  while (type->code () == TYPE_CODE_TYPEDEF)
+    type = type->target_type ();
   /* Non-struct and non-union types are always passed by value.  */
-  if (TYPE_CODE (type) != TYPE_CODE_STRUCT
-      && TYPE_CODE (type) != TYPE_CODE_UNION)
+  if (type->code () != TYPE_CODE_STRUCT
+      && type->code () != TYPE_CODE_UNION)
     return 0;
   /* Structs with more than 1 field are always passed by address.  */
-  if (TYPE_NFIELDS (type) != 1)
+  if (type->num_fields () != 1)
     return 1;
   /* Get field type.  */
-  ftype = (TYPE_FIELDS (type))[0].type;
+  ftype = type->field (0).type ();
   /* The field type must have size 8, otherwise pass by address.  */
-  if (TYPE_LENGTH (ftype) != 8)
+  if (ftype->length () != 8)
     return 1;
   /* Skip typedefs of field type.  */
-  while (TYPE_CODE (ftype) == TYPE_CODE_TYPEDEF)
-    ftype = TYPE_TARGET_TYPE (ftype);
+  while (ftype->code () == TYPE_CODE_TYPEDEF)
+    ftype = ftype->target_type ();
   /* If field is int or float, pass by value.  */
-  if (TYPE_CODE (ftype) == TYPE_CODE_FLT
-      || TYPE_CODE (ftype) == TYPE_CODE_INT)
+  if (ftype->code () == TYPE_CODE_FLT
+      || ftype->code () == TYPE_CODE_INT)
     return 0;
   /* Everything else, pass by address.  */
   return 1;
@@ -643,8 +624,8 @@ iq2000_pass_8bytetype_by_address (struct type *type)
 
 static CORE_ADDR
 iq2000_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
-		        struct regcache *regcache, CORE_ADDR bp_addr,
-		        int nargs, struct value **args, CORE_ADDR sp,
+			struct regcache *regcache, CORE_ADDR bp_addr,
+			int nargs, struct value **args, CORE_ADDR sp,
 			function_call_return_method return_method,
 			CORE_ADDR struct_addr)
 {
@@ -662,48 +643,48 @@ iq2000_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
        i < nargs;
        i++)
     {
-      type = value_type (args[i]);
-      typelen = TYPE_LENGTH (type);
+      type = args[i]->type ();
+      typelen = type->length ();
       if (typelen <= 4)
-        {
-          /* Scalars of up to 4 bytes, 
-             structs of up to 4 bytes, and
-             pointers.  */
-          if (argreg <= E_LAST_ARGREG)
-            argreg++;
-          else
-            stackspace += 4;
-        }
+	{
+	  /* Scalars of up to 4 bytes, 
+	     structs of up to 4 bytes, and
+	     pointers.  */
+	  if (argreg <= E_LAST_ARGREG)
+	    argreg++;
+	  else
+	    stackspace += 4;
+	}
       else if (typelen == 8 && !iq2000_pass_8bytetype_by_address (type))
-        {
-          /* long long, 
-             double, and possibly
-             structs with a single field of long long or double.  */
-          if (argreg <= E_LAST_ARGREG - 1)
-            {
-              /* 8-byte arg goes into a register pair
-                 (must start with an even-numbered reg).  */
-              if (((argreg - E_1ST_ARGREG) % 2) != 0)
-                argreg ++;
-              argreg += 2;
-            }
-          else
-            {
-              argreg = E_LAST_ARGREG + 1;       /* no more argregs.  */
-              /* 8-byte arg goes on stack, must be 8-byte aligned.  */
-              stackspace = ((stackspace + 7) & ~7);
-              stackspace += 8;
-            }
-        }
+	{
+	  /* long long, 
+	     double, and possibly
+	     structs with a single field of long long or double.  */
+	  if (argreg <= E_LAST_ARGREG - 1)
+	    {
+	      /* 8-byte arg goes into a register pair
+		 (must start with an even-numbered reg).  */
+	      if (((argreg - E_1ST_ARGREG) % 2) != 0)
+		argreg ++;
+	      argreg += 2;
+	    }
+	  else
+	    {
+	      argreg = E_LAST_ARGREG + 1;       /* no more argregs.  */
+	      /* 8-byte arg goes on stack, must be 8-byte aligned.  */
+	      stackspace = ((stackspace + 7) & ~7);
+	      stackspace += 8;
+	    }
+	}
       else
 	{
 	  /* Structs are passed as pointer to a copy of the struct.
 	     So we need room on the stack for a copy of the struct
 	     plus for the argument pointer.  */
-          if (argreg <= E_LAST_ARGREG)
-            argreg++;
-          else
-            stackspace += 4;
+	  if (argreg <= E_LAST_ARGREG)
+	    argreg++;
+	  else
+	    stackspace += 4;
 	  /* Care for 8-byte alignment of structs saved on stack.  */
 	  stackspace += ((typelen + 7) & ~7);
 	}
@@ -728,51 +709,51 @@ iq2000_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
   for (i = 0; i < nargs; i++)
     {
-      type = value_type (args[i]);
-      typelen = TYPE_LENGTH (type);
-      val = value_contents (args[i]);
+      type = args[i]->type ();
+      typelen = type->length ();
+      val = args[i]->contents ().data ();
       if (typelen <= 4)
-        {
-          /* Char, short, int, float, pointer, and structs <= four bytes.  */
+	{
+	  /* Char, short, int, float, pointer, and structs <= four bytes.  */
 	  slacklen = (4 - (typelen % 4)) % 4;
 	  memset (buf, 0, sizeof (buf));
 	  memcpy (buf + slacklen, val, typelen);
-          if (argreg <= E_LAST_ARGREG)
-            {
-              /* Passed in a register.  */
+	  if (argreg <= E_LAST_ARGREG)
+	    {
+	      /* Passed in a register.  */
 	      regcache->raw_write (argreg++, buf);
-            }
-          else
-            {
-              /* Passed on the stack.  */
-              write_memory (sp + stackspace, buf, 4);
-              stackspace += 4;
-            }
-        }
+	    }
+	  else
+	    {
+	      /* Passed on the stack.  */
+	      write_memory (sp + stackspace, buf, 4);
+	      stackspace += 4;
+	    }
+	}
       else if (typelen == 8 && !iq2000_pass_8bytetype_by_address (type))
-        {
-          /* (long long), (double), or struct consisting of 
-             a single (long long) or (double).  */
-          if (argreg <= E_LAST_ARGREG - 1)
-            {
-              /* 8-byte arg goes into a register pair
-                 (must start with an even-numbered reg).  */
-              if (((argreg - E_1ST_ARGREG) % 2) != 0)
-                argreg++;
+	{
+	  /* (long long), (double), or struct consisting of 
+	     a single (long long) or (double).  */
+	  if (argreg <= E_LAST_ARGREG - 1)
+	    {
+	      /* 8-byte arg goes into a register pair
+		 (must start with an even-numbered reg).  */
+	      if (((argreg - E_1ST_ARGREG) % 2) != 0)
+		argreg++;
 	      regcache->raw_write (argreg++, val);
 	      regcache->raw_write (argreg++, val + 4);
-            }
-          else
-            {
-              /* 8-byte arg goes on stack, must be 8-byte aligned.  */
-              argreg = E_LAST_ARGREG + 1;       /* no more argregs.  */
-              stackspace = ((stackspace + 7) & ~7);
-              write_memory (sp + stackspace, val, typelen);
-              stackspace += 8;
-            }
-        }
+	    }
+	  else
+	    {
+	      /* 8-byte arg goes on stack, must be 8-byte aligned.  */
+	      argreg = E_LAST_ARGREG + 1;       /* no more argregs.  */
+	      stackspace = ((stackspace + 7) & ~7);
+	      write_memory (sp + stackspace, val, typelen);
+	      stackspace += 8;
+	    }
+	}
       else
-        {
+	{
 	  /* Store struct beginning at the upper end of the previously
 	     computed stack space.  Then store the address of the struct
 	     using the usual rules for a 4 byte value.  */
@@ -786,7 +767,7 @@ iq2000_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	      write_memory (sp + stackspace, buf, 4);
 	      stackspace += 4;
 	    }
-        }
+	}
     }
 
   /* Store return address.  */
@@ -843,9 +824,6 @@ iq2000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_inner_than           (gdbarch, core_addr_lessthan);
   set_gdbarch_register_type (gdbarch, iq2000_register_type);
   set_gdbarch_frame_align (gdbarch, iq2000_frame_align);
-  set_gdbarch_unwind_sp (gdbarch, iq2000_unwind_sp);
-  set_gdbarch_unwind_pc (gdbarch, iq2000_unwind_pc);
-  set_gdbarch_dummy_id (gdbarch, iq2000_dummy_id);
   frame_base_set_default (gdbarch, &iq2000_frame_base);
   set_gdbarch_push_dummy_call (gdbarch, iq2000_push_dummy_call);
 
@@ -861,8 +839,9 @@ iq2000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
    Initializer function for the iq2000 module.
    Called by gdb at start-up.  */
 
+void _initialize_iq2000_tdep ();
 void
-_initialize_iq2000_tdep (void)
+_initialize_iq2000_tdep ()
 {
-  register_gdbarch_init (bfd_arch_iq2000, iq2000_gdbarch_init);
+  gdbarch_register (bfd_arch_iq2000, iq2000_gdbarch_init);
 }

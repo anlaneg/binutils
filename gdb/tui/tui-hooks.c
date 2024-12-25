@@ -1,6 +1,6 @@
 /* GDB hooks for TUI.
 
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,21 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include "inferior.h"
-#include "command.h"
-#include "bfd.h"
 #include "symfile.h"
 #include "objfiles.h"
 #include "target.h"
-#include "gdbcore.h"
-#include "event-loop.h"
-#include "event-top.h"
 #include "frame.h"
 #include "breakpoint.h"
-#include "ui-out.h"
-#include "top.h"
 #include "observable.h"
 #include "source.h"
 #include <unistd.h>
@@ -39,21 +31,10 @@
 
 #include "tui/tui.h"
 #include "tui/tui-hooks.h"
-#include "tui/tui-data.h"
 #include "tui/tui-layout.h"
-#include "tui/tui-io.h"
 #include "tui/tui-regs.h"
-#include "tui/tui-win.h"
-#include "tui/tui-stack.h"
-#include "tui/tui-windata.h"
+#include "tui/tui-status.h"
 #include "tui/tui-winsource.h"
-
-#include "gdb_curses.h"
-
-/* This redefines CTRL if it is not already defined, so it must come
-   after terminal state releated include files like <term.h> and
-   "gdb_curses.h".  */
-#include "readline/readline.h"
 
 static void
 tui_new_objfile_hook (struct objfile* objfile)
@@ -62,15 +43,15 @@ tui_new_objfile_hook (struct objfile* objfile)
     tui_display_main ();
 }
 
-/* Prevent recursion of deprecated_register_changed_hook().  */
-static int tui_refreshing_registers = 0;
-
 /* Observer for the register_changed notification.  */
 
 static void
-tui_register_changed (struct frame_info *frame, int regno)
+tui_register_changed (const frame_info_ptr &frame, int regno)
 {
-  struct frame_info *fi;
+  frame_info_ptr fi;
+
+  if (!tui_is_window_visible (DATA_WIN))
+    return;
 
   /* The frame of the register that was changed may differ from the selected
      frame, but we only want to show the register values of the selected frame.
@@ -78,12 +59,7 @@ tui_register_changed (struct frame_info *frame, int regno)
      up in the other.  So we always use the selected frame here, and ignore
      FRAME.  */
   fi = get_selected_frame (NULL);
-  if (tui_refreshing_registers == 0)
-    {
-      tui_refreshing_registers = 1;
-      tui_check_data_values (fi);
-      tui_refreshing_registers = 0;
-    }
+  tui_data_win ()->check_register_values (fi);
 }
 
 /* Breakpoint creation hook.
@@ -91,7 +67,7 @@ tui_register_changed (struct frame_info *frame, int regno)
 static void
 tui_event_create_breakpoint (struct breakpoint *b)
 {
-  tui_update_all_breakpoint_info ();
+  tui_update_all_breakpoint_info (nullptr);
 }
 
 /* Breakpoint deletion hook.
@@ -99,62 +75,61 @@ tui_event_create_breakpoint (struct breakpoint *b)
 static void
 tui_event_delete_breakpoint (struct breakpoint *b)
 {
-  tui_update_all_breakpoint_info ();
+  tui_update_all_breakpoint_info (b);
 }
 
 static void
 tui_event_modify_breakpoint (struct breakpoint *b)
 {
-  tui_update_all_breakpoint_info ();
+  tui_update_all_breakpoint_info (nullptr);
 }
 
-/* Refresh TUI's frame and register information.  This is a hook intended to be
-   used to update the screen after potential frame and register changes.
+/* This is set to true if the next window refresh should come from the
+   current stack frame.  */
 
-   REGISTERS_TOO_P controls whether to refresh our register information even
-   if frame information hasn't changed.  */
+static bool from_stack;
+
+/* This is set to true if the next window refresh should come from the
+   current source symtab.  */
+
+static bool from_source_symtab;
+
+/* Refresh TUI's frame and register information.  This is a hook intended to be
+   used to update the screen after potential frame and register changes.  */
 
 static void
-tui_refresh_frame_and_register_information (int registers_too_p)
+tui_refresh_frame_and_register_information ()
 {
-  struct frame_info *fi;
-  CORE_ADDR pc;
-  int frame_info_changed_p;
-
-  if (!has_stack_frames ())
+  if (!from_stack && !from_source_symtab)
     return;
 
   target_terminal::scoped_restore_terminal_state term_state;
   target_terminal::ours_for_output ();
 
-  fi = get_selected_frame (NULL);
-  /* Ensure that symbols for this frame are read in.  Also, determine
-     the source language of this frame, and switch to it if
-     desired.  */
-  if (get_frame_pc_if_available (fi, &pc))
+  if (from_stack)
     {
-      struct symtab *s;
+      frame_info_ptr fi;
+      if (has_stack_frames ())
+	{
+	  fi = get_selected_frame (NULL);
 
-      s = find_pc_line_symtab (pc);
-      /* elz: This if here fixes the problem with the pc not being
-	 displayed in the tui asm layout, with no debug symbols.  The
-	 value of s would be 0 here, and select_source_symtab would
-	 abort the command by calling the 'error' function.  */
-      if (s)
-	select_source_symtab (s);
+	  /* Display the frame position (even if there is no symbols or
+	     the PC is not known).  */
+	  tui_show_frame_info (fi);
+	}
+
+      /* Refresh the register window if it's visible.  */
+      if (tui_is_window_visible (DATA_WIN))
+	tui_data_win ()->check_register_values (fi);
     }
-
-  /* Display the frame position (even if there is no symbols or the PC
-     is not known).  */
-  frame_info_changed_p = tui_show_frame_info (fi);
-
-  /* Refresh the register window if it's visible.  */
-  if (tui_is_window_visible (DATA_WIN)
-      && (frame_info_changed_p || registers_too_p))
+  else
     {
-      tui_refreshing_registers = 1;
-      tui_check_data_values (fi);
-      tui_refreshing_registers = 0;
+      /* Make sure that the source window is displayed.  */
+      tui_add_win_to_layout (SRC_WIN);
+
+      symtab_and_line sal
+	= get_current_source_symtab_and_line (current_program_space);
+      tui_update_source_windows_with_line (sal);
     }
 }
 
@@ -179,6 +154,7 @@ tui_inferior_exit (struct inferior *inf)
   tui_set_key_mode (TUI_COMMAND_MODE);
   tui_show_frame_info (0);
   tui_display_main ();
+  from_stack = true;
 }
 
 /* Observer for the before_prompt notification.  */
@@ -186,22 +162,33 @@ tui_inferior_exit (struct inferior *inf)
 static void
 tui_before_prompt (const char *current_gdb_prompt)
 {
-  /* This refresh is intended to catch changes to the selected frame following
-     a call to "up", "down" or "frame".  As such we don't necessarily want to
-     refresh registers here unless the frame actually changed by one of these
-     commands.  Registers will otherwise be refreshed after a normal stop or by
-     our tui_register_changed_hook.  */
-  tui_refresh_frame_and_register_information (/*registers_too_p=*/0);
+  tui_refresh_frame_and_register_information ();
+  from_stack = false;
+  from_source_symtab = false;
 }
 
 /* Observer for the normal_stop notification.  */
 
 static void
-tui_normal_stop (struct bpstats *bs, int print_frame)
+tui_normal_stop (struct bpstat *bs, int print_frame)
 {
-  /* This refresh is intended to catch changes to the selected frame and to
-     registers following a normal stop.  */
-  tui_refresh_frame_and_register_information (/*registers_too_p=*/1);
+  from_stack = true;
+}
+
+/* Observer for user_selected_context_changed.  */
+
+static void
+tui_context_changed (user_selected_what ignore)
+{
+  from_stack = true;
+}
+
+/* Observer for current_source_symtab_and_line_changed.  */
+
+static void
+tui_symtab_changed ()
+{
+  from_source_symtab = true;
 }
 
 /* Token associated with observers registered while TUI hooks are
@@ -215,7 +202,7 @@ static void
 attach_or_detach (T &observable, typename T::func_type func, bool attach)
 {
   if (attach)
-    observable.attach (func, tui_observers_token);
+    observable.attach (func, tui_observers_token, "tui-hooks");
   else
     observable.detach (tui_observers_token);
 }
@@ -239,6 +226,10 @@ tui_attach_detach_observers (bool attach)
 		    tui_normal_stop, attach);
   attach_or_detach (gdb::observers::register_changed,
 		    tui_register_changed, attach);
+  attach_or_detach (gdb::observers::user_selected_context_changed,
+		    tui_context_changed, attach);
+  attach_or_detach (gdb::observers::current_source_symtab_and_line_changed,
+		    tui_symtab_changed, attach);
 }
 
 /* Install the TUI specific hooks.  */
@@ -261,15 +252,15 @@ void
 tui_remove_hooks (void)
 {
   deprecated_print_frame_info_listing_hook = 0;
-  deprecated_query_hook = 0;
 
   /* Remove our observers.  */
   tui_attach_detach_observers (false);
 }
 
+void _initialize_tui_hooks ();
 void
-_initialize_tui_hooks (void)
+_initialize_tui_hooks ()
 {
   /* Install the permanent hooks.  */
-  gdb::observers::new_objfile.attach (tui_new_objfile_hook);
+  gdb::observers::new_objfile.attach (tui_new_objfile_hook, "tui-hooks");
 }

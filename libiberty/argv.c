@@ -1,5 +1,5 @@
 /* Create and destroy argument vectors (argv's)
-   Copyright (C) 1992-2019 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
    Written by Fred Fish @ Cygnus Support
 
 This file is part of the libiberty library.
@@ -124,16 +124,6 @@ consume_whitespace (const char **input)
     }
 }
 
-/*input字符串是否全为空字符*/
-static int
-only_whitespace (const char* input)
-{
-  while (*input != EOS && ISSPACE (*input))
-    input++;
-
-  return (*input == EOS);
-}
-
 /*
 
 @deftypefn Extension char** buildargv (char *@var{sp})
@@ -217,72 +207,77 @@ char **buildargv (const char *input)
 	      argv[argc] = NULL;
 	    }
 	  /* Begin scanning arg */
-	  arg = copybuf;
-	  while (*input != EOS)
+	  if (*input != EOS)
 	    {
-	      if (ISSPACE (*input) && !squote && !dquote && !bsquote)
+	      arg = copybuf;
+	      while (*input != EOS)
 		{
-	          /*遇到空字符，且不处于 单引号，双引号，转议状态中，则当前单个参数复制结束，跳出*/
-		  break;
-		}
-	      else
-		{
-		  if (bsquote)
+		  if (ISSPACE (*input) && !squote && !dquote && !bsquote)
 		    {
-		      bsquote = 0;/*关闭转义*/
-		      *arg++ = *input;/*复制被转议字符*/
-		    }
-		  else if (*input == '\\')
-		    {
-		      bsquote = 1;/*指明遇到转义*/
-		    }
-		  else if (squote)
-		    {
-		      /*单引号处理*/
-		      if (*input == '\'')
-			{
-			  squote = 0;/*单引号结束*/
-			}
-		      else
-			{
-			  *arg++ = *input;/*单引号未结束，直接复制*/
-			}
-		    }
-		  else if (dquote)
-		    {
-		      /*双引号处理*/
-		      if (*input == '"')
-			{
-			  dquote = 0;/*双引号结束*/
-			}
-		      else
-			{
-			  *arg++ = *input;/*双引号未结束，直接复制*/
-			}
+		      break;
 		    }
 		  else
 		    {
-		      /*检查是否首次遇到 单引号，双引号*/
-		      if (*input == '\'')
+		      if (bsquote)
 			{
-			  squote = 1;
+			  bsquote = 0;/*关闭转义*/
+			  if (*input != '\n')
+			    *arg++ = *input;/*复制被转议字符*/
 			}
-		      else if (*input == '"')
+		      else if (*input == '\\'
+			       && !squote
+			       && (!dquote
+				   || strchr ("$`\"\\\n", *(input + 1)) != NULL))
 			{
-			  dquote = 1;
+			  bsquote = 1;/*指明遇到转义*/
+			}
+		      else if (squote)
+			{
+		          /*单引号处理*/
+			  if (*input == '\'')
+			    {
+			      squote = 0;/*单引号结束*/
+			    }
+			  else
+			    {
+			      *arg++ = *input;/*单引号未结束，直接复制*/
+			    }
+			}
+		      else if (dquote)
+			{
+		          /*双引号处理*/
+			  if (*input == '"')
+			    {
+			      dquote = 0;/*双引号结束*/
+			    }
+			  else
+			    {
+			      *arg++ = *input;/*双引号未结束，直接复制*/
+			    }
 			}
 		      else
 			{
-			  *arg++ = *input;
+		          /*检查是否首次遇到 单引号，双引号*/
+			  if (*input == '\'')
+			    {
+			      squote = 1;
+			    }
+			  else if (*input == '"')
+			    {
+			      dquote = 1;
+			    }
+			  else
+			    {
+			      *arg++ = *input;
+			    }
 			}
+		      input++;
 		    }
-		  input++;
 		}
+	      *arg = EOS;/*参数置结尾符*/
+	      argv[argc] = xstrdup (copybuf);/*填写分析成功的一个参数*/
+	      argc++;
 	    }
-
-	  *arg = EOS;/*参数置结尾符*/
-	  argv[argc] = xstrdup (copybuf);/*填写分析成功的一个参数*/
-	  argc++;
 	  argv[argc] = NULL;
 
 	  /*跳过后置的空字符*/
@@ -300,8 +295,8 @@ char **buildargv (const char *input)
 @deftypefn Extension int writeargv (char * const *@var{argv}, FILE *@var{file})
 
 Write each member of ARGV, handling all necessary quoting, to the file
-named by FILE, separated by whitespace.  Return 0 on success, non-zero
-if an error occurred while writing to FILE.
+associated with FILE, separated by whitespace.  Return 0 on success,
+non-zero if an error occurred while writing to FILE.
 
 @end deftypefn
 
@@ -310,8 +305,6 @@ if an error occurred while writing to FILE.
 int
 writeargv (char * const *argv, FILE *f)
 {
-  int status = 0;
-
   if (f == NULL)
     return 1;
 
@@ -325,29 +318,26 @@ writeargv (char * const *argv, FILE *f)
 
           if (ISSPACE(c) || c == '\\' || c == '\'' || c == '"')
             if (EOF == fputc ('\\', f))
-              {
-                status = 1;
-                goto done;
-              }
+              return 1;
 
           if (EOF == fputc (c, f))
-            {
-              status = 1;
-              goto done;
-            }
+            return 1;
+	  
           arg++;
         }
 
+      /* Write out a pair of quotes for an empty argument.  */
+      if (arg == *argv)
+        if (EOF == fputs ("\"\"", f))
+          return 1;
+
       if (EOF == fputc ('\n', f))
-        {
-          status = 1;
-          goto done;
-        }
+        return 1;
+      
       argv++;
     }
 
- done:
-  return status;
+  return 0;
 }
 
 /*
@@ -452,22 +442,14 @@ expandargv (int *argcp, char ***argvp/*出参，合入file_argv*/)
 	     due to CR/LF->CR translation when reading text files.
 	     That does not in-and-of itself indicate failure.  */
 	  && ferror (f))
-          /*读取内容失败*/
-	goto error;
+	{
+	  free (buffer);
+	  goto error;
+	}
       /* Add a NUL terminator.  */
       buffer[len] = '\0';
-      /* If the file is empty or contains only whitespace, buildargv would
-	 return a single empty argument.  In this context we want no arguments,
-	 instead.  */
-      if (only_whitespace (buffer))
-	{
-          /*buffer为空，参数置为空*/
-	  file_argv = (char **) xmalloc (sizeof (char *));
-	  file_argv[0] = NULL;
-	}
-      else
-	/* Parse the string.  */
-	file_argv = buildargv (buffer);/*将buffer拆解成argv形式*/
+      /* Parse the string.  */
+      file_argv = buildargv (buffer);
       /* If *ARGVP is not already dynamically allocated, copy it.  */
       if (*argvp == original_argv)
 	*argvp = dupargv (*argvp);

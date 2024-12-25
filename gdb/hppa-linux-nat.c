@@ -1,6 +1,6 @@
 /* Functions specific to running GDB native on HPPA running GNU/Linux.
 
-   Copyright (C) 2004-2019 Free Software Foundation, Inc.
+   Copyright (C) 2004-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "gdbcore.h"
 #include "regcache.h"
 #include "inferior.h"
 #include "target.h"
 #include "linux-nat.h"
 #include "inf-ptrace.h"
+#include "gdbarch.h"
 
 #include <sys/procfs.h>
 #include "nat/gdb_ptrace.h"
@@ -280,7 +280,7 @@ hppa_linux_nat_target::fetch_registers (struct regcache *regcache, int regno)
       for (regno = 0;
 	   regno < gdbarch_num_regs (regcache->arch ());
 	   regno++)
-        fetch_register (regcache, regno);
+	fetch_register (regcache, regno);
     }
   else 
     {
@@ -383,8 +383,9 @@ fill_fpregset (const struct regcache *regcache,
    }
 }
 
+void _initialize_hppa_linux_nat ();
 void
-_initialize_hppa_linux_nat (void)
+_initialize_hppa_linux_nat ()
 {
   /* Register the target.  */
   linux_target = &the_hppa_linux_nat_target;

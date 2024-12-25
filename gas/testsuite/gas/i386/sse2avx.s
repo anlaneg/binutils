@@ -1,11 +1,14 @@
 # Check SSE to AVX instructions
 
-	.allow_index_reg
 	.text
 _start:
 # Tests for op mem64
 	ldmxcsr (%ecx)
 	stmxcsr (%ecx)
+
+# These should not be converted
+	data16 ldmxcsr (%ecx)
+	data16 stmxcsr (%ecx)
 
 # Tests for op xmm/mem128, xmm
 	cvtdq2ps %xmm4,%xmm6
@@ -421,6 +424,7 @@ _start:
 	comisd (%ecx),%xmm4
 	cvtdq2pd %xmm4,%xmm6
 	cvtdq2pd (%ecx),%xmm4
+	cvtpi2pd (%ecx),%xmm4
 	cvtps2pd %xmm4,%xmm6
 	cvtps2pd (%ecx),%xmm4
 	movddup %xmm4,%xmm6
@@ -1082,6 +1086,7 @@ _start:
 	comisd xmm4,QWORD PTR [ecx]
 	cvtdq2pd xmm6,xmm4
 	cvtdq2pd xmm4,QWORD PTR [ecx]
+	cvtpi2pd xmm4,QWORD PTR [ecx]
 	cvtps2pd xmm6,xmm4
 	cvtps2pd xmm4,QWORD PTR [ecx]
 	movddup xmm6,xmm4

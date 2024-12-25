@@ -1,5 +1,5 @@
 /* Opcode table for the ARC.
-   Copyright (C) 1994-2019 Free Software Foundation, Inc.
+   Copyright (C) 1994-2024 Free Software Foundation, Inc.
 
    Contributed by Claudiu Zissulescu (claziss@synopsys.com)
 
@@ -52,6 +52,7 @@ typedef enum
   BRANCH,
   BRCC,
   CONTROL,
+  DBNZ,
   DIVREM,
   DMA,
   DPI,
@@ -64,6 +65,7 @@ typedef enum
   JUMP,
   KERNEL,
   LEAVE,
+  LLOCK,
   LOAD,
   LOGICAL,
   LOOP,
@@ -76,9 +78,11 @@ typedef enum
   PMU,
   POP,
   PUSH,
+  SCOND,
   SJLI,
   STORE,
   SUB,
+  SWITCH,
   ULTRAIP,
   XY
 } insn_class_t;
@@ -97,6 +101,7 @@ typedef enum
   DP       = (1U << 6),
   DPA      = (1U << 7),
   DPX      = (1U << 8),
+  FASTMATH = (1U << 23),
   LL64     = (1U << 9),
   MPY1E    = (1U << 10),
   MPY6E    = (1U << 11),
@@ -256,8 +261,7 @@ struct arc_operand
      TRUE if this operand type can not actually be extracted from
      this operand (i.e., the instruction does not match).  If the
      operand is valid, *INVALID will not be changed.  */
-  long long int (*extract) (unsigned long long instruction,
-                            bfd_boolean *invalid);
+  long long int (*extract) (unsigned long long instruction, bool *invalid);
 };
 
 /* Elements in the table are retrieved by indexing with values from

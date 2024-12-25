@@ -1,6 +1,6 @@
 /* Native-dependent code for SPARC.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef SPARC_NAT_H
-#define SPARC_NAT_H 1
+#ifndef GDB_SPARC_NAT_H
+#define GDB_SPARC_NAT_H
 
 #include "target.h"
 
@@ -41,8 +41,10 @@ extern int (*sparc_fpregset_supplies_p) (struct gdbarch *gdbarch, int);
 extern int sparc32_gregset_supplies_p (struct gdbarch *gdbarch, int regnum);
 extern int sparc32_fpregset_supplies_p (struct gdbarch *gdbarch, int regnum);
 
-extern void sparc_fetch_inferior_registers (struct regcache *, int);
-extern void sparc_store_inferior_registers (struct regcache *, int);
+extern void sparc_fetch_inferior_registers (process_stratum_target *proc_target,
+					    regcache *, int);
+extern void sparc_store_inferior_registers (process_stratum_target *proc_target,
+					    regcache *, int);
 
 extern target_xfer_status sparc_xfer_wcookie (enum target_object object,
 					      const char *annex,
@@ -59,10 +61,10 @@ template<typename BaseTarget>
 struct sparc_target : public BaseTarget
 {
   void fetch_registers (struct regcache *regcache, int regnum) override
-  { sparc_fetch_inferior_registers (regcache, regnum); }
+  { sparc_fetch_inferior_registers (this, regcache, regnum); }
 
   void store_registers (struct regcache *regcache, int regnum) override
-  { sparc_store_inferior_registers (regcache, regnum); }
+  { sparc_store_inferior_registers (this, regcache, regnum); }
 
   enum target_xfer_status xfer_partial (enum target_object object,
 					const char *annex,
@@ -75,9 +77,9 @@ struct sparc_target : public BaseTarget
       return sparc_xfer_wcookie (object, annex, readbuf, writebuf,
 				 offset, len, xfered_len);
 
-    return BaseTarget (object, annex, readbuf, writebuf,
-		       offset, len, xfered_len);
+    return BaseTarget::xfer_partial (object, annex, readbuf, writebuf,
+				     offset, len, xfered_len);
   }
 };
 
-#endif /* sparc-nat.h */
+#endif /* GDB_SPARC_NAT_H */

@@ -1,6 +1,6 @@
 /* gdb-if.c -- sim interface to GDB.
 
-Copyright (C) 2008-2019 Free Software Foundation, Inc.
+Copyright (C) 2008-2024 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -18,7 +18,9 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <stdio.h>
 #include <assert.h>
 #include <signal.h>
@@ -27,10 +29,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include <stdlib.h>
 
 #include "ansidecl.h"
-#include "gdb/callback.h"
-#include "gdb/remote-sim.h"
+#include "bfd.h"
+#include "libiberty.h"
+#include "sim/callback.h"
+#include "sim/sim.h"
 #include "gdb/signals.h"
-#include "gdb/sim-rx.h"
+#include "sim/sim-rx.h"
 
 #include "cpu.h"
 #include "mem.h"
@@ -164,14 +168,14 @@ build_swap_list (struct bfd *abfd)
 	  struct swap_list *sl;
 	  bfd_size_type size;
 
-	  size = bfd_get_section_size (s);
+	  size = bfd_section_size (s);
 	  if (size <= 0)
 	    continue;
 	  
 	  sl = malloc (sizeof (struct swap_list));
 	  assert (sl != NULL);
 	  sl->next = swap_list;
-	  sl->start = bfd_section_lma (abfd, s);
+	  sl->start = bfd_section_lma (s);
 	  sl->end = sl->start + size;
 	  swap_list = sl;
 	}
@@ -222,23 +226,24 @@ sim_create_inferior (SIM_DESC sd, struct bfd *abfd,
   return SIM_RC_OK;
 }
 
-int
-sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
+uint64_t
+sim_read (SIM_DESC sd, uint64_t addr, void *buffer, uint64_t length)
 {
   int i;
+  unsigned char *data = buffer;
 
   check_desc (sd);
 
-  if (mem == 0)
+  if (addr == 0)
     return 0;
 
   execution_error_clear_last_error ();
 
   for (i = 0; i < length; i++)
     {
-      bfd_vma addr = mem + i;
-      int do_swap = addr_in_swap_list (addr);
-      buf[i] = mem_get_qi (addr ^ (do_swap ? 3 : 0));
+      bfd_vma vma = addr + i;
+      int do_swap = addr_in_swap_list (vma);
+      data[i] = mem_get_qi (vma ^ (do_swap ? 3 : 0));
 
       if (execution_error_get_last_error () != SIM_ERR_NONE)
 	return i;
@@ -247,10 +252,11 @@ sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
   return length;
 }
 
-int
-sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
+uint64_t
+sim_write (SIM_DESC sd, uint64_t addr, const void *buffer, uint64_t length)
 {
   int i;
+  const unsigned char *data = buffer;
 
   check_desc (sd);
 
@@ -258,9 +264,9 @@ sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
 
   for (i = 0; i < length; i++)
     {
-      bfd_vma addr = mem + i;
-      int do_swap = addr_in_swap_list (addr);
-      mem_put_qi (addr ^ (do_swap ? 3 : 0), buf[i]);
+      bfd_vma vma = addr + i;
+      int do_swap = addr_in_swap_list (vma);
+      mem_put_qi (vma ^ (do_swap ? 3 : 0), data[i]);
 
       if (execution_error_get_last_error () != SIM_ERR_NONE)
 	return i;
@@ -271,7 +277,7 @@ sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
 
 /* Read the LENGTH bytes at BUF as an little-endian value.  */
 static DI
-get_le (unsigned char *buf, int length)
+get_le (const unsigned char *buf, int length)
 {
   DI acc = 0;
   while (--length >= 0)
@@ -282,7 +288,7 @@ get_le (unsigned char *buf, int length)
 
 /* Read the LENGTH bytes at BUF as a big-endian value.  */
 static DI
-get_be (unsigned char *buf, int length)
+get_be (const unsigned char *buf, int length)
 {
   DI acc = 0;
   while (length-- > 0)
@@ -417,7 +423,7 @@ reg_size (enum sim_rx_regnum regno)
 }
 
 int
-sim_fetch_register (SIM_DESC sd, int regno, unsigned char *buf, int length)
+sim_fetch_register (SIM_DESC sd, int regno, void *buf, int length)
 {
   size_t size;
   DI val;
@@ -527,7 +533,7 @@ sim_fetch_register (SIM_DESC sd, int regno, unsigned char *buf, int length)
 }
 
 int
-sim_store_register (SIM_DESC sd, int regno, unsigned char *buf, int length)
+sim_store_register (SIM_DESC sd, int regno, const void *buf, int length)
 {
   size_t size;
   DI val;
@@ -638,7 +644,7 @@ sim_store_register (SIM_DESC sd, int regno, unsigned char *buf, int length)
 }
 
 void
-sim_info (SIM_DESC sd, int verbose)
+sim_info (SIM_DESC sd, bool verbose)
 {
   check_desc (sd);
 
@@ -688,7 +694,7 @@ rx_signal_to_gdb_signal (int rx)
 
 /* Take a step return code RC and set up the variables consulted by
    sim_stop_reason appropriately.  */
-void
+static void
 handle_step (int rc)
 {
   if (execution_error_get_last_error () != SIM_ERR_NONE)
@@ -794,37 +800,25 @@ sim_stop_reason (SIM_DESC sd, enum sim_stop *reason_p, int *sigrc_p)
 void
 sim_do_command (SIM_DESC sd, const char *cmd)
 {
-  const char *args;
-  char *p = strdup (cmd);
+  const char *arg;
+  char **argv = buildargv (cmd);
 
   check_desc (sd);
 
-  /* Skip leading whitespace.  */
-  while (isspace (*p))
-    p++;
-
-  /* Find the extent of the command word.  */
-  for (p = cmd; *p; p++)
-    if (isspace (*p))
-      break;
-
-  /* Null-terminate the command word, and record the start of any
-     further arguments.  */
-  if (*p)
+  cmd = arg = "";
+  if (argv != NULL)
     {
-      *p = '\0';
-      args = p + 1;
-      while (isspace (*args))
-	args++;
+      if (argv[0] != NULL)
+	cmd = argv[0];
+      if (argv[1] != NULL)
+	arg = argv[1];
     }
-  else
-    args = p;
 
   if (strcmp (cmd, "trace") == 0)
     {
-      if (strcmp (args, "on") == 0)
+      if (strcmp (arg, "on") == 0)
 	trace = 1;
-      else if (strcmp (args, "off") == 0)
+      else if (strcmp (arg, "off") == 0)
 	trace = 0;
       else
 	printf ("The 'sim trace' command expects 'on' or 'off' "
@@ -832,11 +826,11 @@ sim_do_command (SIM_DESC sd, const char *cmd)
     }
   else if (strcmp (cmd, "verbose") == 0)
     {
-      if (strcmp (args, "on") == 0)
+      if (strcmp (arg, "on") == 0)
 	verbose = 1;
-      else if (strcmp (args, "noisy") == 0)
+      else if (strcmp (arg, "noisy") == 0)
 	verbose = 2;
-      else if (strcmp (args, "off") == 0)
+      else if (strcmp (arg, "off") == 0)
 	verbose = 0;
       else
 	printf ("The 'sim verbose' command expects 'on', 'noisy', or 'off'"
@@ -846,11 +840,19 @@ sim_do_command (SIM_DESC sd, const char *cmd)
     printf ("The 'sim' command expects either 'trace' or 'verbose'"
 	    " as a subcommand.\n");
 
-  free (p);
+  freeargv (argv);
 }
 
 char **
 sim_complete_command (SIM_DESC sd, const char *text, const char *word)
+{
+  return NULL;
+}
+
+/* Stub this out for now.  */
+
+char *
+sim_memory_map (SIM_DESC sd)
 {
   return NULL;
 }

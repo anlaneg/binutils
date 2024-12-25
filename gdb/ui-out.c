@@ -1,6 +1,6 @@
 /* Output generating routines for GDB.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
    Written by Fernando Nasser for Cygnus.
@@ -20,10 +20,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
-#include "expression.h"		/* For language.h */
+#include "expression.h"
 #include "language.h"
 #include "ui-out.h"
+#include "gdbsupport/format.h"
+#include "cli/cli-style.h"
+#include "diagnostics.h"
 
 #include <vector>
 #include <memory>
@@ -209,16 +211,14 @@ class ui_out_table
 void ui_out_table::start_body ()
 {
   if (m_state != state::HEADERS)
-    internal_error (__FILE__, __LINE__,
-		    _("extra table_body call not allowed; there must be only "
+    internal_error (_("extra table_body call not allowed; there must be only "
 		      "one table_body after a table_begin and before a "
 		      "table_end."));
 
   /* Check if the number of defined headers matches the number of expected
      columns.  */
   if (m_headers.size () != m_nr_cols)
-    internal_error (__FILE__, __LINE__,
-		    _("number of headers differ from number of table "
+    internal_error (_("number of headers differ from number of table "
 		      "columns."));
 
   m_state = state::BODY;
@@ -232,13 +232,12 @@ void ui_out_table::append_header (int width, ui_align alignment,
 				  const std::string &col_hdr)
 {
   if (m_state != state::HEADERS)
-    internal_error (__FILE__, __LINE__,
-		    _("table header must be specified after table_begin and "
+    internal_error (_("table header must be specified after table_begin and "
 		      "before table_body."));
 
-  std::unique_ptr<ui_out_hdr> header (new ui_out_hdr (m_headers.size () + 1,
-							width, alignment,
-							col_name, col_hdr));
+  auto header = std::make_unique<ui_out_hdr> (m_headers.size () + 1,
+					      width, alignment,
+					      col_name, col_hdr);
 
   m_headers.push_back (std::move (header));
 }
@@ -328,7 +327,7 @@ ui_out::current_level () const
 void
 ui_out::push_level (ui_out_type type)
 {
-  std::unique_ptr<ui_out_level> level (new ui_out_level (type));
+  auto level = std::make_unique<ui_out_level> (type);
 
   m_levels.push_back (std::move (level));
 }
@@ -351,11 +350,10 @@ void
 ui_out::table_begin (int nr_cols, int nr_rows, const std::string &tblid)
 {
   if (m_table_up != nullptr)
-    internal_error (__FILE__, __LINE__,
-		    _("tables cannot be nested; table_begin found before \
+    internal_error (_("tables cannot be nested; table_begin found before \
 previous table_end."));
 
-  m_table_up.reset (new ui_out_table (level () + 1, nr_cols, tblid));
+  m_table_up = std::make_unique<ui_out_table> (level () + 1, nr_cols, tblid);
 
   do_table_begin (nr_cols, nr_rows, tblid.c_str ());
 }
@@ -365,8 +363,7 @@ ui_out::table_header (int width, ui_align alignment,
 		      const std::string &col_name, const std::string &col_hdr)
 {
   if (m_table_up == nullptr)
-    internal_error (__FILE__, __LINE__,
-		    _("table_header outside a table is not valid; it must be \
+    internal_error (_("table_header outside a table is not valid; it must be \
 after a table_begin and before a table_body."));
 
   m_table_up->append_header (width, alignment, col_name, col_hdr);
@@ -378,8 +375,7 @@ void
 ui_out::table_body ()
 {
   if (m_table_up == nullptr)
-    internal_error (__FILE__, __LINE__,
-		    _("table_body outside a table is not valid; it must be "
+    internal_error (_("table_body outside a table is not valid; it must be "
 		      "after a table_begin and before a table_end."));
 
   m_table_up->start_body ();
@@ -391,8 +387,7 @@ void
 ui_out::table_end ()
 {
   if (m_table_up == nullptr)
-    internal_error (__FILE__, __LINE__,
-		    _("misplaced table_end or missing table_begin."));
+    internal_error (_("misplaced table_end or missing table_begin."));
 
   do_table_end ();
 
@@ -438,7 +433,8 @@ ui_out::end (ui_out_type type)
 }
 
 void
-ui_out::field_int (const char *fldname, int value)
+ui_out::field_signed (const char *fldname, LONGEST value,
+		      const ui_file_style &style)
 {
   int fldno;
   int width;
@@ -446,12 +442,12 @@ ui_out::field_int (const char *fldname, int value)
 
   verify_field (&fldno, &width, &align);
 
-  do_field_int (fldno, width, align, fldname, value);
+  do_field_signed (fldno, width, align, fldname, value, style);
 }
 
 void
-ui_out::field_fmt_int (int input_width, ui_align input_align,
-		       const char *fldname, int value)
+ui_out::field_fmt_signed (int input_width, ui_align input_align,
+			  const char *fldname, LONGEST value)
 {
   int fldno;
   int width;
@@ -459,7 +455,22 @@ ui_out::field_fmt_int (int input_width, ui_align input_align,
 
   verify_field (&fldno, &width, &align);
 
-  do_field_int (fldno, input_width, input_align, fldname, value);
+  do_field_signed (fldno, input_width, input_align, fldname, value,
+		   ui_file_style ());
+}
+
+/* See ui-out.h.  */
+
+void
+ui_out::field_unsigned (const char *fldname, ULONGEST value)
+{
+  int fldno;
+  int width;
+  ui_align align;
+
+  verify_field (&fldno, &width, &align);
+
+  do_field_unsigned (fldno, width, align, fldname, value);
 }
 
 /* Documented in ui-out.h.  */
@@ -469,12 +480,12 @@ ui_out::field_core_addr (const char *fldname, struct gdbarch *gdbarch,
 			 CORE_ADDR address)
 {
   field_string (fldname, print_core_address (gdbarch, address),
-		ui_out_style_kind::ADDRESS);
+		address_style.style ());
 }
 
 void
 ui_out::field_stream (const char *fldname, string_file &stream,
-		      ui_out_style_kind style)
+		      const ui_file_style &style)
 {
   if (!stream.empty ())
     field_string (fldname, stream.c_str (), style);
@@ -499,7 +510,7 @@ ui_out::field_skip (const char *fldname)
 
 void
 ui_out::field_string (const char *fldname, const char *string,
-		      ui_out_style_kind style)
+		      const ui_file_style &style)
 {
   int fldno;
   int width;
@@ -508,12 +519,6 @@ ui_out::field_string (const char *fldname, const char *string,
   verify_field (&fldno, &width, &align);
 
   do_field_string (fldno, width, align, fldname, string, style);
-}
-
-void
-ui_out::field_string (const char *fldname, const std::string &string)
-{
-  field_string (fldname, string.c_str ());
 }
 
 /* VARARGS */
@@ -529,62 +534,240 @@ ui_out::field_fmt (const char *fldname, const char *format, ...)
 
   va_start (args, format);
 
-  do_field_fmt (fldno, width, align, fldname, format, args);
+  do_field_fmt (fldno, width, align, fldname, ui_file_style (), format, args);
 
   va_end (args);
 }
 
 void
-ui_out::spaces (int numspaces)
+ui_out::field_fmt (const char *fldname, const ui_file_style &style,
+		   const char *format, ...)
 {
-  do_spaces (numspaces);
+  va_list args;
+  int fldno;
+  int width;
+  ui_align align;
+
+  verify_field (&fldno, &width, &align);
+
+  va_start (args, format);
+
+  do_field_fmt (fldno, width, align, fldname, style, format, args);
+
+  va_end (args);
 }
 
 void
-ui_out::text (const char *string)
+ui_out::call_do_message (const ui_file_style &style, const char *format,
+			 ...)
 {
-  do_text (string);
+  va_list args;
+
+  va_start (args, format);
+
+  /* Since call_do_message is only used as a helper of vmessage, silence the
+     warning here once instead of at all call sites in vmessage, if we were
+     to put a "format" attribute on call_do_message.  */
+  DIAGNOSTIC_PUSH
+  DIAGNOSTIC_IGNORE_FORMAT_NONLITERAL
+  do_message (style, format, args);
+  DIAGNOSTIC_POP
+
+  va_end (args);
+}
+
+void
+ui_out::vmessage (const ui_file_style &in_style, const char *format,
+		  va_list args)
+{
+  format_pieces fpieces (&format, true);
+
+  ui_file_style style = in_style;
+
+  for (auto &&piece : fpieces)
+    {
+      const char *current_substring = piece.string;
+
+      gdb_assert (piece.n_int_args >= 0 && piece.n_int_args <= 2);
+      int intvals[2] = { 0, 0 };
+      for (int i = 0; i < piece.n_int_args; ++i)
+	intvals[i] = va_arg (args, int);
+
+      /* The only ones we support for now.  */
+      gdb_assert (piece.n_int_args == 0
+		  || piece.argclass == string_arg
+		  || piece.argclass == int_arg
+		  || piece.argclass == long_arg);
+
+      switch (piece.argclass)
+	{
+	case string_arg:
+	  {
+	    const char *str = va_arg (args, const char *);
+	    switch (piece.n_int_args)
+	      {
+	      case 0:
+		call_do_message (style, current_substring, str);
+		break;
+	      case 1:
+		call_do_message (style, current_substring, intvals[0], str);
+		break;
+	      case 2:
+		call_do_message (style, current_substring,
+				 intvals[0], intvals[1], str);
+		break;
+	      }
+	  }
+	  break;
+	case wide_string_arg:
+	  gdb_assert_not_reached ("wide_string_arg not supported in vmessage");
+	  break;
+	case wide_char_arg:
+	  gdb_assert_not_reached ("wide_char_arg not supported in vmessage");
+	  break;
+	case long_long_arg:
+	  call_do_message (style, current_substring, va_arg (args, long long));
+	  break;
+	case int_arg:
+	  {
+	    int val = va_arg (args, int);
+	    switch (piece.n_int_args)
+	      {
+	      case 0:
+		call_do_message (style, current_substring, val);
+		break;
+	      case 1:
+		call_do_message (style, current_substring, intvals[0], val);
+		break;
+	      case 2:
+		call_do_message (style, current_substring,
+				 intvals[0], intvals[1], val);
+		break;
+	      }
+	  }
+	  break;
+	case long_arg:
+	  {
+	    long val = va_arg (args, long);
+	    switch (piece.n_int_args)
+	      {
+	      case 0:
+		call_do_message (style, current_substring, val);
+		break;
+	      case 1:
+		call_do_message (style, current_substring, intvals[0], val);
+		break;
+	      case 2:
+		call_do_message (style, current_substring,
+				 intvals[0], intvals[1], val);
+		break;
+	      }
+	  }
+	  break;
+	case size_t_arg:
+	  {
+	    size_t val = va_arg (args, size_t);
+	    switch (piece.n_int_args)
+	      {
+	      case 0:
+		call_do_message (style, current_substring, val);
+		break;
+	      case 1:
+		call_do_message (style, current_substring, intvals[0], val);
+		break;
+	      case 2:
+		call_do_message (style, current_substring,
+				 intvals[0], intvals[1], val);
+		break;
+	      }
+	  }
+	  break;
+	case double_arg:
+	  call_do_message (style, current_substring, va_arg (args, double));
+	  break;
+	case long_double_arg:
+	  gdb_assert_not_reached ("long_double_arg not supported in vmessage");
+	  break;
+	case dec32float_arg:
+	  gdb_assert_not_reached ("dec32float_arg not supported in vmessage");
+	  break;
+	case dec64float_arg:
+	  gdb_assert_not_reached ("dec64float_arg not supported in vmessage");
+	  break;
+	case dec128float_arg:
+	  gdb_assert_not_reached ("dec128float_arg not supported in vmessage");
+	  break;
+	case ptr_arg:
+	  switch (current_substring[2])
+	    {
+	    case 'F':
+	      {
+		gdb_assert (!test_flags (disallow_ui_out_field));
+		base_field_s *bf = va_arg (args, base_field_s *);
+		switch (bf->kind)
+		  {
+		  case field_kind::FIELD_SIGNED:
+		    {
+		      auto *f = (signed_field_s *) bf;
+		      field_signed (f->name, f->val);
+		    }
+		    break;
+		  case field_kind::FIELD_STRING:
+		    {
+		      auto *f = (string_field_s *) bf;
+		      field_string (f->name, f->str);
+		    }
+		    break;
+		  }
+	      }
+	      break;
+	    case 's':
+	      {
+		styled_string_s *ss = va_arg (args, styled_string_s *);
+		call_do_message (ss->style, "%s", ss->str);
+	      }
+	      break;
+	    case '[':
+	      style = *va_arg (args, const ui_file_style *);
+	      break;
+	    case ']':
+	      {
+		void *arg = va_arg (args, void *);
+		gdb_assert (arg == nullptr);
+
+		style = {};
+	      }
+	      break;
+	    default:
+	      call_do_message (style, current_substring, va_arg (args, void *));
+	      break;
+	    }
+	  break;
+	case literal_piece:
+	  /* Print a portion of the format string that has no
+	     directives.  Note that this will not include any ordinary
+	     %-specs, but it might include "%%".  That is why we use
+	     call_do_message here.  Also, we pass a dummy argument
+	     because some platforms have modified GCC to include
+	     -Wformat-security by default, which will warn here if
+	     there is no argument.  */
+	  call_do_message (style, current_substring, 0);
+	  break;
+	default:
+	  internal_error (_("failed internal consistency check"));
+	}
+    }
 }
 
 void
 ui_out::message (const char *format, ...)
 {
   va_list args;
-
   va_start (args, format);
-  do_message (format, args);
+
+  vmessage (ui_file_style (), format, args);
+
   va_end (args);
-}
-
-void
-ui_out::wrap_hint (const char *identstring)
-{
-  do_wrap_hint (identstring);
-}
-
-void
-ui_out::flush ()
-{
-  do_flush ();
-}
-
-void
-ui_out::redirect (ui_file *outstream)
-{
-  do_redirect (outstream);
-}
-
-/* Test the flags against the mask given.  */
-ui_out_flags
-ui_out::test_flags (ui_out_flags mask)
-{
-  return m_flags & mask;
-}
-
-bool
-ui_out::is_mi_like_p () const
-{
-  return do_is_mi_like_p ();
 }
 
 /* Verify that the field/tuple/list is correctly positioned.  Return
@@ -600,8 +783,7 @@ ui_out::verify_field (int *fldno, int *width, ui_align *align)
   if (m_table_up != nullptr
       && m_table_up->current_state () != ui_out_table::state::BODY)
     {
-      internal_error (__FILE__, __LINE__,
-		      _("table_body missing; table fields must be \
+      internal_error (_("table_body missing; table fields must be \
 specified after table_body and inside a list."));
     }
 
@@ -613,8 +795,7 @@ specified after table_body and inside a list."));
       && m_table_up->get_next_header (fldno, width, align, &text))
     {
       if (*fldno != current->field_count ())
-	internal_error (__FILE__, __LINE__,
-			_("ui-out internal error in handling headers."));
+	internal_error (_("ui-out internal error in handling headers."));
     }
   else
     {
@@ -647,4 +828,137 @@ ui_out::ui_out (ui_out_flags flags)
 
 ui_out::~ui_out ()
 {
+}
+
+/* See ui-out.h.  */
+
+void
+buffer_group::output_unit::flush () const
+{
+  if (!m_msg.empty ())
+    m_stream->puts (m_msg.c_str ());
+
+  if (m_wrap_hint >= 0)
+    m_stream->wrap_here (m_wrap_hint);
+
+  if (m_flush)
+    m_stream->flush ();
+}
+
+/* See ui-out.h.  */
+
+void
+buffer_group::write (const char *buf, long length_buf, ui_file *stream)
+{
+  /* Record each line separately.  */
+  for (size_t prev = 0, cur = 0; cur < length_buf; ++cur)
+    if (buf[cur] == '\n' || cur == length_buf - 1)
+      {
+	std::string msg (buf + prev, cur - prev + 1);
+
+	if (m_buffered_output.size () > 0
+	    && m_buffered_output.back ().m_wrap_hint == -1
+	    && m_buffered_output.back ().m_stream == stream
+	    && m_buffered_output.back ().m_msg.size () > 0
+	    && m_buffered_output.back ().m_msg.back () != '\n')
+	  m_buffered_output.back ().m_msg.append (msg);
+	else
+	  m_buffered_output.emplace_back (msg).m_stream = stream;
+	prev = cur + 1;
+      }
+}
+
+/* See ui-out.h.  */
+
+void
+buffer_group::wrap_here (int indent, ui_file *stream)
+{
+  m_buffered_output.emplace_back ("", indent).m_stream = stream;
+}
+
+/* See ui-out.h.  */
+
+void
+buffer_group::flush_here (ui_file *stream)
+{
+  m_buffered_output.emplace_back ("", -1, true).m_stream = stream;
+}
+
+/* See ui-out.h.  */
+
+ui_file *
+get_unbuffered (ui_file *stream)
+{
+  buffering_file *buf = dynamic_cast<buffering_file *> (stream);
+
+  if (buf == nullptr)
+    return stream;
+
+  return get_unbuffered (buf->stream ());
+}
+
+buffered_streams::buffered_streams (buffer_group *group, ui_out *uiout)
+  : m_buffered_stdout (group, gdb_stdout),
+    m_buffered_stderr (group, gdb_stderr),
+    m_buffered_stdlog (group, gdb_stdlog),
+    m_buffered_stdtarg (group, gdb_stdtarg),
+    m_uiout (uiout)
+{
+  gdb_stdout = &m_buffered_stdout;
+  gdb_stderr = &m_buffered_stderr;
+  gdb_stdlog = &m_buffered_stdlog;
+  gdb_stdtarg = &m_buffered_stdtarg;
+
+  ui_file *stream = current_uiout->current_stream ();
+  if (stream != nullptr)
+    {
+      m_buffered_current_uiout.emplace (group, stream);
+      current_uiout->redirect (&(*m_buffered_current_uiout));
+    }
+
+  stream = m_uiout->current_stream ();
+  if (stream != nullptr && current_uiout != m_uiout)
+    {
+      m_buffered_uiout.emplace (group, stream);
+      m_uiout->redirect (&(*m_buffered_uiout));
+    }
+
+  m_buffers_in_place = true;
+}
+
+/* See ui-out.h.  */
+
+void
+buffered_streams::remove_buffers ()
+{
+  if (!m_buffers_in_place)
+    return;
+
+  m_buffers_in_place = false;
+
+  gdb_stdout = m_buffered_stdout.stream ();
+  gdb_stderr = m_buffered_stderr.stream ();
+  gdb_stdlog = m_buffered_stdlog.stream ();
+  gdb_stdtarg = m_buffered_stdtarg.stream ();
+
+  if (m_buffered_current_uiout.has_value ())
+    current_uiout->redirect (nullptr);
+
+  if (m_buffered_uiout.has_value ())
+    m_uiout->redirect (nullptr);
+}
+
+buffer_group::buffer_group (ui_out *uiout)
+  : m_buffered_streams (new buffered_streams (this, uiout))
+{ /* Nothing.  */ }
+
+/* See ui-out.h.  */
+
+void
+buffer_group::flush () const
+{
+  m_buffered_streams->remove_buffers ();
+
+  for (const output_unit &ou : m_buffered_output)
+    ou.flush ();
 }

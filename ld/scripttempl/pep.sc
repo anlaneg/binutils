@@ -1,6 +1,6 @@
 # Linker script for PE.
 #
-# Copyright (C) 2014-2019 Free Software Foundation, Inc.
+# Copyright (C) 2014-2024 Free Software Foundation, Inc.
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
@@ -34,6 +34,7 @@ if test "${RELOCATING}"; then
     KEEP (SORT(*)(.idata$3))
     /* These zeroes mark the end of the import list.  */
     LONG (0); LONG (0); LONG (0); LONG (0); LONG (0);
+    . = ALIGN(8);
     KEEP (SORT(*)(.idata$4))'
   R_IDATA5='SORT(*)(.idata$5)'
   R_IDATA67='
@@ -44,6 +45,7 @@ if test "${RELOCATING}"; then
   R_CRT_XL='KEEP (*(SORT(.CRT$XL*)))  /* TLS callbacks */'
   R_CRT_XP='KEEP (*(SORT(.CRT$XP*)))  /* Pre-termination */'
   R_CRT_XT='KEEP (*(SORT(.CRT$XT*)))  /* Termination */'
+  R_CRT_XD='KEEP (*(SORT(.CRT$XD*)))  /* Dynamic TLS Initializer */'
   R_TLS='
     KEEP (*(.tls$AAA))
     KEEP (*(.tls))
@@ -65,12 +67,13 @@ else
   R_CRT_XL=
   R_CRT_XP=
   R_CRT_XT=
+  R_CRT_XD=
   R_TLS='*(.tls)'
   R_RSRC='*(.rsrc)'
 fi
 
 cat <<EOF
-/* Copyright (C) 2014-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
@@ -90,7 +93,7 @@ SECTIONS
   ${RELOCATING+. = ALIGN(__section_alignment__);}
   .text ${RELOCATING+ __image_base__ + ( __section_alignment__ < ${TARGET_PAGE_SIZE} ? . : __section_alignment__ )} :
   {
-    ${RELOCATING+ KEEP(*(.init))}
+    ${RELOCATING+KEEP (*(SORT_NONE(.init)))}
     *(.text)
     ${R_TEXT}
     ${RELOCATING+ *(.text.*)}
@@ -98,44 +101,8 @@ SECTIONS
     ${RELOCATING+*(.glue_7t)}
     ${RELOCATING+*(.glue_7)}
     ${CONSTRUCTING+. = ALIGN(8);}
-    ${CONSTRUCTING+
-       /* Note: we always define __CTOR_LIST__ and ___CTOR_LIST__ here,
-          we do not PROVIDE them.  This is because the ctors.o startup
-	  code in libgcc defines them as common symbols, with the 
-          expectation that they will be overridden by the definitions
-	  here.  If we PROVIDE the symbols then they will not be
-	  overridden and global constructors will not be run.
-	  
-	  This does mean that it is not possible for a user to define
-	  their own __CTOR_LIST__ and __DTOR_LIST__ symbols; if they do,
-	  the content from those variables are included but the symbols
-	  defined here silently take precedence.  If they truly need to
-	  be redefined, a custom linker script will have to be used.
-	  (The custom script can just be a copy of this script with the
-	  PROVIDE() qualifiers added).
-
-	  See PR 22762 for more details.  */
-       ___CTOR_LIST__ = .;
-       __CTOR_LIST__ = .;
-       LONG (-1); LONG (-1);
-       KEEP (*(.ctors));
-       KEEP (*(.ctor));
-       KEEP (*(SORT_BY_NAME(.ctors.*)));
-       LONG (0); LONG (0);
-     }
-    ${CONSTRUCTING+
-       /* See comment about __CTOR_LIST__ above.  The same reasoning
-    	  applies here too.  */
-       ___DTOR_LIST__ = .;
-       __DTOR_LIST__ = .;
-       LONG (-1); LONG (-1);
-       KEEP (*(.dtors));
-       KEEP (*(.dtor));
-       KEEP (*(SORT_BY_NAME(.dtors.*)));
-       LONG (0); LONG (0);
-     }
-    ${RELOCATING+ KEEP (*(.fini))}
-    /* ??? Why is .gcc_exc here?  */
+    ${RELOCATING+KEEP (*(SORT_NONE(.fini)))}
+    ${RELOCATING+/* ??? Why is .gcc_exc here?  */}
     ${RELOCATING+ *(.gcc_exc)}
     ${RELOCATING+PROVIDE (etext = .);}
     ${RELOCATING+ KEEP (*(.gcc_except_table))}
@@ -165,12 +132,74 @@ SECTIONS
     ${RELOCATING+__rt_psrelocs_start = .;}
     ${RELOCATING+KEEP(*(.rdata_runtime_pseudo_reloc))}
     ${RELOCATING+__rt_psrelocs_end = .;}
+
+    /* .ctors & .dtors */
+    ${CONSTRUCTING+. = ALIGN(8);}
+    ${CONSTRUCTING+
+       /* Note: we always define __CTOR_LIST__ and ___CTOR_LIST__ here,
+          we do not PROVIDE them.  This is because the ctors.o startup
+	  code in libgcc defines them as common symbols, with the 
+          expectation that they will be overridden by the definitions
+	  here.  If we PROVIDE the symbols then they will not be
+	  overridden and global constructors will not be run.
+	  See PR 22762 for more details.
+	  
+	  This does mean that it is not possible for a user to define
+	  their own __CTOR_LIST__ and __DTOR_LIST__ symbols; if they do,
+	  the content from those variables are included but the symbols
+	  defined here silently take precedence.  If they truly need to
+	  be redefined, a custom linker script will have to be used.
+	  (The custom script can just be a copy of this script with the
+	  PROVIDE() qualifiers added).
+
+	  In particular this means that ld -Ur does not work, because
+	  the proper __CTOR_LIST__ set by ld -Ur is overridden by a
+	  bogus __CTOR_LIST__ set by the final link.  See PR 46.  */
+       ___CTOR_LIST__ = .;
+       __CTOR_LIST__ = .;
+       LONG (-1); LONG (-1);
+       KEEP (*(.ctors));
+       KEEP (*(.ctor));
+       KEEP (*(SORT_BY_NAME(.ctors.*)));
+       LONG (0); LONG (0);
+     }
+    ${CONSTRUCTING+
+       /* See comment about __CTOR_LIST__ above.  The same reasoning
+    	  applies here too.  */
+       ___DTOR_LIST__ = .;
+       __DTOR_LIST__ = .;
+       LONG (-1); LONG (-1);
+       KEEP (*(.dtors));
+       KEEP (*(.dtor));
+       KEEP (*(SORT_BY_NAME(.dtors.*)));
+       LONG (0); LONG (0);
+     }
+
+    /* .CRT */
+    ${RELOCATING+___crt_xc_start__ = . ;}
+    ${R_CRT_XC}
+    ${RELOCATING+___crt_xc_end__ = . ;}
+    ${RELOCATING+___crt_xi_start__ = . ;}
+    ${R_CRT_XI}
+    ${RELOCATING+___crt_xi_end__ = . ;}
+    ${RELOCATING+___crt_xl_start__ = . ;}
+    ${R_CRT_XL}
+    /* ___crt_xl_end__ is defined in the TLS Directory support code */
+    ${RELOCATING+___crt_xp_start__ = . ;}
+    ${R_CRT_XP}
+    ${RELOCATING+___crt_xp_end__ = . ;}
+    ${RELOCATING+___crt_xt_start__ = . ;}
+    ${R_CRT_XT}
+    ${RELOCATING+___crt_xt_end__ = . ;}
+    ${RELOCATING+___crt_xd_start__ = . ;}
+    ${R_CRT_XD}
+    ${RELOCATING+___crt_xd_end__ = . ;}
   }
-  ${RELOCATING+__rt_psrelocs_size = __rt_psrelocs_end - __rt_psrelocs_start;}
-  ${RELOCATING+___RUNTIME_PSEUDO_RELOC_LIST_END__ = .;}
-  ${RELOCATING+__RUNTIME_PSEUDO_RELOC_LIST_END__ = .;}
-  ${RELOCATING+___RUNTIME_PSEUDO_RELOC_LIST__ = . - __rt_psrelocs_size;}
-  ${RELOCATING+__RUNTIME_PSEUDO_RELOC_LIST__ = . - __rt_psrelocs_size;}
+
+  ${RELOCATING+___RUNTIME_PSEUDO_RELOC_LIST_END__ = __rt_psrelocs_end;}
+  ${RELOCATING+__RUNTIME_PSEUDO_RELOC_LIST_END__ = __rt_psrelocs_end;}
+  ${RELOCATING+___RUNTIME_PSEUDO_RELOC_LIST__ = __rt_psrelocs_start;}
+  ${RELOCATING+__RUNTIME_PSEUDO_RELOC_LIST__ = __rt_psrelocs_start;}
 
   .eh_frame ${RELOCATING+BLOCK(__section_alignment__)} :
   {
@@ -205,7 +234,7 @@ SECTIONS
     *(.debug\$S)
     *(.debug\$T)
     *(.debug\$F)
-    *(.drectve)
+    ${RELOCATING+ *(.drectve)}
     ${RELOCATING+ *(.note.GNU-stack)}
     ${RELOCATING+ *(.gnu.lto_*)}
   }
@@ -219,24 +248,6 @@ SECTIONS
     ${R_IDATA5}
     ${RELOCATING+__IAT_end__ = .;}
     ${R_IDATA67}
-  }
-  .CRT ${RELOCATING+BLOCK(__section_alignment__)} :
-  {
-    ${RELOCATING+___crt_xc_start__ = . ;}
-    ${R_CRT_XC}
-    ${RELOCATING+___crt_xc_end__ = . ;}
-    ${RELOCATING+___crt_xi_start__ = . ;}
-    ${R_CRT_XI}
-    ${RELOCATING+___crt_xi_end__ = . ;}
-    ${RELOCATING+___crt_xl_start__ = . ;}
-    ${R_CRT_XL}
-    /* ___crt_xl_end__ is defined in the TLS Directory support code */
-    ${RELOCATING+___crt_xp_start__ = . ;}
-    ${R_CRT_XP}
-    ${RELOCATING+___crt_xp_end__ = . ;}
-    ${RELOCATING+___crt_xt_start__ = . ;}
-    ${R_CRT_XT}
-    ${RELOCATING+___crt_xt_end__ = . ;}
   }
 
   /* Windows TLS expects .tls\$AAA to be at the start and .tls\$ZZZ to be
@@ -302,15 +313,6 @@ SECTIONS
     *(.zdebug_pubnames)
   }
 
-  .debug_pubtypes ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
-  {
-    *(.debug_pubtypes)
-  }
-  .zdebug_pubtypes ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
-  {
-    *(.zdebug_pubtypes)
-  }
-
   /* DWARF 2.  */
   .debug_info ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
@@ -341,11 +343,11 @@ SECTIONS
 
   .debug_frame ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
-    *(.debug_frame)
+    *(.debug_frame*)
   }
   .zdebug_frame ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
-    *(.zdebug_frame)
+    *(.zdebug_frame*)
   }
 
   .debug_str ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
@@ -412,16 +414,16 @@ SECTIONS
     *(.zdebug_varnames)
   }
 
-  .debug_macro ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  /* DWARF 3.  */
+  .debug_pubtypes ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
-    *(.debug_macro)
+    *(.debug_pubtypes)
   }
-  .zdebug_macro ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  .zdebug_pubtypes ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
-    *(.zdebug_macro)
+    *(.zdebug_pubtypes)
   }
 
-  /* DWARF 3.  */
   .debug_ranges ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
     *(.debug_ranges)
@@ -438,7 +440,69 @@ SECTIONS
   }
   .zdebug_types ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
   {
-    *(.zdebug_types${RELOCATING+ .zdebug.gnu.linkonce.wt.*})
+    *(.zdebug_types${RELOCATING+ .gnu.linkonce.wt.*})
+  }
+
+  /* DWARF 5.  */
+  .debug_addr ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_addr)
+  }
+  .zdebug_addr ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_addr)
+  }
+  .debug_line_str ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_line_str)
+  }
+  .zdebug_line_str ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_line_str)
+  }
+  .debug_loclists ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_loclists)
+  }
+  .zdebug_loclists ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_loclists)
+  }
+  .debug_macro ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_macro)
+  }
+  .zdebug_macro ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_macro)
+  }
+  .debug_names ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_names)
+  }
+  .zdebug_names ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_names)
+  }
+  .debug_rnglists ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_rnglists)
+  }
+  .zdebug_rnglists ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_rnglists)
+  }
+  .debug_str_offsets ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_str_offsets)
+  }
+  .zdebug_str_offsets ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.zdebug_str_offsets)
+  }
+  .debug_sup ${RELOCATING+BLOCK(__section_alignment__)} ${RELOCATING+(NOLOAD)} :
+  {
+    *(.debug_sup)
   }
 
   /* For Go and Rust.  */

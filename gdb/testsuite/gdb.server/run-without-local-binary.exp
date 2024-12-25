@@ -1,4 +1,4 @@
-# Copyright 2017-2019 Free Software Foundation, Inc.
+# Copyright 2017-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,15 +15,15 @@
 
 load_lib gdbserver-support.exp
 
-if {[skip_gdbserver_tests]} {
-    return
-}
+require allow_gdbserver_tests
 
 standard_testfile normal.c
 
-if {[prepare_for_testing "failed to prepare" $testfile $srcfile debug]} {
+if {[build_executable "failed to prepare" $testfile $srcfile debug]} {
     return -1
 }
+
+set target_binfile [gdb_remote_download target $binfile]
 
 # Test running GDB without providing a local binary for it.  In order
 # to do that, we unset GDBFLAGS before running GDB.  We also start
@@ -31,15 +31,22 @@ if {[prepare_for_testing "failed to prepare" $testfile $srcfile debug]} {
 # remote/21852.
 save_vars { GDBFLAGS } {
     set GDBFLAGS ""
+
+    # If GDB and GDBserver are both running locally, set the sysroot to avoid
+    # reading files via the remote protocol.
+    if { ![is_remote host] && ![is_remote target] } {
+	set GDBFLAGS "-ex \"set sysroot\""
+    }
+
     gdb_exit
     gdb_start
 
-    gdb_test_no_output "set remote exec-file $binfile" \
+    gdb_test_no_output "set remote exec-file $target_binfile" \
 	"set remote exec-file"
 
     # Make sure we're disconnected, in case we're testing with an
     # extended-remote board, therefore already connected.
-    gdb_test "disconnect" ".*" "disconnect"
+    gdb_test "disconnect" ".*"
 
     # Let's start gdbserver in extended-remote mode now.  We cannot
     # use gdbserver_start_extended here because it starts gdbserver,

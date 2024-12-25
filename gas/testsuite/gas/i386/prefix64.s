@@ -8,6 +8,8 @@ prefix:
 	repe vaddss	%xmm0, %xmm0, %xmm0
 	repne vaddss	%xmm0, %xmm0, %xmm0
 
+	{disp16} nop
+
 .Lrep_ret:
 	bnd ret
 	rep ret
@@ -15,7 +17,7 @@ prefix:
 	rep bnd ret
 
 .Ldata16:
-#bogus	data16 addps	%xmm0, %xmm0
+	data16 addps	%xmm0, %xmm0
 	data16 addpd	%xmm0, %xmm0
 	data16 vaddps	%xmm0, %xmm0, %xmm0
 	data16 vaddpd	%xmm0, %xmm0, %xmm0

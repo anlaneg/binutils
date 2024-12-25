@@ -2,7 +2,7 @@
    Written by Fred Fish <fnf@cygnus.com>
    Rewritten by Jim Blandy <jimb@cygnus.com>
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,8 +19,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef BCACHE_H
-#define BCACHE_H 1
+#ifndef GDB_BCACHE_H
+#define GDB_BCACHE_H
 
 /* A bcache is a data structure for factoring out duplication in
    read-only structures.  You give the bcache some string of bytes S.
@@ -136,41 +136,98 @@
   
 */
 
+namespace gdb {
 
-struct bcache;
+struct bstring;
 
-/* Find a copy of the LENGTH bytes at ADDR in BCACHE.  If BCACHE has
-   never seen those bytes before, add a copy of them to BCACHE.  In
-   either case, return a pointer to BCACHE's copy of that string.
-   Since the cached value is ment to be read-only, return a const
-   buffer.  */
-extern const void *bcache (const void *addr, int length,
-			   struct bcache *bcache);
+struct bcache
+{
+  virtual ~bcache ();
 
-/* Like bcache, but if ADDED is not NULL, set *ADDED to true if the
-   bytes were newly added to the cache, or to false if the bytes were
-   found in the cache.  */
-extern const void *bcache_full (const void *addr, int length,
-				struct bcache *bcache, int *added);
+  /* Find a copy of the LENGTH bytes at ADDR in BCACHE.  If BCACHE has
+     never seen those bytes before, add a copy of them to BCACHE.  In
+     either case, return a pointer to BCACHE's copy of that string.
+     Since the cached value is meant to be read-only, return a const
+     buffer.  If ADDED is not NULL, set *ADDED to true if the bytes
+     were newly added to the cache, or to false if the bytes were
+     found in the cache.  */
 
-/* Free all the storage used by BCACHE.  */
-extern void bcache_xfree (struct bcache *bcache);
+  template<typename T, typename = gdb::Requires<std::is_trivially_copyable<T>>>
+  const T *insert (const T *addr, int length, bool *added = nullptr)
+  {
+    return (const T *) this->insert ((const void *) addr, length, added);
+  }
 
-/* Create a new bcache object.  */
-extern struct bcache *bcache_xmalloc (
-    unsigned long (*hash_function)(const void *, int length),
-    int (*compare_function)(const void *, const void *, int length));
+  /* Find a copy of OBJECT in this bcache.  If BCACHE has never seen
+     those bytes before, add a copy of them to BCACHE.  In either
+     case, return a pointer to BCACHE's copy of that string.  Since
+     the cached value is meant to be read-only, return a const buffer.
+     If ADDED is not NULL, set *ADDED to true if the bytes were newly
+     added to the cache, or to false if the bytes were found in the
+     cache.  */
 
-/* Print statistics on BCACHE's memory usage and efficacity at
-   eliminating duplication.  TYPE should be a string describing the
-   kind of data BCACHE holds.  Statistics are printed using
-   `printf_filtered' and its ilk.  */
-extern void print_bcache_statistics (struct bcache *bcache, const char *type);
-extern int bcache_memory_used (struct bcache *bcache);
+  template<typename T, typename = gdb::Requires<std::is_trivially_copyable<T>>>
+  const T *insert (const T &object, bool *added = nullptr)
+  {
+    return (const T *) this->insert ((const void *) &object, sizeof (object),
+				     added);
+  }
 
-/* The hash functions */
-extern unsigned long hash(const void *addr, int length);
-extern unsigned long hash_continue (const void *addr, int length,
-                                    unsigned long h);
+  /* Print statistics on this bcache's memory usage and efficacity at
+     eliminating duplication.  TYPE should be a string describing the
+     kind of data this bcache holds.  Statistics are printed using
+     `gdb_printf' and its ilk.  */
+  void print_statistics (const char *type);
+  int memory_used ();
 
-#endif /* BCACHE_H */
+protected:
+
+  /* Hash function to be used for this bcache object.  Defaults to
+     fast_hash.  */
+  virtual unsigned long hash (const void *addr, int length);
+
+  /* Compare function to be used for this bcache object.  Defaults to
+     memcmp.  */
+  virtual int compare (const void *left, const void *right, int length);
+
+private:
+
+  /* Implementation of the templated 'insert' methods.  */
+
+  const void *insert (const void *addr, int length, bool *added);
+
+  /* All the bstrings are allocated here.  */
+  struct obstack m_cache {};
+
+  /* How many hash buckets we're using.  */
+  unsigned int m_num_buckets = 0;
+
+  /* Hash buckets.  This table is allocated using malloc, so when we
+     grow the table we can return the old table to the system.  */
+  struct bstring **m_bucket = nullptr;
+
+  /* Statistics.  */
+  unsigned long m_unique_count = 0;	/* number of unique strings */
+  long m_total_count = 0;	/* total number of strings cached, including dups */
+  long m_unique_size = 0;	/* size of unique strings, in bytes */
+  long m_total_size = 0;      /* total number of bytes cached, including dups */
+  long m_structure_size = 0;	/* total size of bcache, including infrastructure */
+  /* Number of times that the hash table is expanded and hence
+     re-built, and the corresponding number of times that a string is
+     [re]hashed as part of entering it into the expanded table.  The
+     total number of hashes can be computed by adding TOTAL_COUNT to
+     expand_hash_count.  */
+  unsigned long m_expand_count = 0;
+  unsigned long m_expand_hash_count = 0;
+  /* Number of times that the half-hash compare hit (compare the upper
+     16 bits of hash values) hit, but the corresponding combined
+     length/data compare missed.  */
+  unsigned long m_half_hash_miss_count = 0;
+
+  /* Expand the hash table.  */
+  void expand_hash_table ();
+};
+
+} /* namespace gdb */
+
+#endif /* GDB_BCACHE_H */

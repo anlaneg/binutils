@@ -1,5 +1,5 @@
 /* coff object file format
-   Copyright (C) 1989-2019 Free Software Foundation, Inc.
+   Copyright (C) 1989-2024 Free Software Foundation, Inc.
 
    This file is part of GAS.
 
@@ -40,34 +40,22 @@
 #endif
 #endif
 
-#ifdef TC_PPC
-#ifdef TE_PE
-#include "coff/powerpc.h"
-#else
-#include "coff/rs6000.h"
+#ifdef TC_AARCH64
+#include "coff/aarch64.h"
 #endif
+
+#ifdef TC_PPC
+#include "coff/rs6000.h"
 #endif
 
 #ifdef TC_I386
-#ifdef TE_PEP
-#include "coff/x86_64.h"
-#else
-#include "coff/i386.h"
-#endif
-
+#include "coff/x86.h"
 #ifndef TARGET_FORMAT
 #ifdef TE_PEP
 #define TARGET_FORMAT "coff-x86-64"
 #else
 #define TARGET_FORMAT "coff-i386"
 #endif
-#endif
-#endif
-
-#ifdef TC_M68K
-#include "coff/m68k.h"
-#ifndef TARGET_FORMAT
-#define TARGET_FORMAT "coff-m68k"
 #endif
 #endif
 
@@ -99,13 +87,6 @@
    : (sh_small ? "coff-sh-small" : "coff-sh"))
 
 #endif
-#endif
-
-#ifdef TC_MIPS
-#define COFF_WITH_PE
-#include "coff/mipspe.h"
-#undef  TARGET_FORMAT
-#define TARGET_FORMAT "pe-mips"
 #endif
 
 #ifdef TC_TIC30
@@ -147,10 +128,8 @@
 
 #define OUTPUT_FLAVOR bfd_target_coff_flavour
 
-/* Alter the field names, for now, until we've fixed up the other
-   references to use the new name.  */
+/* COFF symbol flags.  See SF_* macros.  */
 #define OBJ_SYMFIELD_TYPE	unsigned long
-#define sy_obj			sy_obj_flags
 
 /* We can't use the predefined section symbols in bfd/section.c, as
    COFF symbols have extra fields.  See bfd/libcoff.h:coff_symbol_type.  */
@@ -176,7 +155,7 @@
 /* Omit the tv related fields.  */
 /* Accessors.  */
 
-#define SA_GET_SYM_TAGNDX(s)	(SYM_AUXENT (s)->x_sym.x_tagndx.l)
+#define SA_GET_SYM_TAGNDX(s)	(SYM_AUXENT (s)->x_sym.x_tagndx.u32)
 #define SA_GET_SYM_LNNO(s)	(SYM_AUXENT (s)->x_sym.x_misc.x_lnsz.x_lnno)
 #define SA_GET_SYM_SIZE(s)	(SYM_AUXENT (s)->x_sym.x_misc.x_lnsz.x_size)
 #define SA_GET_SYM_FSIZE(s)	(SYM_AUXENT (s)->x_sym.x_misc.x_fsize)
@@ -198,9 +177,15 @@
 #define SA_SET_SCN_NRELOC(s,v)	(SYM_AUXENT (s)->x_scn.x_nreloc = (v))
 #define SA_SET_SCN_NLINNO(s,v)	(SYM_AUXENT (s)->x_scn.x_nlinno = (v))
 
-/* Internal use only definitions. SF_ stands for symbol flags.
+#ifdef OBJ_XCOFF
+#define SA_GET_SECT_SCNLEN(s)	(SYM_AUXENT (s)->x_sect.x_scnlen)
+#define SA_GET_SECT_NRELOC(s)	(SYM_AUXENT (s)->x_sect.x_nreloc)
+#define SA_SET_SECT_SCNLEN(s,v)	(SYM_AUXENT (s)->x_sect.x_scnlen = (v))
+#define SA_SET_SECT_NRELOC(s,v)	(SYM_AUXENT (s)->x_sect.x_nreloc = (v))
+#endif
 
-   These values can be assigned to sy_symbol.ost_flags field of a symbolS.  */
+/* Internal use only definitions.  SF_ stands for symbol flags.  These
+   values can be assigned to OBJ_SYMFIELD_TYPE obj field of a symbolS.  */
 
 #define SF_NORMAL_MASK	0x0000ffff	/* bits 12-15 are general purpose.  */
 
@@ -260,7 +245,8 @@ extern int coff_n_line_nos;
 extern symbolS *coff_last_function;
 
 #define obj_emit_lineno(WHERE, LINE, FILE_START)	abort ()
-#define obj_app_file(name, app)      c_dot_file_symbol (name, app)
+#define obj_app_file(name)           c_dot_file_symbol (name)
+#define obj_assign_symbol(S)         coff_assign_symbol (S)
 #define obj_frob_symbol(S,P) 	     coff_frob_symbol (S, & P)
 #define obj_frob_section(S)	     coff_frob_section (S)
 #define obj_frob_file_after_relocs() coff_frob_file_after_relocs ()
@@ -284,12 +270,9 @@ extern symbolS *coff_last_function;
 #endif
 #endif
 
-/* Sanity check.  */
-
-extern const pseudo_typeS coff_pseudo_table[];
-
+extern void coff_pop_insert (void);
 #ifndef obj_pop_insert
-#define obj_pop_insert() pop_insert (coff_pseudo_table)
+#define obj_pop_insert() coff_pop_insert ()
 #endif
 
 /* In COFF, if a symbol is defined using .def/.val SYM/.endef, it's OK
@@ -298,7 +281,7 @@ extern const pseudo_typeS coff_pseudo_table[];
    as in start/_start/__start in gcc/libgcc1-test.c.  */
 #define RESOLVE_SYMBOL_REDEFINITION(sym)		\
 (SF_GET_GET_SEGMENT (sym)				\
- ? (sym->sy_frag = frag_now,				\
+ ? (sym->frag = frag_now,				\
     S_SET_VALUE (sym, frag_now_fix ()),			\
     S_SET_SEGMENT (sym, now_seg),			\
     0)							\
@@ -309,20 +292,30 @@ extern const pseudo_typeS coff_pseudo_table[];
 
 /* We need 12 bytes at the start of the section to hold some initial
    information.  */
-#define INIT_STAB_SECTION(seg) obj_coff_init_stab_section (seg)
+#define INIT_STAB_SECTION(stab, str) obj_coff_init_stab_section (stab, str)
 
 /* Store the number of relocations in the section aux entry.  */
+#ifdef OBJ_XCOFF
+#define SET_SECTION_RELOCS(sec, relocs, n)		\
+  do {							\
+    symbolS * sectSym = section_symbol (sec);		\
+    if (S_GET_STORAGE_CLASS (sectSym) == C_DWARF)	\
+      SA_SET_SECT_NRELOC (sectSym, n);			\
+    else						\
+      SA_SET_SCN_NRELOC (sectSym, n);			\
+  } while (0)
+#else
 #define SET_SECTION_RELOCS(sec, relocs, n) \
   SA_SET_SCN_NRELOC (section_symbol (sec), n)
-
-#define obj_app_file(name, app) c_dot_file_symbol (name, app)
+#endif
 
 extern int  S_SET_DATA_TYPE              (symbolS *, int);
 extern int  S_SET_STORAGE_CLASS          (symbolS *, int);
 extern int  S_GET_STORAGE_CLASS          (symbolS *);
 extern void SA_SET_SYM_ENDNDX            (symbolS *, symbolS *);
 extern void coff_add_linesym             (symbolS *);
-extern void c_dot_file_symbol            (const char *, int);
+extern void c_dot_file_symbol            (const char *);
+extern void coff_assign_symbol           (symbolS *);
 extern void coff_frob_symbol             (symbolS *, int *);
 extern void coff_adjust_symtab           (void);
 extern void coff_frob_section            (segT);
@@ -338,13 +331,12 @@ extern void pecoff_obj_clear_weak_hook   (symbolS *);
 extern void obj_coff_section             (int);
 extern segT obj_coff_add_segment         (const char *);
 extern void obj_coff_section             (int);
-extern void c_dot_file_symbol            (const char *, int);
 extern segT s_get_segment                (symbolS *);
 #ifndef tc_coff_symbol_emit_hook
 extern void tc_coff_symbol_emit_hook     (symbolS *);
 #endif
 extern void obj_coff_pe_handle_link_once (void);
-extern void obj_coff_init_stab_section   (segT);
+extern void obj_coff_init_stab_section   (segT, segT);
 extern void c_section_header             (struct internal_scnhdr *,
 					  char *, long, long, long, long,
 					  long, long, long, long);

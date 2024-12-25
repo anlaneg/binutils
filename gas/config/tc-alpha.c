@@ -1,5 +1,5 @@
 /* tc-alpha.c - Processor-specific code for the DEC Alpha AXP CPU.
-   Copyright (C) 1989-2019 Free Software Foundation, Inc.
+   Copyright (C) 1989-2024 Free Software Foundation, Inc.
    Contributed by Carnegie Mellon University, 1993.
    Written by Alessandro Forin, based on earlier gas-1.38 target CPU files.
    Modified by Ken Raeburn for gas-2.x and ECOFF support.
@@ -243,12 +243,12 @@ const char EXP_CHARS[] = "eE";
 const char FLT_CHARS[] = "rRsSfFdDxXpP";
 
 #ifdef OBJ_EVAX
-const char *md_shortopts = "Fm:g+1h:HG:";
+const char md_shortopts[] = "Fm:g+1h:HG:";
 #else
-const char *md_shortopts = "Fm:gG:";
+const char md_shortopts[] = "Fm:gG:";
 #endif
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
   {
 #define OPTION_32ADDR (OPTION_MD_BASE)
     { "32addr", no_argument, NULL, OPTION_32ADDR },
@@ -269,7 +269,7 @@ struct option md_longopts[] =
     { NULL, no_argument, NULL, 0 }
   };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 #ifdef OBJ_EVAX
 #define AXP_REG_R0     0
@@ -297,10 +297,10 @@ static unsigned alpha_target = AXP_OPCODE_BASE;
 static const char *alpha_target_name = "<all>";
 
 /* The hash table of instruction opcodes.  */
-static struct hash_control *alpha_opcode_hash;
+static htab_t alpha_opcode_hash;
 
 /* The hash table of macro opcodes.  */
-static struct hash_control *alpha_macro_hash;
+static htab_t alpha_macro_hash;
 
 #ifdef OBJ_ECOFF
 /* The $gp relocation symbol.  */
@@ -514,7 +514,7 @@ struct alpha_reloc_tag
 };
 
 /* Hash table to link up literals with the appropriate lituse.  */
-static struct hash_control *alpha_literal_hash;
+static htab_t alpha_literal_hash;
 
 /* Sequence numbers for internal use by macros.  */
 static long next_sequence_num = -1;
@@ -589,21 +589,17 @@ get_alpha_reloc_tag (long sequence)
 
   sprintf (buffer, "!%ld", sequence);
 
-  info = (struct alpha_reloc_tag *) hash_find (alpha_literal_hash, buffer);
+  info = (struct alpha_reloc_tag *) str_hash_find (alpha_literal_hash, buffer);
   if (! info)
     {
       size_t len = strlen (buffer);
-      const char *errmsg;
 
-      info = (struct alpha_reloc_tag *)
-          xcalloc (sizeof (struct alpha_reloc_tag) + len, 1);
+      info = notes_calloc (sizeof (struct alpha_reloc_tag) + len, 1);
 
       info->segment = now_seg;
       info->sequence = sequence;
       strcpy (info->string, buffer);
-      errmsg = hash_insert (alpha_literal_hash, info->string, (void *) info);
-      if (errmsg)
-	as_fatal ("%s", errmsg);
+      str_hash_insert (alpha_literal_hash, info->string, info, 0);
 #ifdef OBJ_EVAX
       info->sym = 0;
       info->psym = 0;
@@ -940,8 +936,8 @@ tokenize_arguments (char *str,
 	      goto err_report;
 	    }
 
-	  *input_line_pointer = c;
-	  SKIP_WHITESPACE_AFTER_NAME ();
+	  restore_line_pointer (c);
+	  SKIP_WHITESPACE ();
 	  if (*input_line_pointer != '!')
 	    {
 	      if (r->require_seq)
@@ -991,6 +987,7 @@ tokenize_arguments (char *str,
 
 	    /* First try for parenthesized register ...  */
 	    expression (tok);
+	    resolve_register (tok);
 	    if (*input_line_pointer == ')' && tok->X_op == O_register)
 	      {
 		tok->X_op = (saw_comma ? O_cpregister : O_pregister);
@@ -1014,6 +1011,8 @@ tokenize_arguments (char *str,
 	  if (tok->X_op == O_illegal || tok->X_op == O_absent)
 	    goto err;
 
+	  resolve_register (tok);
+
 	  saw_comma = 0;
 	  saw_arg = 1;
 	  ++tok;
@@ -1021,7 +1020,7 @@ tokenize_arguments (char *str,
 	}
     }
 
-fini:
+ fini:
   if (saw_comma)
     goto err;
   input_line_pointer = old_input_line_pointer;
@@ -1035,7 +1034,7 @@ fini:
 
   return ntok - (end_tok - tok);
 
-err:
+ err:
 #ifdef RELOC_OP_P
   is_end_of_line[(unsigned char) '!'] = 0;
 #endif
@@ -1043,7 +1042,7 @@ err:
   return TOKENIZE_ERROR;
 
 #ifdef RELOC_OP_P
-err_report:
+ err_report:
   is_end_of_line[(unsigned char) '!'] = 0;
 #endif
   input_line_pointer = old_input_line_pointer;
@@ -1171,7 +1170,8 @@ assemble_tokens_to_insn (const char *opname,
   const struct alpha_opcode *opcode;
 
   /* Search opcodes.  */
-  opcode = (const struct alpha_opcode *) hash_find (alpha_opcode_hash, opname);
+  opcode = (const struct alpha_opcode *) str_hash_find (alpha_opcode_hash,
+							opname);
   if (opcode)
     {
       int cpumatch;
@@ -1205,10 +1205,9 @@ create_literal_section (const char *name,
 
   *secp = new_sec = subseg_new (name, 0);
   subseg_set (current_section, current_subsec);
-  bfd_set_section_alignment (stdoutput, new_sec, 4);
-  bfd_set_section_flags (stdoutput, new_sec,
-			 SEC_RELOC | SEC_ALLOC | SEC_LOAD | SEC_READONLY
-			 | SEC_DATA);
+  bfd_set_section_alignment (new_sec, 4);
+  bfd_set_section_flags (new_sec, (SEC_RELOC | SEC_ALLOC | SEC_LOAD
+				   | SEC_READONLY | SEC_DATA));
 
   S_CLEAR_EXTERNAL (*symp = section_symbol (new_sec));
 }
@@ -1976,7 +1975,7 @@ insert_operand (unsigned insn,
 		const char *file,
 		unsigned line)
 {
-  if (operand->bits != 32 && !(operand->flags & AXP_OPERAND_NOOVERFLOW))
+  if (!(operand->flags & AXP_OPERAND_NOOVERFLOW))
     {
       offsetT min, max;
 
@@ -3319,8 +3318,8 @@ assemble_tokens (const char *opname,
 #endif
   if (local_macros_on)
     {
-      macro = ((const struct alpha_macro *)
-	       hash_find (alpha_macro_hash, opname));
+      macro = (const struct alpha_macro *) str_hash_find (alpha_macro_hash,
+							  opname);
       if (macro)
 	{
 	  found_something = 1;
@@ -3334,7 +3333,8 @@ assemble_tokens (const char *opname,
     }
 
   /* Search opcodes.  */
-  opcode = (const struct alpha_opcode *) hash_find (alpha_opcode_hash, opname);
+  opcode = (const struct alpha_opcode *) str_hash_find (alpha_opcode_hash,
+							opname);
   if (opcode)
     {
       found_something = 1;
@@ -3407,8 +3407,7 @@ add_to_link_pool (symbolS *sym, offsetT addend)
 
   /* Not found, add a new entry.  */
   subseg_set (alpha_link_section, 0);
-  linksym = symbol_new
-    (FAKE_LABEL_NAME, now_seg, (valueT) frag_now_fix (), frag_now);
+  linksym = symbol_new (FAKE_LABEL_NAME, now_seg, frag_now, frag_now_fix ());
   p = frag_more (8);
   memset (p, 0, 8);
 
@@ -3500,9 +3499,9 @@ s_alpha_comm (int ignore ATTRIBUTE_UNUSED)
 
   /* Just after name is now '\0'.  */
   p = input_line_pointer;
-  *p = c;
+  restore_line_pointer (c);
 
-  SKIP_WHITESPACE_AFTER_NAME ();
+  SKIP_WHITESPACE ();
 
   /* Alpha OSF/1 compiler doesn't provide the comma, gcc does.  */
   if (*input_line_pointer == ',')
@@ -3747,8 +3746,8 @@ s_alpha_ent (int dummy ATTRIBUTE_UNUSED)
 
 	  /* The .ent directive is sometimes followed by a number.  Not sure
 	     what it really means, but ignore it.  */
-	  *input_line_pointer = name_end;
-	  SKIP_WHITESPACE_AFTER_NAME ();
+	  restore_line_pointer (name_end);
+	  SKIP_WHITESPACE ();
 	  if (*input_line_pointer == ',')
 	    {
 	      input_line_pointer++;
@@ -3907,8 +3906,8 @@ s_alpha_prologue (int ignore ATTRIBUTE_UNUSED)
 
   arg = get_absolute_expression ();
   demand_empty_rest_of_line ();
-  alpha_prologue_label = symbol_new
-    (FAKE_LABEL_NAME, now_seg, (valueT) frag_now_fix (), frag_now);
+  alpha_prologue_label = symbol_new (FAKE_LABEL_NAME, now_seg, frag_now,
+				     frag_now_fix ());
 
   if (ECOFF_DEBUGGING)
     sym = ecoff_get_cur_proc_sym ();
@@ -3985,8 +3984,8 @@ s_alpha_stab (int n)
   if (alpha_flag_mdebug < 0)
     {
       segT sec = subseg_new (".mdebug", 0);
-      bfd_set_section_flags (stdoutput, sec, SEC_HAS_CONTENTS | SEC_READONLY);
-      bfd_set_section_alignment (stdoutput, sec, 3);
+      bfd_set_section_flags (sec, SEC_HAS_CONTENTS | SEC_READONLY);
+      bfd_set_section_alignment (sec, 3);
 
       ecoff_read_begin_hook ();
 
@@ -4033,7 +4032,7 @@ s_alpha_coff_wrapper (int which)
    unless the compiler has done it for us.  */
 
 void
-alpha_elf_md_end (void)
+alpha_elf_md_finish (void)
 {
   struct alpha_elf_frame_data *p;
 
@@ -4059,8 +4058,8 @@ alpha_elf_md_end (void)
 	/* Create a temporary symbol at the same location as our
 	   function symbol.  This prevents problems with globals.  */
 	cfi_new_fde (symbol_temp_new (S_GET_SEGMENT (p->func_sym),
-				      S_GET_VALUE (p->func_sym),
-				      symbol_get_frag (p->func_sym)));
+				      symbol_get_frag (p->func_sym),
+				      S_GET_VALUE (p->func_sym)));
 
 	cfi_set_sections ();
 	cfi_set_return_column (p->ra_regno);
@@ -4232,7 +4231,7 @@ s_alpha_section_word (char *str, size_t len)
   int no = 0;
   flagword flag = 0;
 
-  if (len == 5 && strncmp (str, "NO", 2) == 0)
+  if (len == 5 && startswith (str, "NO"))
     {
       no = 1;
       str += 2;
@@ -4241,30 +4240,30 @@ s_alpha_section_word (char *str, size_t len)
 
   if (len == 3)
     {
-      if (strncmp (str, "PIC", 3) == 0)
+      if (startswith (str, "PIC"))
 	flag = EGPS__V_PIC;
-      else if (strncmp (str, "LIB", 3) == 0)
+      else if (startswith (str, "LIB"))
 	flag = EGPS__V_LIB;
-      else if (strncmp (str, "OVR", 3) == 0)
+      else if (startswith (str, "OVR"))
 	flag = EGPS__V_OVR;
-      else if (strncmp (str, "REL", 3) == 0)
+      else if (startswith (str, "REL"))
 	flag = EGPS__V_REL;
-      else if (strncmp (str, "GBL", 3) == 0)
+      else if (startswith (str, "GBL"))
 	flag = EGPS__V_GBL;
-      else if (strncmp (str, "SHR", 3) == 0)
+      else if (startswith (str, "SHR"))
 	flag = EGPS__V_SHR;
-      else if (strncmp (str, "EXE", 3) == 0)
+      else if (startswith (str, "EXE"))
 	flag = EGPS__V_EXE;
-      else if (strncmp (str, "WRT", 3) == 0)
+      else if (startswith (str, "WRT"))
 	flag = EGPS__V_WRT;
-      else if (strncmp (str, "VEC", 3) == 0)
+      else if (startswith (str, "VEC"))
 	flag = EGPS__V_VEC;
-      else if (strncmp (str, "MOD", 3) == 0)
+      else if (startswith (str, "MOD"))
 	{
 	  flag = no ? EGPS__V_NOMOD : EGPS__V_NOMOD << EGPS__V_NO_SHIFT;
 	  no = 0;
 	}
-      else if (strncmp (str, "COM", 3) == 0)
+      else if (startswith (str, "COM"))
 	flag = EGPS__V_COM;
     }
 
@@ -4317,11 +4316,11 @@ s_alpha_section (int secid)
 
      	      SKIP_WHITESPACE ();
      	      c = get_symbol_name (&beg);
-     	      *input_line_pointer = c;
+     	      restore_line_pointer (c);
 
      	      vms_flags |= s_alpha_section_word (beg, input_line_pointer - beg);
 
-     	      SKIP_WHITESPACE_AFTER_NAME ();
+     	      SKIP_WHITESPACE ();
      	    }
      	  while (*input_line_pointer++ == ',');
 
@@ -4473,8 +4472,8 @@ static void
 s_alpha_prologue (int ignore ATTRIBUTE_UNUSED)
 {
   demand_empty_rest_of_line ();
-  alpha_prologue_label = symbol_new
-    (FAKE_LABEL_NAME, now_seg, (valueT) frag_now_fix (), frag_now);
+  alpha_prologue_label = symbol_new (FAKE_LABEL_NAME, now_seg, frag_now,
+				     frag_now_fix ());
 }
 
 /* Parse .pdesc <entry_name>,{null|stack|reg}
@@ -4547,13 +4546,13 @@ s_alpha_pdesc (int ignore ATTRIBUTE_UNUSED)
   SKIP_WHITESPACE ();
   name_end = get_symbol_name (&name);
 
-  if (strncmp (name, "stack", 5) == 0)
+  if (startswith (name, "stack"))
     alpha_evax_proc->pdsckind = PDSC_S_K_KIND_FP_STACK;
 
-  else if (strncmp (name, "reg", 3) == 0)
+  else if (startswith (name, "reg"))
     alpha_evax_proc->pdsckind = PDSC_S_K_KIND_FP_REGISTER;
 
-  else if (strncmp (name, "null", 4) == 0)
+  else if (startswith (name, "null"))
     alpha_evax_proc->pdsckind = PDSC_S_K_KIND_NULL;
 
   else
@@ -4709,8 +4708,8 @@ s_alpha_linkage (int ignore ATTRIBUTE_UNUSED)
 	 BFD_RELOC_ALPHA_LINKAGE);
 
       if (alpha_insn_label == NULL)
-	alpha_insn_label = symbol_new
-	  (FAKE_LABEL_NAME, now_seg, (valueT) frag_now_fix (), frag_now);
+	alpha_insn_label = symbol_new (FAKE_LABEL_NAME, now_seg, frag_now,
+				       frag_now_fix ());
 
       /* Create a linkage element.  */
       linkage_fixup = XNEW (struct alpha_linkage_fixups);
@@ -4939,8 +4938,8 @@ s_alpha_proc (int is_static ATTRIBUTE_UNUSED)
   c = get_symbol_name (&name);
   p = input_line_pointer;
   symbolP = symbol_find_or_make (name);
-  *p = c;
-  SKIP_WHITESPACE_AFTER_NAME ();
+  restore_line_pointer (c);
+  SKIP_WHITESPACE ();
   if (*input_line_pointer != ',')
     {
       *p = 0;
@@ -5137,7 +5136,7 @@ s_alpha_arch (int ignored ATTRIBUTE_UNUSED)
       }
   as_warn (_("Unknown CPU identifier `%s'"), name);
 
-found:
+ found:
   (void) restore_line_pointer (ch);
   demand_empty_rest_of_line ();
 }
@@ -5301,7 +5300,7 @@ maybe_set_gp (asection *sec)
 
   if (!sec)
     return;
-  vma = bfd_get_section_vma (sec->owner, sec);
+  vma = bfd_section_vma (sec);
   if (vma && vma < alpha_gp_value)
     alpha_gp_value = vma;
 }
@@ -5420,17 +5419,15 @@ md_begin (void)
   }
 
   /* Create the opcode hash table.  */
-  alpha_opcode_hash = hash_new ();
+  alpha_opcode_hash = str_htab_create ();
 
   for (i = 0; i < alpha_num_opcodes;)
     {
-      const char *name, *retval, *slash;
+      const char *name, *slash;
 
       name = alpha_opcodes[i].name;
-      retval = hash_insert (alpha_opcode_hash, name, (void *) &alpha_opcodes[i]);
-      if (retval)
-	as_fatal (_("internal error: can't hash opcode `%s': %s"),
-		  name, retval);
+      if (str_hash_insert (alpha_opcode_hash, name, &alpha_opcodes[i], 0))
+	as_fatal (_("duplicate %s"), name);
 
       /* Some opcodes include modifiers of various sorts with a "/mod"
 	 syntax, like the architecture manual suggests.  However, for
@@ -5439,12 +5436,14 @@ md_begin (void)
 
       if ((slash = strchr (name, '/')) != NULL)
 	{
-	  char *p = XNEWVEC (char, strlen (name));
+	  size_t len = strlen (name);
+	  char *p = notes_alloc (len);
+	  size_t len1 = slash - name;
 
-	  memcpy (p, name, slash - name);
-	  strcpy (p + (slash - name), slash + 1);
+	  memcpy (p, name, len1);
+	  memcpy (p + len1, slash + 1, len - len1);
 
-	  (void) hash_insert (alpha_opcode_hash, p, (void *) &alpha_opcodes[i]);
+	  (void) str_hash_insert (alpha_opcode_hash, p, &alpha_opcodes[i], 0);
 	  /* Ignore failures -- the opcode table does duplicate some
 	     variants in different forms, like "hw_stq" and "hw_st/q".  */
 	}
@@ -5456,17 +5455,15 @@ md_begin (void)
     }
 
   /* Create the macro hash table.  */
-  alpha_macro_hash = hash_new ();
+  alpha_macro_hash = str_htab_create ();
 
   for (i = 0; i < alpha_num_macros;)
     {
-      const char *name, *retval;
+      const char *name;
 
       name = alpha_macros[i].name;
-      retval = hash_insert (alpha_macro_hash, name, (void *) &alpha_macros[i]);
-      if (retval)
-	as_fatal (_("internal error: can't hash macro `%s': %s"),
-		  name, retval);
+      if (str_hash_insert (alpha_macro_hash, name, &alpha_macros[i], 0))
+	as_fatal (_("duplicate %s"), name);
 
       while (++i < alpha_num_macros
 	     && (alpha_macros[i].name == name
@@ -5480,8 +5477,8 @@ md_begin (void)
       char name[4];
 
       sprintf (name, "$%d", i);
-      alpha_register_table[i] = symbol_create (name, reg_section, i,
-					       &zero_address_frag);
+      alpha_register_table[i] = symbol_create (name, reg_section,
+					       &zero_address_frag, i);
     }
 
   for (; i < 64; ++i)
@@ -5489,8 +5486,8 @@ md_begin (void)
       char name[5];
 
       sprintf (name, "$f%d", i - 32);
-      alpha_register_table[i] = symbol_create (name, reg_section, i,
-					       &zero_address_frag);
+      alpha_register_table[i] = symbol_create (name, reg_section,
+					       &zero_address_frag, i);
     }
 
   /* Create the special symbols and sections we'll be using.  */
@@ -5503,8 +5500,8 @@ md_begin (void)
 
   /* For handling the GP, create a symbol that won't be output in the
      symbol table.  We'll edit it out of relocs later.  */
-  alpha_gp_symbol = symbol_create ("<GP value>", alpha_lita_section, 0x8000,
-				   &zero_address_frag);
+  alpha_gp_symbol = symbol_create ("<GP value>", alpha_lita_section,
+				   &zero_address_frag, 0x8000);
 #endif
 
 #ifdef OBJ_EVAX
@@ -5515,13 +5512,13 @@ md_begin (void)
   if (ECOFF_DEBUGGING)
     {
       segT sec = subseg_new (".mdebug", (subsegT) 0);
-      bfd_set_section_flags (stdoutput, sec, SEC_HAS_CONTENTS | SEC_READONLY);
-      bfd_set_section_alignment (stdoutput, sec, 3);
+      bfd_set_section_flags (sec, SEC_HAS_CONTENTS | SEC_READONLY);
+      bfd_set_section_alignment (sec, 3);
     }
 #endif
 
   /* Create literal lookup hash table.  */
-  alpha_literal_hash = hash_new ();
+  alpha_literal_hash = str_htab_create ();
 
   subseg_set (text_section, 0);
 }
@@ -5563,7 +5560,7 @@ md_assemble (char *str)
 valueT
 md_section_align (segT seg, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
+  int align = bfd_section_alignment (seg);
   valueT mask = ((valueT) 1 << align) - 1;
 
   return (size + mask) & ~mask;
@@ -5591,7 +5588,7 @@ md_atof (int type, char *litP, int *sizeP)
       return vax_md_atof (type, litP, sizeP);
 
     default:
-      return ieee_md_atof (type, litP, sizeP, FALSE);
+      return ieee_md_atof (type, litP, sizeP, false);
     }
 }
 
@@ -5977,10 +5974,10 @@ md_apply_fix (fixS *fixP, valueT * valP, segT seg)
       goto done;
     }
 
-write_done:
+ write_done:
   md_number_to_chars (fixpos, image, 4);
 
-done:
+ done:
   fixP->fx_done = 1;
 }
 
@@ -6344,7 +6341,7 @@ tc_get_register (int frame ATTRIBUTE_UNUSED)
     }
   as_warn (_("frame reg expected, using $%d."), framereg);
 
-found:
+ found:
   note_gpreg (framereg);
   return framereg;
 }

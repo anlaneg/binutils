@@ -1,5 +1,5 @@
 /* tc-tic54x.h -- Header file for tc-tic54x.c
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
    Contributed by Timothy Wall (twall@alum.mit.edu)
 
    This file is part of GAS, the GNU Assembler.
@@ -35,6 +35,8 @@
 #define MAX_OPERANDS 4
 #define PARALLEL_SEPARATOR '|'
 #define LABELS_WITHOUT_COLONS 1
+#undef LOCAL_LABELS_FB
+
 /* accept 0FFFFh, 1010b, etc.  */
 #define NUMBERS_WITH_SUFFIX 1
 /* $ is section program counter */
@@ -64,10 +66,13 @@ struct bit_info
 #define TC_FRAG_TYPE int
 #define TC_FRAG_INIT(FRAGP, MAX_BYTES) do {(FRAGP)->tc_frag_data = 0;}while (0)
 
-/* tell GAS whether the given token is indeed a code label */
+/* Tell GAS whether the given token is indeed a code label.
+   Note - we make of the knowledge that this macro will be called from
+   read.c:read_a_source_file()  in that we also pass the local variable
+   line_start.  */
 #define TC_START_LABEL_WITHOUT_COLON(NUL_CHAR, NEXT_CHAR) \
-  tic54x_start_label(NUL_CHAR, NEXT_CHAR)
-extern int tic54x_start_label (int, int);
+  tic54x_start_label (line_start, NUL_CHAR, NEXT_CHAR)
+extern int tic54x_start_label (char *, int, int);
 
 /* custom handling for relocations in cons expressions */
 #define TC_CONS_FIX_NEW(FRAG, OFF, LEN, EXP, RELOC)	\
@@ -125,5 +130,8 @@ extern void tic54x_convert_frag(bfd *, segT, fragS *);
 #define LISTING_WORD_SIZE 2
 
 extern void tic54x_global (int);
+
+extern void tic54x_md_end (void);
+#define md_end tic54x_md_end
 
 #endif

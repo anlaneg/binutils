@@ -1,4 +1,4 @@
-# Copyright 2008-2019 Free Software Foundation, Inc.
+# Copyright 2008-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -49,9 +49,7 @@ if {[bad_dejagnu]} {
     return 0
 }
 
-if {![can_spawn_for_attach]} {
-    return 0
-}
+require can_spawn_for_attach
 
 standard_testfile
 
@@ -61,8 +59,6 @@ proc test {} {
     global binfile
     global gdb_prompt
     global decimal
-
-    clean_restart ${binfile}
 
     set test_spawn_id [spawn_wait_for_attach $binfile]
     set testpid [spawn_id_get_pid $test_spawn_id]
@@ -78,7 +74,7 @@ proc test {} {
 		    # Seen when "set debug libthread_db" is on.
 		    exp_continue
 		}
-		-re "warning: Cannot attach to lwp $decimal: Operation not permitted" {
+		-re "Cannot attach to lwp $decimal: Operation not permitted" {
 		    # On Linux, PTRACE_ATTACH sometimes fails with
 		    # EPERM, even though /proc/PID/status indicates
 		    # the thread is running.
@@ -100,6 +96,10 @@ proc test {} {
 		}
 	    }
 
+	    if { $eperm } {
+		continue
+	    }
+
 	    # Sleep a bit and try updating the thread list.  We should
 	    # know about all threads already at this point.  If we see
 	    # "New Thread" or similar being output, then "attach" is
@@ -108,12 +108,18 @@ proc test {} {
 	    sleep 1
 
 	    set test "no new threads"
-	    gdb_test_multiple "info threads" $test {
-		-re "New .*$gdb_prompt $" {
-		    fail $test
+	    set status 1
+	    gdb_test_multiple "info threads" $test -lbl {
+		-re "\r\n\[^\r\n\]*New " {
+		    set status 0
+		    exp_continue
 		}
-		-re "$gdb_prompt $" {
-		    pass $test
+		-re -wrap "" {
+		    if { $status == 1 } {
+			pass $gdb_test_name
+		    } else {
+			fail $gdb_test_name
+		    }
 		}
 	    }
 
@@ -128,16 +134,39 @@ proc test {} {
 	    # detaching from the program and reattaching, we check that
 	    # the program doesn't die due to gdb leaving a pending
 	    # breakpoint hit on a new thread unprocessed.
-	    gdb_test "break break_fn" "Breakpoint.*" "break break_fn"
+	    gdb_test "break break_fn" "Breakpoint.*"
 
 	    # Wait a bit, to give time for most threads to hit the
 	    # breakpoint, including threads we might have failed to
 	    # attach.
 	    sleep 2
 
+	    set re_pr26286 \
+		[multi_line \
+		     [string_to_regexp \
+			  "Program terminated with signal SIGTRAP, Trace/breakpoint trap."] \
+		     [string_to_regexp \
+			  "The program no longer exists."]]
+
 	    set bps 3
+	    set exited 0
 	    for {set bp 1} { $bp <= $bps } { incr bp } {
-		gdb_test "continue" "Breakpoint.*" "break at break_fn: $bp"
+		gdb_test_multiple "continue" "break at break_fn: $bp" {
+		    -re -wrap "$re_pr26286" {
+			kfail threads/26286 $gdb_test_name
+			set exited 1
+		    }
+		    -re -wrap "Breakpoint.*" {
+			pass $gdb_test_name
+		    }
+		}
+		if { $exited } {
+		    break
+		}
+	    }
+
+	    if { $exited } {
+		return
 	    }
 
 	    if {$attempt < $attempts} {
@@ -164,7 +193,8 @@ proc test {} {
 # failure.
 set options { "additional_flags=-DTIMEOUT=$timeout" debug pthreads }
 
-if {[prepare_for_testing "failed to prepare" $testfile $srcfile $options] == -1} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile \
+	 $options] == -1} {
     return -1
 }
 

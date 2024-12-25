@@ -1,5 +1,5 @@
 /* Support for GDB maintenance commands.
-   Copyright (C) 2013-2019 Free Software Foundation, Inc.
+   Copyright (C) 2013-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,15 +16,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef MAINT_H
-#define MAINT_H
+#ifndef GDB_MAINT_H
+#define GDB_MAINT_H
 
-#include "common/run-time-clock.h"
+#include "gdbsupport/run-time-clock.h"
 #include <chrono>
 
 extern void set_per_command_time (int);
 
 extern void set_per_command_space (int);
+
+/* Update the thread pool for the desired number of threads.  */
+
+extern void update_thread_pool_size ();
 
 /* Records a run time and space usage to be used as a base for
    reporting elapsed time or change in space.  */
@@ -38,9 +42,10 @@ class scoped_command_stats
 
  private:
 
-  // No need for these.  They are intentionally not defined anywhere.
-  scoped_command_stats &operator= (const scoped_command_stats &);
-  scoped_command_stats (const scoped_command_stats &);
+  DISABLE_COPY_AND_ASSIGN (scoped_command_stats);
+
+  /* Print the time, along with a string.  */
+  void print_time (const char *msg);
 
   /* Zero if the saved time is from the beginning of GDB execution.
      One if from the beginning of an individual command execution.  */
@@ -48,9 +53,9 @@ class scoped_command_stats
   /* Track whether the stat was enabled at the start of the command
      so that we can avoid printing anything if it gets turned on by
      the current command.  */
-  int m_time_enabled : 1;
-  int m_space_enabled : 1;
-  int m_symtab_enabled : 1;
+  bool m_time_enabled : 1;
+  bool m_space_enabled : 1;
+  bool m_symtab_enabled : 1;
   run_time_clock::time_point m_start_cpu_time;
   std::chrono::steady_clock::time_point m_start_wall_time;
   long m_start_space;
@@ -62,4 +67,7 @@ class scoped_command_stats
   int m_start_nr_blocks;
 };
 
-#endif /* MAINT_H */
+extern obj_section *maint_obj_section_from_bfd_section (bfd *abfd,
+							asection *asection,
+							objfile *ofile);
+#endif /* GDB_MAINT_H */

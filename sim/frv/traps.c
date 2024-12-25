@@ -1,5 +1,5 @@
 /* frv trap support
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
    Contributed by Red Hat.
 
 This file is part of the GNU simulators.
@@ -17,17 +17,23 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define WANT_CPU frvbf
 #define WANT_CPU_FRVBF
 
 #include "sim-main.h"
-#include "targ-vals.h"
 #include "cgen-engine.h"
 #include "cgen-par.h"
 #include "sim-fpu.h"
+#include "sim-signal.h"
+#include "sim/callback.h"
 
 #include "bfd.h"
 #include "libiberty.h"
+
+#include <stdlib.h>
 
 CGEN_ATTR_VALUE_ENUM_TYPE frv_current_fm_slot;
 
@@ -127,13 +133,13 @@ frv_itrap (SIM_CPU *current_cpu, PCADDR pc, USI base, SI offset)
 	s.arg2 = GET_H_GR (9);
 	s.arg3 = GET_H_GR (10);
 
-	if (s.func == TARGET_SYS_exit)
+	if (cb_target_to_host_syscall (cb, s.func) == CB_SYS_exit)
 	  {
 	    sim_engine_halt (sd, current_cpu, NULL, pc, sim_exited, s.arg1);
 	  }
 
-	s.p1 = (PTR) sd;
-	s.p2 = (PTR) current_cpu;
+	s.p1 = sd;
+	s.p2 = current_cpu;
 	s.read_mem = syscall_read_mem;
 	s.write_mem = syscall_write_mem;
 	cb_syscall (cb, &s);
@@ -166,7 +172,7 @@ frv_itrap (SIM_CPU *current_cpu, PCADDR pc, USI base, SI offset)
 #if TRAPDUMP || (defined (TRAP_REGDUMP1)) || (defined (TRAP_REGDUMP2))
       {
 	char buf[256];
-	int i, j;
+	int i;
 
 	buf[0] = 0;
 	if (STATE_TEXT_SECTION (sd)
@@ -270,7 +276,8 @@ frv_mtrap (SIM_CPU *current_cpu)
 
   /* Check the status of media exceptions in MSR0.  */
   SI msr = GET_MSR (0);
-  if (GET_MSR_AOVF (msr) || GET_MSR_MTT (msr) && STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550)
+  if (GET_MSR_AOVF (msr)
+      || (GET_MSR_MTT (msr) && STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550))
     frv_queue_program_interrupt (current_cpu, FRV_MP_EXCEPTION);
 }
 
@@ -278,14 +285,14 @@ frv_mtrap (SIM_CPU *current_cpu)
 void
 frv_break (SIM_CPU *current_cpu)
 {
-  IADDR pc;
   SIM_DESC sd = CPU_STATE (current_cpu);
 
   if (STATE_ENVIRONMENT (sd) != OPERATING_ENVIRONMENT)
     {
       /* Invalidate the insn cache because the debugger will presumably
 	 replace the breakpoint insn with the real one.  */
-      sim_engine_halt (sd, current_cpu, NULL, pc, sim_stopped, SIM_SIGTRAP);
+      sim_engine_halt (sd, current_cpu, NULL, NULL_CIA, sim_stopped,
+		       SIM_SIGTRAP);
     }
 
   frv_queue_break_interrupt (current_cpu);
@@ -740,7 +747,7 @@ frvbf_check_acc_range (SIM_CPU *current_cpu, SI regno)
   /* Only applicable to fr550 */
   SIM_DESC sd = CPU_STATE (current_cpu);
   if (STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550)
-    return;
+    return 1;
 
   /* On the fr550, media insns in slots 0 and 2 can only access
      accumulators acc0-acc3. Insns in slots 1 and 3 can only access
@@ -773,7 +780,7 @@ frvbf_check_swap_address (SIM_CPU *current_cpu, SI address)
   if (STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550)
     return;
 
-  /* Adress must be aligned on a word boundary.  */
+  /* Address must be aligned on a word boundary.  */
   if (address & 0x3)
     frv_queue_data_access_exception_interrupt (current_cpu);
 }
@@ -817,7 +824,6 @@ clear_ne_flags (
 )
 {
   SI NE_flags[2];
-  int exception;
 
   GET_NE_FLAGS (NE_flags, NE_base);
   if (target_index >= 0)
@@ -850,7 +856,6 @@ frvbf_clear_ne_flags (SIM_CPU *current_cpu, SI target_index, BI is_float)
 {
   int hi_available;
   int lo_available;
-  int exception;
   SI NE_base;
   USI necr;
   FRV_REGISTER_CONTROL *control;
@@ -890,7 +895,6 @@ frvbf_commit (SIM_CPU *current_cpu, SI target_index, BI is_float)
   SI NE_base;
   SI NE_flags[2];
   BI NE_flag;
-  int exception;
   int hi_available;
   int lo_available;
   USI necr;
@@ -917,8 +921,8 @@ frvbf_commit (SIM_CPU *current_cpu, SI target_index, BI is_float)
     NE_flag = GET_NE_FLAG (NE_flags, target_index);
   else
     {
-      NE_flag =
-	hi_available && NE_flags[0] != 0 || lo_available && NE_flags[1] != 0;
+      NE_flag = (hi_available && NE_flags[0] != 0)
+		|| (lo_available && NE_flags[1] != 0);
     }
 
   /* Always clear the appropriate NE flags.  */

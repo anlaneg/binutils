@@ -1,5 +1,5 @@
 /* s12z-dis.c -- Freescale S12Z disassembly
-   Copyright (C) 2018-2019 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -20,18 +20,16 @@
 
 #include "sysdep.h"
 #include <stdio.h>
-#include "bfd_stdint.h"
+#include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
 
 #include "opcode/s12z.h"
-
 #include "bfd.h"
 #include "dis-asm.h"
-
 #include "disassemble.h"
-
 #include "s12z-opc.h"
+#include "opintl.h"
 
 struct mem_read_abstraction
 {
@@ -61,16 +59,12 @@ abstract_read_memory (struct mem_read_abstraction_base *b,
 {
   struct mem_read_abstraction *mra = (struct mem_read_abstraction *) b;
 
-  int status =
-    (*mra->info->read_memory_func) (mra->memaddr + offset,
-				    bytes, n, mra->info);
-
+  int status = (*mra->info->read_memory_func) (mra->memaddr + offset,
+					       bytes, n, mra->info);
   if (status != 0)
-    {
-      (*mra->info->memory_error_func) (status, mra->memaddr, mra->info);
-      return -1;
-    }
-  return 0;
+    (*mra->info->memory_error_func) (status, mra->memaddr + offset,
+                                     mra->info);
+  return status != 0 ? -1 : 0;
 }
 
 /* Start of disassembly file.  */
@@ -211,31 +205,16 @@ operand_separator (struct disassemble_info *info)
    there is no symbol.  If BASE is non zero, then the a PC relative adddress is
    assumend (ie BASE is the value in the PC.  */
 static void
-decode_possible_symbol (bfd_vma addr, bfd_vma base,
+decode_possible_symbol (bfd_signed_vma addr, bfd_vma base,
                         struct disassemble_info *info, bool relative)
 {
-  const char *fmt = relative  ? "*%+" BFD_VMA_FMT "d" : "%" BFD_VMA_FMT "d";
-  if (!info->symbol_at_address_func (addr + base, info))
-    {
-      (*info->fprintf_func) (info->stream, fmt, addr);
-    }
+  const char *fmt = relative ? "*%+" PRId64 : "%" PRId64;
+  asymbol *sym = info->symbol_at_address_func (addr + base, info);
+
+  if (!sym)
+    (*info->fprintf_func) (info->stream, fmt, (int64_t) addr);
   else
-    {
-      asymbol *sym = NULL;
-      int j;
-      for (j = 0; j < info->symtab_size; ++j)
-	{
-	  sym = info->symtab[j];
-	  if (bfd_asymbol_value (sym) == addr + base)
-	    {
-	      break;
-	    }
-	}
-      if (j < info->symtab_size)
-	(*info->fprintf_func) (info->stream, "%s", bfd_asymbol_name (sym));
-      else
-        (*info->fprintf_func) (info->stream, fmt, addr);
-    }
+    (*info->fprintf_func) (info->stream, "%s", bfd_asymbol_name (sym));
 }
 
 
@@ -255,7 +234,11 @@ opr_emit_disassembly (const struct operand *opr,
     case OPND_CL_REGISTER:
       {
         int r = ((struct register_operand*) opr)->reg;
-	(*info->fprintf_func) (info->stream, "%s", registers[r].name);
+
+	if (r < 0 || r >= S12Z_N_REGISTERS)
+	  (*info->fprintf_func) (info->stream, _("<illegal reg num>"));
+	else
+	  (*info->fprintf_func) (info->stream, "%s", registers[r].name);
       }
       break;
     case OPND_CL_REGISTER_ALL16:
@@ -306,14 +289,25 @@ opr_emit_disassembly (const struct operand *opr,
 	    break;
 	  }
 	if (mo->n_regs > 0)
-	  (*info->fprintf_func) (info->stream, fmt,
-				 registers[mo->regs[0]].name);
+	  {
+	    int r = mo->regs[0];
+
+	    if (r < 0 || r >= S12Z_N_REGISTERS)
+	      (*info->fprintf_func) (info->stream, fmt, _("<illegal reg num>"));
+	    else
+	      (*info->fprintf_func) (info->stream, fmt, registers[r].name);
+	  }
 	used_reg = 1;
 
         if (mo->n_regs > used_reg)
           {
-            (*info->fprintf_func) (info->stream, ",%s",
-				   registers[mo->regs[used_reg]].name);
+	    int r = mo->regs[used_reg];
+
+	    if (r < 0 || r >= S12Z_N_REGISTERS)
+	      (*info->fprintf_func) (info->stream, _("<illegal reg num>"));
+	    else
+	      (*info->fprintf_func) (info->stream, ",%s",
+				     registers[r].name);
           }
 
 	(*info->fprintf_func) (info->stream, "%c",
@@ -323,7 +317,9 @@ opr_emit_disassembly (const struct operand *opr,
     };
 }
 
-static const char shift_size_table[] = {
+#define S12Z_N_SIZES 4
+static const char shift_size_table[S12Z_N_SIZES] =
+{
   'b', 'w', 'p', 'l'
 };
 
@@ -331,7 +327,7 @@ int
 print_insn_s12z (bfd_vma memaddr, struct disassemble_info* info)
 {
   int o;
-  enum operator operator = OP_INVALID;
+  enum optr operator = OP_INVALID;
   int n_operands = 0;
 
   /* The longest instruction in S12Z can have 6 operands.
@@ -357,6 +353,7 @@ print_insn_s12z (bfd_vma memaddr, struct disassemble_info* info)
   if (osize == -1)
     {
       bool suffix = false;
+
       for (o = 0; o < n_operands; ++o)
 	{
 	  if (operands[o] && operands[o]->osize != -1)
@@ -366,17 +363,25 @@ print_insn_s12z (bfd_vma memaddr, struct disassemble_info* info)
 		  (*mra.info->fprintf_func) (mra.info->stream, "%c", '.');
 		  suffix = true;
 		}
-	      (*mra.info->fprintf_func) (mra.info->stream, "%c",
-				     shift_size_table[operands[o]->osize]);
+
+	      osize = operands[o]->osize;
+
+	      if (osize < 0 || osize >= S12Z_N_SIZES)
+		(*mra.info->fprintf_func) (mra.info->stream, _("<bad>"));
+	      else
+		(*mra.info->fprintf_func) (mra.info->stream, "%c",
+					   shift_size_table[osize]);
 	    }
 	}
     }
   else
     {
-      (*mra.info->fprintf_func) (mra.info->stream, ".%c",
-			     shift_size_table[osize]);
+      if (osize < 0 || osize >= S12Z_N_SIZES)
+	(*mra.info->fprintf_func) (mra.info->stream, _(".<bad>"));
+      else
+	(*mra.info->fprintf_func) (mra.info->stream, ".%c",
+				   shift_size_table[osize]);
     }
-
 
   /* Ship out the operands.  */
   for (o = 0; o < n_operands; ++o)

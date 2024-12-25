@@ -1,5 +1,5 @@
 /* Low level Alpha GNU/Linux interface, for GDB when running native.
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,12 +16,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "target.h"
 #include "regcache.h"
 #include "linux-nat-trad.h"
 
 #include "alpha-tdep.h"
+#include "gdbarch.h"
 
 #include "nat/gdb_ptrace.h"
 #include <alpha/ptrace.h>
@@ -100,8 +100,9 @@ alpha_linux_nat_target::register_u_offset (struct gdbarch *gdbarch,
     return FPR_BASE + regno - gdbarch_fp0_regnum (gdbarch);
 }
 
+void _initialize_alpha_linux_nat ();
 void
-_initialize_alpha_linux_nat (void)
+_initialize_alpha_linux_nat ()
 {
   linux_target = &the_alpha_linux_nat_target;
   add_inf_child_target (&the_alpha_linux_nat_target);

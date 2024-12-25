@@ -1,6 +1,6 @@
 /* Native-dependent code for modern i386 BSD's.
 
-   Copyright (C) 2000-2019 Free Software Foundation, Inc.
+   Copyright (C) 2000-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "inferior.h"
 #include "regcache.h"
 
@@ -33,6 +32,21 @@
 #include "i386-bsd-nat.h"
 #include "inf-ptrace.h"
 
+
+static PTRACE_TYPE_RET
+gdb_ptrace (PTRACE_TYPE_ARG1 request, ptid_t ptid, PTRACE_TYPE_ARG3 addr,
+	    PTRACE_TYPE_ARG4 data)
+{
+#ifdef __NetBSD__
+  gdb_assert (data == 0);
+  /* Support for NetBSD threads: unlike other ptrace implementations in this
+     file, NetBSD requires that we pass both the pid and lwp.  */
+  return ptrace (request, ptid.pid (), addr, ptid.lwp ());
+#else
+  pid_t pid = get_ptrace_pid (ptid);
+  return ptrace (request, pid, addr, data);
+#endif
+}
 
 /* In older BSD versions we cannot get at some of the segment
    registers.  FreeBSD for example didn't support the %fs and %gs
@@ -77,11 +91,9 @@ static int i386bsd_r_reg_offset[] =
 #define GETREGS_SUPPLIES(regnum) \
   ((0 <= (regnum) && (regnum) <= 15))
 
-#ifdef HAVE_PT_GETXMMREGS
 /* Set to 1 if the kernel supports PT_GETXMMREGS.  Initialized to -1
    so that we try PT_GETXMMREGS the first time around.  */
 static int have_ptrace_xmmregs = -1;
-#endif
 
 
 /* Supply the general-purpose registers in GREGS, to REGCACHE.  */
@@ -130,13 +142,13 @@ i386bsd_collect_gregset (const struct regcache *regcache,
 void
 i386bsd_fetch_inferior_registers (struct regcache *regcache, int regnum)
 {
-  pid_t pid = get_ptrace_pid (regcache->ptid ());
+  ptid_t ptid = regcache->ptid ();
 
   if (regnum == -1 || GETREGS_SUPPLIES (regnum))
     {
       struct reg regs;
 
-      if (ptrace (PT_GETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
+      if (gdb_ptrace (PT_GETREGS, ptid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
       i386bsd_supply_gregset (regcache, &regs);
@@ -147,28 +159,11 @@ i386bsd_fetch_inferior_registers (struct regcache *regcache, int regnum)
   if (regnum == -1 || regnum >= I386_ST0_REGNUM)
     {
       struct fpreg fpregs;
-#ifdef HAVE_PT_GETXMMREGS
       char xmmregs[512];
-#endif
 
-#ifdef PT_GETXSTATE_INFO
-      if (x86bsd_xsave_len != 0)
-	{
-	  void *xstateregs;
-
-	  xstateregs = alloca (x86bsd_xsave_len);
-	  if (ptrace (PT_GETXSTATE, pid,
-		      (PTRACE_TYPE_ARG3) xstateregs, 0) == -1)
-	    perror_with_name (_("Couldn't get extended state status"));
-
-	  i387_supply_xsave (regcache, -1, xstateregs);
-	  return;
-	}
-#endif
-      
-#ifdef HAVE_PT_GETXMMREGS
       if (have_ptrace_xmmregs != 0
-	  && ptrace(PT_GETXMMREGS, pid, (PTRACE_TYPE_ARG3) xmmregs, 0) == 0)
+	  && gdb_ptrace(PT_GETXMMREGS, ptid,
+			(PTRACE_TYPE_ARG3) xmmregs, 0) == 0)
 	{
 	  have_ptrace_xmmregs = 1;
 	  i387_supply_fxsave (regcache, -1, xmmregs);
@@ -176,14 +171,12 @@ i386bsd_fetch_inferior_registers (struct regcache *regcache, int regnum)
       else
 	{
 	  have_ptrace_xmmregs = 0;
-#endif
-          if (ptrace (PT_GETFPREGS, pid, (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
+	  if (gdb_ptrace (PT_GETFPREGS, ptid,
+			  (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
 	    perror_with_name (_("Couldn't get floating point status"));
 
 	  i387_supply_fsave (regcache, -1, &fpregs);
-#ifdef HAVE_PT_GETXMMREGS
 	}
-#endif
     }
 }
 
@@ -193,19 +186,19 @@ i386bsd_fetch_inferior_registers (struct regcache *regcache, int regnum)
 void
 i386bsd_store_inferior_registers (struct regcache *regcache, int regnum)
 {
-  pid_t pid = get_ptrace_pid (regcache->ptid ());
+  ptid_t ptid = regcache->ptid ();
 
   if (regnum == -1 || GETREGS_SUPPLIES (regnum))
     {
       struct reg regs;
 
-      if (ptrace (PT_GETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-        perror_with_name (_("Couldn't get registers"));
+      if (gdb_ptrace (PT_GETREGS, ptid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
+	perror_with_name (_("Couldn't get registers"));
 
       i386bsd_collect_gregset (regcache, &regs, regnum);
 
-      if (ptrace (PT_SETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-        perror_with_name (_("Couldn't write registers"));
+      if (gdb_ptrace (PT_SETREGS, ptid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
+	perror_with_name (_("Couldn't write registers"));
 
       if (regnum != -1)
 	return;
@@ -214,75 +207,47 @@ i386bsd_store_inferior_registers (struct regcache *regcache, int regnum)
   if (regnum == -1 || regnum >= I386_ST0_REGNUM)
     {
       struct fpreg fpregs;
-#ifdef HAVE_PT_GETXMMREGS
       char xmmregs[512];
-#endif
 
-#ifdef PT_GETXSTATE_INFO
-      if (x86bsd_xsave_len != 0)
-	{
-	  void *xstateregs;
-
-	  xstateregs = alloca (x86bsd_xsave_len);
-	  if (ptrace (PT_GETXSTATE, pid,
-		      (PTRACE_TYPE_ARG3) xstateregs, 0) == -1)
-	    perror_with_name (_("Couldn't get extended state status"));
-
-	  i387_collect_xsave (regcache, -1, xstateregs, 0);
-
-	  if (ptrace (PT_SETXSTATE, pid,
-		      (PTRACE_TYPE_ARG3) xstateregs, x86bsd_xsave_len) == -1)
-	    perror_with_name (_("Couldn't write extended state status"));
-	  return;
-	}
-#endif
-
-#ifdef HAVE_PT_GETXMMREGS
       if (have_ptrace_xmmregs != 0
-	  && ptrace(PT_GETXMMREGS, pid, (PTRACE_TYPE_ARG3) xmmregs, 0) == 0)
+	  && gdb_ptrace(PT_GETXMMREGS, ptid,
+			(PTRACE_TYPE_ARG3) xmmregs, 0) == 0)
 	{
 	  have_ptrace_xmmregs = 1;
 
 	  i387_collect_fxsave (regcache, regnum, xmmregs);
 
-	  if (ptrace (PT_SETXMMREGS, pid, (PTRACE_TYPE_ARG3) xmmregs, 0) == -1)
-            perror_with_name (_("Couldn't write XMM registers"));
+	  if (gdb_ptrace (PT_SETXMMREGS, ptid,
+			  (PTRACE_TYPE_ARG3) xmmregs, 0) == -1)
+	    perror_with_name (_("Couldn't write XMM registers"));
 	}
       else
 	{
 	  have_ptrace_xmmregs = 0;
-#endif
-          if (ptrace (PT_GETFPREGS, pid, (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
+	  if (gdb_ptrace (PT_GETFPREGS, ptid,
+			  (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
 	    perror_with_name (_("Couldn't get floating point status"));
 
-          i387_collect_fsave (regcache, regnum, &fpregs);
+	  i387_collect_fsave (regcache, regnum, &fpregs);
 
-          if (ptrace (PT_SETFPREGS, pid, (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
+	  if (gdb_ptrace (PT_SETFPREGS, ptid,
+			  (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
 	    perror_with_name (_("Couldn't write floating point status"));
-#ifdef HAVE_PT_GETXMMREGS
-        }
-#endif
+	}
     }
 }
 
+void _initialize_i386bsd_nat ();
 void
-_initialize_i386bsd_nat (void)
+_initialize_i386bsd_nat ()
 {
-  int offset;
-
   /* To support the recognition of signal handlers, i386-bsd-tdep.c
      hardcodes some constants.  Inclusion of this file means that we
      are compiling a native debugger, which means that we can use the
      system header files and sysctl(3) to get at the relevant
      information.  */
 
-#if defined (__FreeBSD_version) && __FreeBSD_version >= 400011
-#define SC_REG_OFFSET i386fbsd4_sc_reg_offset
-#elif defined (__FreeBSD_version) && __FreeBSD_version >= 300005
-#define SC_REG_OFFSET i386fbsd_sc_reg_offset
-#elif defined (NetBSD) || defined (__NetBSD_Version__)
-#define SC_REG_OFFSET i386nbsd_sc_reg_offset
-#elif defined (OpenBSD)
+#if defined (OpenBSD)
 #define SC_REG_OFFSET i386obsd_sc_reg_offset
 #endif
 
@@ -300,7 +265,7 @@ _initialize_i386bsd_nat (void)
 
   /* Override the default value for the offset of the program counter
      in the sigcontext structure.  */
-  offset = offsetof (struct sigcontext, sc_pc);
+  int offset = offsetof (struct sigcontext, sc_pc);
 
   if (SC_PC_OFFSET != offset)
     {

@@ -1,6 +1,6 @@
 /* Native-dependent code for FreeBSD/riscv.
 
-   Copyright (C) 2018-2019 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "regcache.h"
 #include "target.h"
 
 #include <sys/types.h>
@@ -37,24 +37,6 @@ struct riscv_fbsd_nat_target final : public fbsd_nat_target
 
 static riscv_fbsd_nat_target the_riscv_fbsd_nat_target;
 
-/* Determine if PT_GETREGS fetches REGNUM.  */
-
-static bool
-getregs_supplies (struct gdbarch *gdbarch, int regnum)
-{
-  return ((regnum >= RISCV_RA_REGNUM && regnum <= RISCV_PC_REGNUM)
-	  || regnum == RISCV_CSR_SSTATUS_REGNUM);
-}
-
-/* Determine if PT_GETFPREGS fetches REGNUM.  */
-
-static bool
-getfpregs_supplies (struct gdbarch *gdbarch, int regnum)
-{
-  return ((regnum >= RISCV_FIRST_FP_REGNUM && regnum <= RISCV_LAST_FP_REGNUM)
-	  || regnum == RISCV_CSR_FCSR_REGNUM);
-}
-
 /* Fetch register REGNUM from the inferior.  If REGNUM is -1, do this
    for all registers.  */
 
@@ -62,32 +44,12 @@ void
 riscv_fbsd_nat_target::fetch_registers (struct regcache *regcache,
 					int regnum)
 {
-  pid_t pid = get_ptrace_pid (regcache->ptid ());
-
-  struct gdbarch *gdbarch = regcache->arch ();
   if (regnum == -1 || regnum == RISCV_ZERO_REGNUM)
     regcache->raw_supply_zeroed (RISCV_ZERO_REGNUM);
-  if (regnum == -1 || getregs_supplies (gdbarch, regnum))
-    {
-      struct reg regs;
-
-      if (ptrace (PT_GETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-	perror_with_name (_("Couldn't get registers"));
-
-      regcache->supply_regset (&riscv_fbsd_gregset, regnum, &regs,
-			       sizeof (regs));
-    }
-
-  if (regnum == -1 || getfpregs_supplies (gdbarch, regnum))
-    {
-      struct fpreg fpregs;
-
-      if (ptrace (PT_GETFPREGS, pid, (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
-	perror_with_name (_("Couldn't get floating point status"));
-
-      regcache->supply_regset (&riscv_fbsd_fpregset, regnum, &fpregs,
-			       sizeof (fpregs));
-    }
+  fetch_register_set<struct reg> (regcache, regnum, PT_GETREGS,
+				  &riscv_fbsd_gregset);
+  fetch_register_set<struct fpreg> (regcache, regnum, PT_GETFPREGS,
+				    &riscv_fbsd_fpregset);
 }
 
 /* Store register REGNUM back into the inferior.  If REGNUM is -1, do
@@ -97,40 +59,15 @@ void
 riscv_fbsd_nat_target::store_registers (struct regcache *regcache,
 					int regnum)
 {
-  pid_t pid = get_ptrace_pid (regcache->ptid ());
-
-  struct gdbarch *gdbarch = regcache->arch ();
-  if (regnum == -1 || getregs_supplies (gdbarch, regnum))
-    {
-      struct reg regs;
-
-      if (ptrace (PT_GETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-	perror_with_name (_("Couldn't get registers"));
-
-      regcache->collect_regset (&riscv_fbsd_gregset, regnum, &regs,
-			       sizeof (regs));
-
-      if (ptrace (PT_SETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-	perror_with_name (_("Couldn't write registers"));
-    }
-
-  if (regnum == -1 || getfpregs_supplies (gdbarch, regnum))
-    {
-      struct fpreg fpregs;
-
-      if (ptrace (PT_GETFPREGS, pid, (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
-	perror_with_name (_("Couldn't get floating point status"));
-
-      regcache->collect_regset (&riscv_fbsd_fpregset, regnum, &fpregs,
-				sizeof (fpregs));
-
-      if (ptrace (PT_SETFPREGS, pid, (PTRACE_TYPE_ARG3) &fpregs, 0) == -1)
-	perror_with_name (_("Couldn't write floating point status"));
-    }
+  store_register_set<struct reg> (regcache, regnum, PT_GETREGS, PT_SETREGS,
+				  &riscv_fbsd_gregset);
+  store_register_set<struct fpreg> (regcache, regnum, PT_GETFPREGS,
+				    PT_SETFPREGS, &riscv_fbsd_fpregset);
 }
 
+void _initialize_riscv_fbsd_nat ();
 void
-_initialize_riscv_fbsd_nat (void)
+_initialize_riscv_fbsd_nat ()
 {
   add_inf_child_target (&the_riscv_fbsd_nat_target);
 }

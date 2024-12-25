@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+#   Copyright (C) 2006-2024 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -55,12 +55,6 @@ vxworks_after_open (void)
 
 EOF
 
-PARSE_AND_LIST_PROLOGUE=$PARSE_AND_LIST_PROLOGUE'
-enum {
-  OPTION_FORCE_DYNAMIC = 501
-};
-'
-
 PARSE_AND_LIST_LONGOPTS=$PARSE_AND_LIST_LONGOPTS'
   {"force-dynamic", no_argument, NULL, OPTION_FORCE_DYNAMIC},
 '
@@ -83,7 +77,7 @@ PARSE_AND_LIST_ARGS_CASES=$PARSE_AND_LIST_ARGS_CASES'
 #
 #   (2) VXWORKS_BASE_EM_FILE set the hook's LDEMUL_FOO variable to
 #	gld${EMULATION_NAME}_foo.  This means that the file has
-#	replaced elf32.em's default definition, so we simply #define
+#	replaced elf.em's default definition, so we simply #define
 #	the current value of LDEMUL_FOO to vxworks_foo.
 #
 #   (3) VXWORKS_BASE_EM_FILE set the hook's LDEMUL_FOO variable to

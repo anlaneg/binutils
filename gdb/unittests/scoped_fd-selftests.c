@@ -1,6 +1,6 @@
 /* Self tests for scoped_fd for GDB, the GNU debugger.
 
-   Copyright (C) 2018-2019 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,12 +17,11 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 
-#include "common/filestuff.h"
-#include "common/scoped_fd.h"
+#include "gdbsupport/filestuff.h"
+#include "gdbsupport/scoped_fd.h"
 #include "config.h"
-#include "common/selftest.h"
+#include "gdbsupport/selftest.h"
 
 namespace selftests {
 namespace scoped_fd {
@@ -32,7 +31,7 @@ static void
 test_destroy ()
 {
   char filename[] = "scoped_fd-selftest-XXXXXX";
-  int fd = gdb_mkostemp_cloexec (filename);
+  int fd = gdb_mkostemp_cloexec (filename).release ();
   SELF_CHECK (fd >= 0);
 
   unlink (filename);
@@ -51,7 +50,7 @@ static void
 test_release ()
 {
   char filename[] = "scoped_fd-selftest-XXXXXX";
-  int fd = gdb_mkostemp_cloexec (filename);
+  int fd = gdb_mkostemp_cloexec (filename).release ();
   SELF_CHECK (fd >= 0);
 
   unlink (filename);
@@ -71,7 +70,7 @@ test_to_file ()
 {
   char filename[] = "scoped_fd-selftest-XXXXXX";
 
-  ::scoped_fd sfd (gdb_mkostemp_cloexec (filename));
+  ::scoped_fd sfd = gdb_mkostemp_cloexec (filename);
   SELF_CHECK (sfd.get () >= 0);
 
   unlink (filename);
@@ -93,6 +92,7 @@ run_tests ()
 } /* namespace scoped_fd */
 } /* namespace selftests */
 
+void _initialize_scoped_fd_selftests ();
 void
 _initialize_scoped_fd_selftests ()
 {

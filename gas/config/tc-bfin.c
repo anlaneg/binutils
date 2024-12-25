@@ -1,5 +1,5 @@
 /* tc-bfin.c -- Assembler for the ADI Blackfin.
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -106,16 +106,6 @@ bfin_pic_ptr (int nbytes)
   demand_empty_rest_of_line ();
 }
 
-static void
-bfin_s_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  int temp;
-
-  temp = get_absolute_expression ();
-  subseg_set (bss_section, (subsegT) temp);
-  demand_empty_rest_of_line ();
-}
-
 const pseudo_typeS md_pseudo_table[] = {
   {"align", s_align_bytes, 0},
   {"byte2", cons, 2},
@@ -128,7 +118,6 @@ const pseudo_typeS md_pseudo_table[] = {
   {"p", s_ignore, 0},
   {"pdata", s_ignore, 0},
   {"var", s_ignore, 0},
-  {"bss", bfin_s_bss, 0},
   {0, 0, 0}
 };
 
@@ -325,13 +314,13 @@ struct bfin_cpu bfin_cpus[] =
 };
 
 /* Define bfin-specific command-line options (there are none). */
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 
 #define OPTION_FDPIC		(OPTION_MD_BASE)
 #define OPTION_NOPIC		(OPTION_MD_BASE + 1)
 #define OPTION_MCPU		(OPTION_MD_BASE + 2)
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   { "mcpu",		required_argument,	NULL, OPTION_MCPU	},
   { "mfdpic",		no_argument,		NULL, OPTION_FDPIC      },
@@ -340,7 +329,7 @@ struct option md_longopts[] =
   { NULL,		no_argument,		NULL, 0                 },
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 
 int
@@ -700,7 +689,7 @@ md_apply_fix (fixS *fixP, valueT *valueP, segT seg ATTRIBUTE_UNUSED)
 
     case BFD_RELOC_BFIN_16_LOW:
     case BFD_RELOC_BFIN_16_HIGH:
-      fixP->fx_done = FALSE;
+      fixP->fx_done = false;
       break;
 
     case BFD_RELOC_BFIN_24_PCREL_JUMP_L:
@@ -769,7 +758,7 @@ md_apply_fix (fixS *fixP, valueT *valueP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_BFIN_FUNCDESC:
     case BFD_RELOC_VTABLE_INHERIT:
     case BFD_RELOC_VTABLE_ENTRY:
-      fixP->fx_done = FALSE;
+      fixP->fx_done = false;
       break;
 
     default:
@@ -781,7 +770,7 @@ md_apply_fix (fixS *fixP, valueT *valueP, segT seg ATTRIBUTE_UNUSED)
     }
 
   if (!fixP->fx_addsy)
-    fixP->fx_done = TRUE;
+    fixP->fx_done = true;
 
 }
 
@@ -789,7 +778,7 @@ md_apply_fix (fixS *fixP, valueT *valueP, segT seg ATTRIBUTE_UNUSED)
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int boundary = bfd_get_section_alignment (stdoutput, segment);
+  int boundary = bfd_section_alignment (segment);
   return ((size + (1 << boundary) - 1) & -(1 << boundary));
 }
 
@@ -797,7 +786,7 @@ md_section_align (segT segment, valueT size)
 const char *
 md_atof (int type, char * litP, int * sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, FALSE);
+  return ieee_md_atof (type, litP, sizeP, false);
 }
 
 
@@ -852,7 +841,7 @@ md_pcrel_from_section (fixS *fixP, segT sec)
 /* Return true if the fix can be handled by GAS, false if it must
    be passed through to the linker.  */
 
-bfd_boolean
+bool
 bfin_fix_adjustable (fixS *fixP)
 {
   switch (fixP->fx_r_type)
@@ -1930,9 +1919,11 @@ bfin_loop_beginend (Expr_Node *exp, int begin)
      Adjust label address.  */
   if (!begin)
     *symbol_X_add_number (linelabel) -= last_insn_size;
+
+  free (label_name);
 }
 
-bfd_boolean
+bool
 bfin_eol_in_insn (char *line)
 {
    /* Allow a new-line to appear in the middle of a multi-issue instruction.  */
@@ -1940,36 +1931,36 @@ bfin_eol_in_insn (char *line)
    char *temp = line;
 
   if (*line != '\n')
-    return FALSE;
+    return false;
 
   /* A semi-colon followed by a newline is always the end of a line.  */
   if (line[-1] == ';')
-    return FALSE;
+    return false;
 
   if (line[-1] == '|')
-    return TRUE;
+    return true;
 
   /* If the || is on the next line, there might be leading whitespace.  */
   temp++;
   while (*temp == ' ' || *temp == '\t') temp++;
 
   if (*temp == '|')
-    return TRUE;
+    return true;
 
-  return FALSE;
+  return false;
 }
 
-bfd_boolean
+bool
 bfin_start_label (char *s)
 {
   while (*s != 0)
     {
       if (*s == '(' || *s == '[')
-	return FALSE;
+	return false;
       s++;
     }
 
-  return TRUE;
+  return true;
 }
 
 int
@@ -1977,7 +1968,7 @@ bfin_force_relocation (struct fix *fixp)
 {
   if (fixp->fx_r_type ==BFD_RELOC_BFIN_16_LOW
       || fixp->fx_r_type == BFD_RELOC_BFIN_16_HIGH)
-    return TRUE;
+    return true;
 
   return generic_force_reloc (fixp);
 }

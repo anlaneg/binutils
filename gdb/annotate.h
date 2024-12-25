@@ -1,5 +1,5 @@
 /* Annotation routines for GDB.
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,11 +16,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef ANNOTATE_H
-#define ANNOTATE_H
+#ifndef GDB_ANNOTATE_H
+#define GDB_ANNOTATE_H
 
 #include "symtab.h"
 #include "gdbtypes.h"
+
+/* Zero means do things normally; we are interacting directly with the
+   user.  One means print the full filename and linenumber when a
+   frame is printed, and do so in a format emacs18/emacs19.22 can
+   parse.  Two means print similar annotations, but in many more
+   cases and in a slightly different syntax.  */
+
+extern int annotation_level;
 
 extern void annotate_breakpoint (int);
 extern void annotate_catchpoint (int);
@@ -87,8 +95,26 @@ struct annotate_arg_emitter
   DISABLE_COPY_AND_ASSIGN (annotate_arg_emitter);
 };
 
-extern void annotate_source (char *, int, int, int,
-			     struct gdbarch *, CORE_ADDR);
+/* If annotations are turned on then print annotation describing the full
+   name of the source file S and the line number LINE and its corresponding
+   character position.
+
+   MID_STATEMENT is nonzero if the PC is not at the beginning of that
+   line.
+
+   The current symtab and line is updated to reflect S and LINE.
+
+   Return true if the annotation was printed and the current symtab and
+   line were updated, otherwise return false, which can happen if the
+   source file for S can't be found, or LINE is out of range.
+
+   This does leave GDB in the weird situation where, even when annotations
+   are on, we only sometimes print the annotation, and only sometimes
+   update the current symtab and line.  However, this particular annotation
+   has behaved this way for some time, and front ends that still use
+   annotations now depend on this behavior.  */
+extern bool annotate_source_line (struct symtab *s, int line,
+				  int mid_statement, CORE_ADDR pc);
 
 extern void annotate_frame_begin (int, struct gdbarch *, CORE_ADDR);
 extern void annotate_function_call (void);
@@ -114,4 +140,4 @@ extern void annotate_array_section_end (void);
 extern void (*deprecated_annotate_signalled_hook) (void);
 extern void (*deprecated_annotate_signal_hook) (void);
 
-#endif /* ANNOTATE_H */
+#endif /* GDB_ANNOTATE_H */

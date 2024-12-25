@@ -1,4 +1,4 @@
-/* Copyright (C) 2009-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,7 +15,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "progspace-and-thread.h"
 #include "inferior.h"
 
@@ -25,8 +24,9 @@ void
 switch_to_program_space_and_thread (program_space *pspace)
 {
   inferior *inf = find_inferior_for_program_space (pspace);
+  gdb_assert (inf != nullptr);
 
-  if (inf != NULL && inf->pid != 0)
+  if (inf->pid != 0)
     {
       thread_info *tp = any_live_thread_of_inferior (inf);
 
@@ -39,6 +39,5 @@ switch_to_program_space_and_thread (program_space *pspace)
 	}
     }
 
-  switch_to_no_thread ();
-  set_current_program_space (pspace);
+  switch_to_inferior_no_thread (inf);
 }

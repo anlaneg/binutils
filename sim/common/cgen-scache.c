@@ -1,5 +1,5 @@
 /* Simulator cache routines for CGEN simulators (and maybe others).
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -17,13 +17,16 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define SCACHE_DEFINE_INLINE
 
-#include "sim-main.h"
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
+
 #include "libiberty.h"
+
+#include "sim-main.h"
 #include "sim-options.h"
 #include "sim-io.h"
 
@@ -174,8 +177,12 @@ scache_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
   return SIM_RC_OK;
 }
 
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+SIM_RC sim_install_scache (SIM_DESC sd);
+
+/* Install the simulator cache into the simulator.  */
 SIM_RC
-scache_install (SIM_DESC sd)
+sim_install_scache (SIM_DESC sd)
 {
   sim_add_option_table (sd, NULL, scache_options);
   sim_module_add_init_fn (sd, scache_init);
@@ -269,7 +276,10 @@ scache_flush (SIM_DESC sd)
 void
 scache_flush_cpu (SIM_CPU *cpu)
 {
-  int i,n;
+  int i;
+#if WITH_SCACHE_PBB
+  int n;
+#endif
 
   /* Don't bother if cache not in use.  */
   if (CPU_SCACHE_SIZE (cpu) == 0)
@@ -413,15 +423,12 @@ scache_lookup_or_alloc (SIM_CPU *cpu, IADDR pc, int n, SCACHE **bufp)
 /* Print cache access statics for CPU.  */
 
 void
-scache_print_profile (SIM_CPU *cpu, int verbose)
+scache_print_profile (SIM_CPU *cpu, bool verbose)
 {
   SIM_DESC sd = CPU_STATE (cpu);
   unsigned long hits = CPU_SCACHE_HITS (cpu);
   unsigned long misses = CPU_SCACHE_MISSES (cpu);
   char buf[20];
-  unsigned long max_val;
-  unsigned long *lengths;
-  int i;
 
   if (CPU_SCACHE_SIZE (cpu) == 0)
     return;
@@ -453,6 +460,10 @@ scache_print_profile (SIM_CPU *cpu, int verbose)
 
   if (verbose)
     {
+      unsigned long max_val;
+      unsigned long *lengths;
+      int i;
+
       sim_io_printf (sd, "  Insn chain lengths:\n\n");
       max_val = 0;
       lengths = CPU_SCACHE_CHAIN_LENGTHS (cpu);

@@ -1,6 +1,6 @@
 /* General window behavior.
 
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -19,26 +19,35 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TUI_TUI_WINGENERAL_H
-#define TUI_TUI_WINGENERAL_H
+#ifndef GDB_TUI_TUI_WINGENERAL_H
+#define GDB_TUI_TUI_WINGENERAL_H
 
 #include "gdb_curses.h"
 
 struct tui_win_info;
-struct tui_gen_win_info;
 
 extern void tui_unhighlight_win (struct tui_win_info *);
-extern void tui_make_visible (struct tui_gen_win_info *);
-extern void tui_make_invisible (struct tui_gen_win_info *);
-extern void tui_make_all_visible (void);
-extern void tui_make_all_invisible (void);
-extern void tui_make_window (struct tui_gen_win_info *, int);
-extern struct tui_win_info *tui_copy_win (struct tui_win_info *);
-extern void tui_box_win (struct tui_gen_win_info *, int);
 extern void tui_highlight_win (struct tui_win_info *);
-extern void tui_check_and_display_highlight_if_needed (struct tui_win_info *);
-extern void tui_refresh_all (struct tui_win_info **);
-extern void tui_delete_win (WINDOW *window);
-extern void tui_refresh_win (struct tui_gen_win_info *);
 
-#endif /* TUI_TUI_WINGENERAL_H */
+/* An RAII class that calls doupdate on destruction (really the
+   destruction of the outermost instance).  This is used to prevent
+   flickering -- window implementations should only call wnoutrefresh,
+   and any time rendering is needed, an object of this type should be
+   instantiated.  */
+
+class tui_batch_rendering
+{
+public:
+
+  tui_batch_rendering ();
+  ~tui_batch_rendering ();
+
+  DISABLE_COPY_AND_ASSIGN (tui_batch_rendering);
+
+private:
+
+  /* Save the state of the suppression global.  */
+  bool m_saved_suppress;
+};
+
+#endif /* GDB_TUI_TUI_WINGENERAL_H */

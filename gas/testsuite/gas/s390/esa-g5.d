@@ -1,4 +1,4 @@
-#name: s390 opcode
+#name: s390 opcode (esa g5)
 #objdump: -drw
 
 .*: +file format .*
@@ -77,11 +77,16 @@ Disassembly of section .text:
 .*:	47 25 af ff [	 ]*bh	4095\(%r5,%r10\)
 .*:	07 29 [	 ]*bhr	%r9
 .*:	07 f9 [	 ]*br	%r9
-.*:	a7 95 00 00 [	 ]*bras	%r9,e2 <foo\+0xe2>
-.*:	a7 64 00 00 [	 ]*jlh	e6 <foo\+0xe6>
-.*:	a7 66 00 00 [	 ]*brct	%r6,ea <foo\+0xea>
-.*:	84 69 00 00 [	 ]*brxh	%r6,%r9,ee <foo\+0xee>
-.*:	85 69 00 00 [	 ]*brxle	%r6,%r9,f2 <foo\+0xf2>
+ *([\da-f]+):	a7 95 00 00 [	 ]*bras	%r9,\1 <foo\+0x\1>
+ *([\da-f]+):	a7 65 00 00 [	 ]*bras	%r6,\1 <foo\+0x\1>
+ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 66 00 00 [	 ]*brct	%r6,\1 <foo\+0x\1>
+ *([\da-f]+):	a7 66 00 00 [	 ]*brct	%r6,\1 <foo\+0x\1>
+ *([\da-f]+):	84 69 00 00 [	 ]*brxh	%r6,%r9,\1 <foo\+0x\1>
+ *([\da-f]+):	84 69 00 00 [	 ]*brxh	%r6,%r9,\1 <foo\+0x\1>
+ *([\da-f]+):	85 69 00 00 [	 ]*brxle	%r6,%r9,\1 <foo\+0x\1>
+ *([\da-f]+):	85 69 00 00 [	 ]*brxle	%r6,%r9,\1 <foo\+0x\1>
 .*:	b2 5a 00 69 [	 ]*bsa	%r6,%r9
 .*:	b2 58 00 69 [	 ]*bsg	%r6,%r9
 .*:	0b 69 [	 ]*bsm	%r6,%r9
@@ -180,27 +185,49 @@ Disassembly of section .text:
 .*:	b2 21 00 69 [	 ]*ipte	%r6,%r9
 .*:	b2 29 00 69 [	 ]*iske	%r6,%r9
 .*:	b2 23 00 69 [	 ]*ivsk	%r6,%r9
-.*:	a7 f4 00 00 [	 ]*j	278 <foo\+0x278>
-.*:	a7 84 00 00 [	 ]*je	27c <foo\+0x27c>
-.*:	a7 24 00 00 [	 ]*jh	280 <foo\+0x280>
-.*:	a7 a4 00 00 [	 ]*jhe	284 <foo\+0x284>
-.*:	a7 44 00 00 [	 ]*jl	288 <foo\+0x288>
-.*:	a7 c4 00 00 [	 ]*jle	28c <foo\+0x28c>
-.*:	a7 64 00 00 [	 ]*jlh	290 <foo\+0x290>
-.*:	a7 44 00 00 [	 ]*jl	294 <foo\+0x294>
-.*:	a7 74 00 00 [	 ]*jne	298 <foo\+0x298>
-.*:	a7 d4 00 00 [	 ]*jnh	29c <foo\+0x29c>
-.*:	a7 54 00 00 [	 ]*jnhe	2a0 <foo\+0x2a0>
-.*:	a7 b4 00 00 [	 ]*jnl	2a4 <foo\+0x2a4>
-.*:	a7 34 00 00 [	 ]*jnle	2a8 <foo\+0x2a8>
-.*:	a7 94 00 00 [	 ]*jnlh	2ac <foo\+0x2ac>
-.*:	a7 b4 00 00 [	 ]*jnl	2b0 <foo\+0x2b0>
-.*:	a7 e4 00 00 [	 ]*jno	2b4 <foo\+0x2b4>
-.*:	a7 d4 00 00 [	 ]*jnh	2b8 <foo\+0x2b8>
-.*:	a7 74 00 00 [	 ]*jne	2bc <foo\+0x2bc>
-.*:	a7 14 00 00 [	 ]*jo	2c0 <foo\+0x2c0>
-.*:	a7 24 00 00 [	 ]*jh	2c4 <foo\+0x2c4>
-.*:	a7 84 00 00 [	 ]*je	2c8 <foo\+0x2c8>
+ *([\da-f]+):	a7 f4 00 00 [	 ]*j	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 a4 00 00 [	 ]*jhe	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 c4 00 00 [	 ]*jle	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 54 00 00 [	 ]*jnhe	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 34 00 00 [	 ]*jnle	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 94 00 00 [	 ]*jnlh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 e4 00 00 [	 ]*jno	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 14 00 00 [	 ]*jo	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 04 00 00 [	 ]*jnop	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 14 00 00 [	 ]*jo	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 34 00 00 [	 ]*jnle	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 54 00 00 [	 ]*jnhe	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 94 00 00 [	 ]*jnlh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 a4 00 00 [	 ]*jhe	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 c4 00 00 [	 ]*jle	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 e4 00 00 [	 ]*jno	\1 <foo\+0x\1>
+ *([\da-f]+):	a7 f4 00 00 [	 ]*j	\1 <foo\+0x\1>
 .*:	ed 65 af ff 00 18 [	 ]*kdb	%f6,4095\(%r5,%r10\)
 .*:	b3 18 00 69 [	 ]*kdbr	%f6,%f9
 .*:	ed 65 af ff 00 08 [	 ]*keb	%f6,4095\(%r5,%r10\)
@@ -483,4 +510,4 @@ Disassembly of section .text:
 .*:	f8 58 5f ff af ff [	 ]*zap	4095\(6,%r5\),4095\(9,%r10\)
 .*:	b2 21 b0 69 [	 ]*ipte	%r6,%r9,%r11
 .*:	b2 21 bd 69 [	 ]*ipte	%r6,%r9,%r11,13
-.*:	07 07 [ 	]*nopr	%r7
+.*:	07 07 [	 ]*nopr	%r7

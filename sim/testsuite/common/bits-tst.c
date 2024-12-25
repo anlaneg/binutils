@@ -3,7 +3,7 @@
 /* Drive the bit test routines */
 
 
-long long
+static long long
 calc (const char *call,
       long long val,
       int row,
@@ -153,15 +153,15 @@ calc (const char *call,
   else
     {
       fprintf (stderr,
-	       "Unknown call passed to calc (%s, 0x%08lx%08lx, %d, %d)\n",
-	       call, (long)(val >> 32), (long)val, row, col);
+	       "Unknown call passed to calc (%s, 0x%016llx, %d, %d)\n",
+	       call, val, row, col);
       abort ();
       return val;
     }
 }
 
 
-int
+static int
 check_sext (int nr_bits,
 	    int msb_nr,
 	    const char *sexted,
@@ -185,10 +185,8 @@ check_sext (int nr_bits,
 	  fprintf (stderr,
 		   "%s:%d: ", __FILE__, __LINE__);
 	  fprintf (stderr,
-		   " %s(0x%08lx%08lx,%d) == 0x%08lx%08lx wrong, != 0x%08lx%08lx\n",
-		   sexted, (long)(mask_0 >> 32), (long)mask_0, col,
-		   (long)(sext_0 >> 32), (long)sext_0,
-		   (long)(mask_1 >> 32), (long)mask_1);
+		   " %s(0x%016llx,%d) == 0x%016llx wrong, != 0x%016llx\n",
+		   sexted, mask_0, col, sext_0, mask_1);
 	  errors ++;
 	}
       if (sext_1 != mask_1)
@@ -196,10 +194,8 @@ check_sext (int nr_bits,
 	  fprintf (stderr,
 		   "%s:%d: ", __FILE__, __LINE__);
 	  fprintf (stderr,
-		   " %s(0x%08lx%08lx,%d) == 0x%08lx%08lx wrong, != 0x%08lx%08lx\n",
-		   sexted, (long)(mask_1 >> 32), (long)mask_1, col,
-		   (long)(sext_1 >> 32), (long)sext_1,
-		   (long)(mask_1 >> 32), (long)mask_1);
+		   " %s(0x%016llx,%d) == 0x%016llx wrong, != 0x%016llx\n",
+		   sexted, mask_1, col, sext_1, mask_1);
 	  errors ++;
 	}
       if (sext != msmask)
@@ -207,10 +203,8 @@ check_sext (int nr_bits,
 	  fprintf (stderr,
 		   "%s:%d: ", __FILE__, __LINE__);
 	  fprintf (stderr,
-		   " %s(0x%08lx%08lx,%d) == 0x%08lx%08lx wrong, != 0x%08lx%08lx (%s(%d,%d))\n",
-		   sexted, (long)(mask >> 32), (long)mask, col,
-		   (long)(sext >> 32), (long)sext,
-		   (long)(msmask >> 32), (long)msmask,
+		   " %s(0x%016llx,%d) == 0x%016llx wrong, != 0x%016llx (%s(%d,%d))\n",
+		   sexted, mask, col, sext, msmask,
 		   msmasked, 0, (msb_nr ? nr_bits - col - 1 : col));
 	  errors ++;
 	}
@@ -220,7 +214,7 @@ check_sext (int nr_bits,
 }
 
 
-int
+static int
 check_rot (int nr_bits,
 	   const char *roted,
 	   const char *masked)
@@ -244,10 +238,8 @@ check_rot (int nr_bits,
 		  || (shift != 0 && rot == mask && abs(row - col) != (nr_bits - 1)))
 		{
 		  fprintf (stderr, "%s:%d: ", __FILE__, __LINE__);
-		  fprintf (stderr, " %s(%s(0x%08lx%08lx,%d) == 0x%08lx%08lx, %d) failed\n",
-			   roted, roted,
-			   (long)(mask >> 32), (long)mask, shift,
-			   (long)(urot >> 32), (long)urot, -shift);
+		  fprintf (stderr, " %s(%s(0x%016llx,%d) == 0x%016llx, %d) failed\n",
+			   roted, roted, mask, shift, urot, -shift);
 		  errors ++;
 		}
 	    }
@@ -256,7 +248,7 @@ check_rot (int nr_bits,
 }
 
 
-int
+static int
 check_extract (int nr_bits,
 	       const char *extracted,
 	       const char *inserted,
@@ -276,10 +268,8 @@ check_extract (int nr_bits,
 	  if (mask != inst)
 	    {
 	      fprintf (stderr, "%s:%d: ", __FILE__, __LINE__);
-	      fprintf (stderr, " %s(%d,%d)=0x%08lx%08lx -> %s=0x%08lx%08lx -> %s=0x%08lx%08lx failed\n",
-		       masked, row, col, (long)(mask >> 32), (long)mask,
-		       extracted, (long)(extr >> 32), (long)extr,
-		       inserted, (long)(inst >> 32), (long)inst);
+	      fprintf (stderr, " %s(%d,%d)=0x%016llx -> %s=0x%016llx -> %s=0x%016llx failed\n",
+		       masked, row, col, mask, extracted, extr, inserted, inst);
 	      errors ++;
 	    }
 	}
@@ -287,7 +277,7 @@ check_extract (int nr_bits,
 }
 
 
-int
+static int
 check_bits (int call,
 	    test_spec **tests)
 {
@@ -317,9 +307,8 @@ check_bits (int call,
 		      fprintf (stderr, " (%d, %d)", tuple->row, tuple->col);
 		    else
 		      fprintf (stderr, " (%d)", tuple->col);
-		    fprintf (stderr, " == 0x%08lx%08lx wrong, != 0x%08lx%08lx\n",
-			     (long) (val >> 32), (long) val,
-			     (long) (check >> 32), (long) check);
+		    fprintf (stderr, " == 0x%016llx wrong, != 0x%016llx\n",
+			     val, check);
 		    errors ++;
 		  }
 	      }

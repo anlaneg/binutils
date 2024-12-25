@@ -1,6 +1,6 @@
 /* Generic GNU/Linux target using traditional ptrace register access.
 
-   Copyright (C) 1988-2019 Free Software Foundation, Inc.
+   Copyright (C) 1988-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,11 +17,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "linux-nat-trad.h"
 
+#include "extract-store-integer.h"
 #include "nat/gdb_ptrace.h"
 #include "inf-ptrace.h"
+#include "gdbarch.h"
 
 /* Fetch register REGNUM from the inferior.  */
 

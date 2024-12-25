@@ -1,6 +1,6 @@
 /* FreeBSD/aarch64 target support, prototypes.
 
-   Copyright (C) 2017-2019 Free Software Foundation, Inc.
+   Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef AARCH64_FBSD_TDEP_H
-#define AARCH64_FBSD_TDEP_H
+#ifndef GDB_AARCH64_FBSD_TDEP_H
+#define GDB_AARCH64_FBSD_TDEP_H
 
 #include "regset.h"
 
@@ -32,7 +32,11 @@
    alignment.  */
 #define AARCH64_FBSD_SIZEOF_FPREGSET (33 * V_REGISTER_SIZE)
 
+/* The TLS regset consists of a single register.  */
+#define	AARCH64_FBSD_SIZEOF_TLSREGSET (X_REGISTER_SIZE)
+
 extern const struct regset aarch64_fbsd_gregset;
 extern const struct regset aarch64_fbsd_fpregset;
+extern const struct regset aarch64_fbsd_tls_regset;
 
-#endif /* AARCH64_FBSD_TDEP_H */
+#endif /* GDB_AARCH64_FBSD_TDEP_H */

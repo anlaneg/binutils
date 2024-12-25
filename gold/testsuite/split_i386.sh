@@ -2,7 +2,7 @@
 
 # split_i386.sh -- test -fstack-split for i386
 
-# Copyright (C) 2009-2019 Free Software Foundation, Inc.
+# Copyright (C) 2009-2024 Free Software Foundation, Inc.
 # Written by Ian Lance Taylor <iant@google.com>.
 
 # This file is part of gold.
@@ -24,7 +24,7 @@
 
 match()
 {
-  if ! egrep "$1" "$2" >/dev/null 2>&1; then
+  if ! $EGREP "$1" "$2" >/dev/null 2>&1; then
     echo 1>&2 "could not find '$1' in $2"
     exit 1
   fi
@@ -32,7 +32,7 @@ match()
 
 nomatch()
 {
-  if egrep "$1" "$2" >/dev/null 2>&1; then
+  if $EGREP "$1" "$2" >/dev/null 2>&1; then
     echo 1>&2 "found unexpected '$1' in $2"
     exit 1
   fi
@@ -45,7 +45,7 @@ match 'lea.*-0x200\(%esp\),' split_i386_1.stdout
 match 'stc' split_i386_2.stdout
 match 'call.*__morestack_non_split>?$' split_i386_2.stdout
 nomatch 'call.*__morestack>?$' split_i386_2.stdout
-match 'lea.*-0x4200\(%esp\),' split_i386_2.stdout
+match 'lea.*-0x100200\(%esp\),' split_i386_2.stdout
 
 match 'failed to match' split_i386_3.stdout
 

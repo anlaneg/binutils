@@ -1,5 +1,5 @@
 /* Target-dependent code for FreeBSD on RISC-V processors.
-   Copyright (C) 2018-2019 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,7 +16,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "fbsd-tdep.h"
 #include "osabi.h"
 #include "riscv-tdep.h"
@@ -25,6 +25,8 @@
 #include "target.h"
 #include "trad-frame.h"
 #include "tramp-frame.h"
+#include "gdbarch.h"
+#include "inferior.h"
 
 /* Register maps.  */
 
@@ -51,35 +53,19 @@ static const struct regcache_map_entry riscv_fbsd_fpregmap[] =
     { 0 }
   };
 
-/* Supply the general-purpose registers stored in GREGS to REGCACHE.
-   This function only exists to supply the always-zero x0 in addition
-   to the registers in GREGS.  */
-
-static void
-riscv_fbsd_supply_gregset (const struct regset *regset,
-			   struct regcache *regcache, int regnum,
-			   const void *gregs, size_t len)
-{
-  regcache->supply_regset (&riscv_fbsd_gregset, regnum, gregs, len);
-  if (regnum == -1 || regnum == RISCV_ZERO_REGNUM)
-    regcache->raw_supply_zeroed (RISCV_ZERO_REGNUM);
-}
-
 /* Register set definitions.  */
 
 const struct regset riscv_fbsd_gregset =
   {
-    riscv_fbsd_gregmap,
-    riscv_fbsd_supply_gregset, regcache_collect_regset
+    riscv_fbsd_gregmap, riscv_supply_regset, regcache_collect_regset
   };
 
 const struct regset riscv_fbsd_fpregset =
   {
-    riscv_fbsd_fpregmap,
-    regcache_supply_regset, regcache_collect_regset
+    riscv_fbsd_fpregmap, riscv_supply_regset, regcache_collect_regset
   };
 
-/* Implement the "regset_from_core_section" gdbarch method.  */
+/* Implement the "iterate_over_regset_sections" gdbarch method.  */
 
 static void
 riscv_fbsd_iterate_over_regset_sections (struct gdbarch *gdbarch,
@@ -122,7 +108,7 @@ riscv_fbsd_iterate_over_regset_sections (struct gdbarch *gdbarch,
 
 static void
 riscv_fbsd_sigframe_init (const struct tramp_frame *self,
-			  struct frame_info *this_frame,
+			  const frame_info_ptr &this_frame,
 			  struct trad_frame_cache *this_cache,
 			  CORE_ADDR func)
 {
@@ -174,6 +160,27 @@ static const struct tramp_frame riscv_fbsd_sigframe =
   riscv_fbsd_sigframe_init
 };
 
+/* Implement the "get_thread_local_address" gdbarch method.  */
+
+static CORE_ADDR
+riscv_fbsd_get_thread_local_address (struct gdbarch *gdbarch, ptid_t ptid,
+				     CORE_ADDR lm_addr, CORE_ADDR offset)
+{
+  regcache *regcache
+    = get_thread_arch_regcache (current_inferior (), ptid, gdbarch);
+
+  target_fetch_registers (regcache, RISCV_TP_REGNUM);
+
+  ULONGEST tp;
+  if (regcache->cooked_read (RISCV_TP_REGNUM, &tp) != REG_VALID)
+    error (_("Unable to fetch %%tp"));
+
+  /* %tp points to the end of the TCB which contains two pointers.
+      The first pointer in the TCB points to the DTV array.  */
+  CORE_ADDR dtv_addr = tp - (gdbarch_ptr_bit (gdbarch) / 8) * 2;
+  return fbsd_get_thread_local_address (gdbarch, dtv_addr, lm_addr, offset);
+}
+
 /* Implement the 'init_osabi' method of struct gdb_osabi_handler.  */
 
 static void
@@ -193,10 +200,16 @@ riscv_fbsd_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 
   set_gdbarch_iterate_over_regset_sections
     (gdbarch, riscv_fbsd_iterate_over_regset_sections);
+
+  set_gdbarch_fetch_tls_load_module_address (gdbarch,
+					     svr4_fetch_objfile_link_map);
+  set_gdbarch_get_thread_local_address (gdbarch,
+					riscv_fbsd_get_thread_local_address);
 }
 
+void _initialize_riscv_fbsd_tdep ();
 void
-_initialize_riscv_fbsd_tdep (void)
+_initialize_riscv_fbsd_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_riscv, 0, GDB_OSABI_FREEBSD,
 			  riscv_fbsd_init_abi);

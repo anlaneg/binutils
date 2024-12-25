@@ -3,6 +3,9 @@
 /* Define if building universal (internal helper macro) */
 #undef AC_APPLE_UNIVERSAL_BUILD
 
+/* Additional directories to look for separate debug info. */
+#undef ADDITIONAL_DEBUG_DIRS
+
 /* Directories from which to load auto-loaded scripts. */
 #undef AUTO_LOAD_DIR
 
@@ -16,6 +19,9 @@
    systems. This function is required for `alloca.c' support on those systems.
    */
 #undef CRAY_STACKSEG_END
+
+/* Define to 1 if std::thread works. */
+#undef CXX_STD_THREAD
 
 /* Define to 1 if using `alloca.c'. */
 #undef C_ALLOCA
@@ -33,9 +39,18 @@
 /* Define to BFD's default target vector. */
 #undef DEFAULT_BFD_VEC
 
+/* Handle .ctf type-info sections */
+#undef ENABLE_LIBCTF
+
 /* Define to 1 if translation of program messages to the user's native
    language is requested. */
 #undef ENABLE_NLS
+
+/* Additional targets configured into GDB. */
+#undef ENABLE_TARGETS
+
+/* The .gdbearlyinit filename. */
+#undef GDBEARLYINIT
 
 /* The .gdbinit filename. */
 #undef GDBINIT
@@ -75,8 +90,19 @@
    */
 #undef HAVE_ALLOCA_H
 
+/* Define if amd-dbgapi is being linked in. */
+#undef HAVE_AMD_DBGAPI
+
 /* Define to 1 if you have the `btowc' function. */
 #undef HAVE_BTOWC
+
+/* Define to 1 if you have the Mac OS X function
+   CFLocaleCopyPreferredLanguages in the CoreFoundation framework. */
+#undef HAVE_CFLOCALECOPYPREFERREDLANGUAGES
+
+/* Define to 1 if you have the Mac OS X function CFPreferencesCopyAppValue in
+   the CoreFoundation framework. */
+#undef HAVE_CFPREFERENCESCOPYAPPVALUE
 
 /* Define to 1 if you have the <cursesX.h> header file. */
 #undef HAVE_CURSESX_H
@@ -84,8 +110,12 @@
 /* Define to 1 if you have the <curses.h> header file. */
 #undef HAVE_CURSES_H
 
-/* define if the compiler supports basic C++11 syntax */
-#undef HAVE_CXX11
+/* define if the compiler supports basic C++17 syntax */
+#undef HAVE_CXX17
+
+/* Define if the GNU dcgettext() function is already present or preinstalled.
+   */
+#undef HAVE_DCGETTEXT
 
 /* Define to 1 if you have the declaration of `ADDR_NO_RANDOMIZE', and to 0 if
    you don't. */
@@ -106,17 +136,9 @@
    don't. */
 #undef HAVE_DECL_GETTHRDS
 
-/* Define to 1 if you have the declaration of `ptrace', and to 0 if you don't.
-   */
-#undef HAVE_DECL_PTRACE
-
 /* Define to 1 if you have the declaration of `snprintf', and to 0 if you
    don't. */
 #undef HAVE_DECL_SNPRINTF
-
-/* Define to 1 if you have the declaration of `strerror', and to 0 if you
-   don't. */
-#undef HAVE_DECL_STRERROR
 
 /* Define to 1 if you have the declaration of `strstr', and to 0 if you don't.
    */
@@ -159,11 +181,14 @@
 /* Define if <sys/procfs.h> has elf_fpregset_t. */
 #undef HAVE_ELF_FPREGSET_T
 
-/* Define to 1 if you have the <elf_hp.h> header file. */
-#undef HAVE_ELF_HP_H
-
 /* Define to 1 if your system has the etext variable. */
 #undef HAVE_ETEXT
+
+/* Define to 1 if execinfo.h backtrace functions are available. */
+#undef HAVE_EXECINFO_BACKTRACE
+
+/* Define to 1 if you have the <execinfo.h> header file. */
+#undef HAVE_EXECINFO_H
 
 /* Define to 1 if you have the `fdwalk' function. */
 #undef HAVE_FDWALK
@@ -192,6 +217,9 @@
 /* Define to 1 if you have the `getrusage' function. */
 #undef HAVE_GETRUSAGE
 
+/* Define if the GNU gettext() function is already present or preinstalled. */
+#undef HAVE_GETTEXT
+
 /* Define to 1 if you have the `getuid' function. */
 #undef HAVE_GETUID
 
@@ -204,7 +232,7 @@
 /* Define if Guile supports manual finalization. */
 #undef HAVE_GUILE_MANUAL_FINALIZATION
 
-/* Define if you have the iconv() function. */
+/* Define if you have the iconv() function and it works. */
 #undef HAVE_ICONV
 
 /* Define to 1 if you have the `iconvlist' function. */
@@ -213,11 +241,8 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if your system has the kinfo_getfile function. */
+/* Define to 1 if you have the `kinfo_getfile' function. */
 #undef HAVE_KINFO_GETFILE
-
-/* Define to 1 if your system has the kinfo_getvmmap function. */
-#undef HAVE_KINFO_GETVMMAP
 
 /* Define if you have <langinfo.h> and nl_langinfo(CODESET). */
 #undef HAVE_LANGINFO_CODESET
@@ -227,6 +252,18 @@
 
 /* Define if you have the babeltrace library. */
 #undef HAVE_LIBBABELTRACE
+
+/* Define if libbacktrace is being used. */
+#undef HAVE_LIBBACKTRACE
+
+/* Define to 1 if curses is enabled. */
+#undef HAVE_LIBCURSES
+
+/* Define to 1 if debuginfod is enabled. */
+#undef HAVE_LIBDEBUGINFOD
+
+/* Define to 1 if debuginfod section downloading is supported. */
+#undef HAVE_LIBDEBUGINFOD_FIND_SECTION
 
 /* Define if you have the expat library. */
 #undef HAVE_LIBEXPAT
@@ -243,26 +280,11 @@
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
 
-/* Define to 1 if you have the `mcheck' library (-lmcheck). */
-#undef HAVE_LIBMCHECK
-
-/* Define if you have the mpfr library. */
-#undef HAVE_LIBMPFR
-
-/* Define if Python 2.4 is being used. */
-#undef HAVE_LIBPYTHON2_4
-
-/* Define if Python 2.5 is being used. */
-#undef HAVE_LIBPYTHON2_5
-
-/* Define if Python 2.6 is being used. */
-#undef HAVE_LIBPYTHON2_6
-
-/* Define if Python 2.7 is being used. */
-#undef HAVE_LIBPYTHON2_7
-
 /* Define to 1 if you have the <libunwind-ia64.h> header file. */
 #undef HAVE_LIBUNWIND_IA64_H
+
+/* Define if you have the xxhash library. */
+#undef HAVE_LIBXXHASH
 
 /* Define to 1 if you have the <linux/elf.h> header file. */
 #undef HAVE_LINUX_ELF_H
@@ -309,9 +331,6 @@
 /* Define to 1 if you have the <nlist.h> header file. */
 #undef HAVE_NLIST_H
 
-/* Define if you support the personality syscall. */
-#undef HAVE_PERSONALITY
-
 /* Define to 1 if you have the `pipe' function. */
 #undef HAVE_PIPE
 
@@ -348,6 +367,15 @@
 /* Define if <sys/procfs.h> has psaddr_t. */
 #undef HAVE_PSADDR_T
 
+/* Have PTHREAD_PRIO_INHERIT. */
+#undef HAVE_PTHREAD_PRIO_INHERIT
+
+/* Define to 1 if you have the `pthread_setname_np' function. */
+#undef HAVE_PTHREAD_SETNAME_NP
+
+/* Define to 1 if you have the `pthread_sigmask' function. */
+#undef HAVE_PTHREAD_SIGMASK
+
 /* Define to 1 if you have the `ptrace64' function. */
 #undef HAVE_PTRACE64
 
@@ -363,9 +391,6 @@
 /* Define if sys/ptrace.h defines the PT_GETDBREGS request. */
 #undef HAVE_PT_GETDBREGS
 
-/* Define if sys/ptrace.h defines the PT_GETXMMREGS request. */
-#undef HAVE_PT_GETXMMREGS
-
 /* Define to 1 if you have the `pt_insn_event' function. */
 #undef HAVE_PT_INSN_EVENT
 
@@ -374,6 +399,9 @@
 
 /* Define if Python interpreter is being linked in. */
 #undef HAVE_PYTHON
+
+/* Define to 1 if you have the <readline/readline.h> header file. */
+#undef HAVE_READLINE_READLINE_H
 
 /* Define to 1 if you have the `resize_term' function. */
 #undef HAVE_RESIZE_TERM
@@ -420,6 +448,9 @@
 /* Define to 1 if you have the `sigsetmask' function. */
 #undef HAVE_SIGSETMASK
 
+/* Define to 1 if you have the `sigtimedwait' function. */
+#undef HAVE_SIGTIMEDWAIT
+
 /* Define to 1 if you have the `socketpair' function. */
 #undef HAVE_SOCKETPAIR
 
@@ -450,6 +481,9 @@
 /* Define to 1 if `pl_tdname' is a member of `struct ptrace_lwpinfo'. */
 #undef HAVE_STRUCT_PTRACE_LWPINFO_PL_TDNAME
 
+/* Define to 1 if `variant.ptwrite' is a member of `struct pt_event'. */
+#undef HAVE_STRUCT_PT_EVENT_VARIANT_PTWRITE
+
 /* Define to 1 if `enabled' is a member of `struct pt_insn'. */
 #undef HAVE_STRUCT_PT_INSN_ENABLED
 
@@ -474,12 +508,6 @@
 /* Define to 1 if `td_pcb' is a member of `struct thread'. */
 #undef HAVE_STRUCT_THREAD_TD_PCB
 
-/* Define to 1 if `fs_base' is a member of `struct user_regs_struct'. */
-#undef HAVE_STRUCT_USER_REGS_STRUCT_FS_BASE
-
-/* Define to 1 if `gs_base' is a member of `struct user_regs_struct'. */
-#undef HAVE_STRUCT_USER_REGS_STRUCT_GS_BASE
-
 /* Define to 1 if you have the <sys/debugreg.h> header file. */
 #undef HAVE_SYS_DEBUGREG_H
 
@@ -497,6 +525,9 @@
 
 /* Define to 1 if you have the <sys/poll.h> header file. */
 #undef HAVE_SYS_POLL_H
+
+/* Define to 1 if you have the <sys/procctl.h> header file. */
+#undef HAVE_SYS_PROCCTL_H
 
 /* Define to 1 if you have the <sys/procfs.h> header file. */
 #undef HAVE_SYS_PROCFS_H
@@ -555,14 +586,8 @@
 /* Define to 1 if you have the <vfork.h> header file. */
 #undef HAVE_VFORK_H
 
-/* Define to 1 if you have the `waitpid' function. */
-#undef HAVE_WAITPID
-
 /* Define to 1 if you have the <wait.h> header file. */
 #undef HAVE_WAIT_H
-
-/* Define to 1 if you have the `wborder' function. */
-#undef HAVE_WBORDER
 
 /* Define to 1 if you have the <windows.h> header file. */
 #undef HAVE_WINDOWS_H
@@ -576,8 +601,14 @@
 /* Define to 1 if you have the `wresize' function. */
 #undef HAVE_WRESIZE
 
+/* Define to 1 if you have the <ws2tcpip.h> header file. */
+#undef HAVE_WS2TCPIP_H
+
 /* Define to 1 if you have the `XML_StopParser' function. */
 #undef HAVE_XML_STOPPARSER
+
+/* Define to 1 if zstd is enabled. */
+#undef HAVE_ZSTD
 
 /* Define to 1 if your system has the _etext variable. */
 #undef HAVE__ETEXT
@@ -600,6 +631,10 @@
 /* Define if the jit-reader-dir directory should be relocated when GDB is
    moved. */
 #undef JIT_READER_DIR_RELOCATABLE
+
+/* Define to the sub-directory in which libtool stores uninstalled libraries.
+   */
+#undef LT_OBJDIR
 
 /* Name of this package. */
 #undef PACKAGE
@@ -634,6 +669,10 @@
 /* Define to 1 if the "%ll" format works to print long longs. */
 #undef PRINTF_HAS_LONG_LONG
 
+/* Define to necessary symbol if this constant uses a non-standard name on
+   your system. */
+#undef PTHREAD_CREATE_JOINABLE
+
 /* Define to the type of arg 1 for ptrace. */
 #undef PTRACE_TYPE_ARG1
 
@@ -648,6 +687,10 @@
 
 /* Define as the return type of ptrace. */
 #undef PTRACE_TYPE_RET
+
+/* Define if the python lib directory should be relocated when GDB is moved.
+   */
+#undef PYTHON_LIBDIR_RELOCATABLE
 
 /* Define if the python directory should be relocated when GDB is moved. */
 #undef PYTHON_PATH_RELOCATABLE
@@ -664,9 +707,6 @@
 /* Define to 1 if the `setpgrp' function takes no argument. */
 #undef SETPGRP_VOID
 
-/* The size of `long', as computed by sizeof. */
-#undef SIZEOF_LONG
-
 /* The size of `long long', as computed by sizeof. */
 #undef SIZEOF_LONG_LONG
 
@@ -678,6 +718,9 @@
 
 /* The size of `unsigned __int128', as computed by sizeof. */
 #undef SIZEOF_UNSIGNED___INT128
+
+/* The size of `void *', as computed by sizeof. */
+#undef SIZEOF_VOID_P
 
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be
@@ -692,6 +735,13 @@
 
 /* automatically load a system-wide gdbinit file */
 #undef SYSTEM_GDBINIT
+
+/* automatically load system-wide gdbinit files from this directory */
+#undef SYSTEM_GDBINIT_DIR
+
+/* Define if the system-gdbinit-dir directory should be relocated when GDB is
+   moved. */
+#undef SYSTEM_GDBINIT_DIR_RELOCATABLE
 
 /* Define if the system-gdbinit directory should be relocated when GDB is
    moved. */
@@ -711,9 +761,6 @@
 
 /* Define if <thread_db.h> has the TD_VERSION error code. */
 #undef THREAD_DB_HAS_TD_VERSION
-
-/* Define to 1 if the regex included in libiberty should be used. */
-#undef USE_INCLUDED_REGEX
 
 /* Enable extensions on AIX 3, Interix.  */
 #ifndef _ALL_SOURCE
@@ -745,12 +792,13 @@
 /* Define if the PPC simulator is being linked in. */
 #undef WITH_PPC_SIM
 
+/* Directory containing Python's standard libraries from --with-python-libdir.
+   */
+#undef WITH_PYTHON_LIBDIR
+
 /* Define if --with-python provides a path, either directly or via
    python-config.py --exec-prefix. */
 #undef WITH_PYTHON_PATH
-
-/* Define if the simulator is being linked in. */
-#undef WITH_SIM
 
 /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
    significant byte first (like Motorola and SPARC, unlike Intel). */
@@ -784,6 +832,9 @@
 
 /* Define to 1 if you need to in order for `stat' and other things to work. */
 #undef _POSIX_SOURCE
+
+/* Use structured /proc on Solaris. */
+#undef _STRUCTURED_PROC
 
 /* Define to empty if `const' does not conform to ANSI C. */
 #undef const

@@ -25,7 +25,9 @@ AC_BEFORE([$0], [_AC_COMPILER_EXEEXT])
 AC_BEFORE([$0], [AC_LINK_IFELSE])
 
 m4_define([_AC_COMPILER_EXEEXT],
-[AC_LANG_CONFTEST([AC_LANG_PROGRAM()])
+[AC_LANG_CONFTEST([AC_LANG_PROGRAM(
+		     [#include <stdio.h>],
+		     [printf ("hello world\n");])])
 # FIXME: Cleanup?
 AS_IF([AC_TRY_EVAL(ac_link)], [gcc_no_link=no], [gcc_no_link=yes])
 if test x$gcc_no_link = xyes; then
@@ -47,14 +49,14 @@ m4_defn([AC_LINK_IFELSE]))
 
 dnl This is a shame.  We have to provide a default for some link tests,
 dnl similar to the default for run tests.
-m4_define([AC_FUNC_MMAP],
+m4_define([GCC_AC_FUNC_MMAP],
 if test x$gcc_no_link = xyes; then
   if test "x${ac_cv_func_mmap_fixed_mapped+set}" != xset; then
     ac_cv_func_mmap_fixed_mapped=no
   fi
 fi
 if test "x${ac_cv_func_mmap_fixed_mapped}" != xno; then
-  m4_defn([AC_FUNC_MMAP])
+  m4_defn([GCC_AC_FUNC_MMAP])
 fi)
 
 m4_divert_pop()dnl

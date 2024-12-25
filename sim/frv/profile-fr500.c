@@ -1,6 +1,6 @@
 /* frv simulator fr500 dependent profiling code.
 
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
    Contributed by Red Hat
 
 This file is part of the GNU simulators.
@@ -16,9 +16,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-*/
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define WANT_CPU
 #define WANT_CPU_FRVBF
 
@@ -124,12 +126,14 @@ set_use_not_cc_complex (SIM_CPU *cpu, INT cc)
   d->cur_cc_complex &= ~(((DI)1) << (cc));
 }
 
+#if 0
 static int
 use_is_cc_complex (SIM_CPU *cpu, INT cc)
 {
   MODEL_FR500_DATA *d = CPU_MODEL_DATA (cpu);
   return d->prev_cc_complex &   (((DI)1) << (cc));
 }
+#endif
 
 void
 fr500_reset_fr_flags (SIM_CPU *cpu, INT fr)
@@ -154,22 +158,28 @@ adjust_float_register_busy (SIM_CPU *cpu, INT in_FRi, INT in_FRj, INT out_FRk,
      then their latency will be less than previously recorded.
      See Table 13-13 in the LSI.  */
   if (in_FRi >= 0)
-    if (use_is_fpop (cpu, in_FRi))
-      decrease_FR_busy (cpu, in_FRi, cycles);
-    else
-      enforce_full_fr_latency (cpu, in_FRi);
-  
+    {
+      if (use_is_fpop (cpu, in_FRi))
+	decrease_FR_busy (cpu, in_FRi, cycles);
+      else
+	enforce_full_fr_latency (cpu, in_FRi);
+    }
+
   if (in_FRj >= 0 && in_FRj != in_FRi)
-    if (use_is_fpop (cpu, in_FRj))
-      decrease_FR_busy (cpu, in_FRj, cycles);
-    else
-      enforce_full_fr_latency (cpu, in_FRj);
+    {
+      if (use_is_fpop (cpu, in_FRj))
+	decrease_FR_busy (cpu, in_FRj, cycles);
+      else
+	enforce_full_fr_latency (cpu, in_FRj);
+    }
 
   if (out_FRk >= 0 && out_FRk != in_FRi && out_FRk != in_FRj)
-    if (use_is_fpop (cpu, out_FRk))
-      decrease_FR_busy (cpu, out_FRk, cycles);
-    else
-      enforce_full_fr_latency (cpu, out_FRk);
+    {
+      if (use_is_fpop (cpu, out_FRk))
+	decrease_FR_busy (cpu, out_FRk, cycles);
+      else
+	enforce_full_fr_latency (cpu, out_FRk);
+    }
 }
 
 /* Latency of floating point registers may be less than recorded when followed
@@ -2033,12 +2043,8 @@ frvbf_model_fr500_u_media (SIM_CPU *cpu, const IDESC *idesc,
 {
   int cycles;
   FRV_PROFILE_STATE *ps;
-  const CGEN_INSN *insn;
-  int is_media_s1;
-  int is_media_s2;
   int busy_adjustment[] = {0, 0, 0};
   int *fr;
-  int *acc;
 
   if (model_insn == FRV_INSN_MODEL_PASS_1)
     return 0;
@@ -2047,7 +2053,6 @@ frvbf_model_fr500_u_media (SIM_CPU *cpu, const IDESC *idesc,
   cycles = idesc->timing->units[unit_num].done;
 
   ps = CPU_PROFILE_STATE (cpu);
-  insn = idesc->idata;
 
   /* If the previous use of the registers was a media op,
      then their latency will be less than previously recorded.

@@ -1,6 +1,6 @@
 /* Scheme interface to architecture.
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,12 +20,11 @@
 /* See README file in this directory for implementation notes, coding
    conventions, et.al.  */
 
-#include "defs.h"
 #include "arch-utils.h"
 #include "disasm.h"
 #include "dis-asm.h"
 #include "gdbarch.h"
-#include "gdbcore.h" /* Why is memory_error here? */
+#include "gdbcore.h"
 #include "guile-internal.h"
 
 static SCM port_keyword;
@@ -106,7 +105,7 @@ gdbscm_disasm_read_memory_worker (void *datap)
 static int
 gdbscm_disasm_read_memory (bfd_vma memaddr, bfd_byte *myaddr,
 			   unsigned int length,
-			   struct disassemble_info *dinfo)
+			   struct disassemble_info *dinfo) noexcept
 {
   gdbscm_disassembler *self
     = static_cast<gdbscm_disassembler *> (dinfo->application_data);
@@ -247,7 +246,8 @@ gdbscm_arch_disassemble (SCM self, SCM start_scm, SCM rest)
       int insn_len = 0;
       string_file buf;
 
-      TRY
+      gdbscm_gdb_exception exc {};
+      try
 	{
 	  if (using_port)
 	    {
@@ -257,12 +257,12 @@ gdbscm_arch_disassemble (SCM self, SCM start_scm, SCM rest)
 	  else
 	    insn_len = gdb_print_insn (gdbarch, pc, &buf, NULL);
 	}
-      CATCH (except, RETURN_MASK_ALL)
+      catch (const gdb_exception &except)
 	{
-	  GDBSCM_HANDLE_GDB_EXCEPTION (except);
+	  exc = unpack (except);
 	}
-      END_CATCH
 
+      GDBSCM_HANDLE_GDB_EXCEPTION (exc);
       result = scm_cons (dascm_make_insn (pc, buf.c_str (), insn_len),
 			 result);
 

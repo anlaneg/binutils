@@ -1,5 +1,5 @@
 /* rescoff.c -- read and write resources in Windows COFF files.
-   Copyright (C) 1997-2019 Free Software Foundation, Inc.
+   Copyright (C) 1997-2024 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support.
    Rewritten by Kai Tietz, Onevision.
 
@@ -141,7 +141,7 @@ read_coff_rsrc (const char *filename, const char *target)
     }
 
   set_windres_bfd (&wrbfd, abfd, sec, WR_KIND_BFD);
-  size = bfd_section_size (abfd, sec);
+  size = bfd_section_size (sec);
   /* PR 17512: file: 1b25ba5d
      The call to get_file_size here may be expensive
      but there is no other way to determine if the section size
@@ -155,8 +155,8 @@ read_coff_rsrc (const char *filename, const char *target)
   flaginfo.filename = filename;
   flaginfo.data = data;
   flaginfo.data_end = data + size;
-  flaginfo.secaddr = (bfd_get_section_vma (abfd, sec)
-		   - pe_data (abfd)->pe_opthdr.ImageBase);
+  flaginfo.secaddr = (bfd_section_vma (sec)
+		      - pe_data (abfd)->pe_opthdr.ImageBase);
 
   /* Now just read in the top level resource directory.  Note that we
      don't free data, since we create resource entries that point into
@@ -463,6 +463,9 @@ write_coff_file (const char *filename, const char *target,
 #elif defined DLLTOOL_ARM
   if (! bfd_set_arch_mach (abfd, bfd_arch_arm, 0))
     bfd_fatal ("bfd_set_arch_mach(arm)");
+#elif defined DLLTOOL_AARCH64
+  if (! bfd_set_arch_mach (abfd, bfd_arch_aarch64, 0))
+    bfd_fatal ("bfd_set_arch_mach(aarch64)");
 #else
   /* FIXME: This is obviously i386 specific.  */
   if (! bfd_set_arch_mach (abfd, bfd_arch_i386, 0))
@@ -474,11 +477,11 @@ write_coff_file (const char *filename, const char *target,
 
   sec = bfd_make_section_with_flags (abfd, ".rsrc",
 				     (SEC_HAS_CONTENTS | SEC_ALLOC
-				      | SEC_LOAD | SEC_DATA));
+				      | SEC_LOAD | SEC_DATA | SEC_READONLY));
   if (sec == NULL)
     bfd_fatal ("bfd_make_section");
 
-  if (! bfd_set_symtab (abfd, sec->symbol_ptr_ptr, 1))
+  if (! bfd_set_symtab (abfd, &sec->symbol, 1))
     bfd_fatal ("bfd_set_symtab");
 
   /* Requiring this is probably a bug in BFD.  */
@@ -495,7 +498,7 @@ write_coff_file (const char *filename, const char *target,
   set_windres_bfd (&wrbfd, abfd, sec, WR_KIND_BFD);
 
   cwi.wrbfd = &wrbfd;
-  cwi.sympp = sec->symbol_ptr_ptr;
+  cwi.sympp = &sec->symbol;
   cwi.dirsize = 0;
   cwi.dirstrsize = 0;
   cwi.dataentsize = 0;
@@ -547,7 +550,7 @@ write_coff_file (const char *filename, const char *target,
 	    + cwi.dataentsize
 	    + cwi.resources.length);
 
-  if (! bfd_set_section_size (abfd, sec, length))
+  if (!bfd_set_section_size (sec, length))
     bfd_fatal ("bfd_set_section_size");
 
   bfd_set_reloc (abfd, sec, cwi.relocs, cwi.reloc_count);

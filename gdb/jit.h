@@ -1,6 +1,6 @@
 /* JIT declarations for GDB, the GNU Debugger.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,19 +17,23 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef JIT_H
-#define JIT_H
+#ifndef GDB_JIT_H
+#define GDB_JIT_H
+
+struct inferior;
+struct objfile;
+struct minimal_symbol;
 
 /* When the JIT breakpoint fires, the inferior wants us to take one of
    these actions.  These values are used by the inferior, so the
    values of these enums cannot be changed.  */
 
-typedef enum
+enum jit_actions_t
 {
   JIT_NOACTION = 0,
   JIT_REGISTER,
   JIT_UNREGISTER
-} jit_actions_t;
+};
 
 /* This struct describes a single symbol file in a linked list of
    symbol files describing generated code.  As the inferior generates
@@ -64,20 +68,58 @@ struct jit_descriptor
   CORE_ADDR first_entry;
 };
 
-/* Looks for the descriptor and registration symbols and breakpoints
-   the registration function.  If it finds both, it registers all the
-   already JITed code.  If it has already found the symbols, then it
-   doesn't try again.  */
+/* An objfile that defines the required symbols of the JIT interface has an
+   instance of this type attached to it.  */
 
-extern void jit_inferior_created_hook (void);
+struct jiter_objfile_data
+{
+  ~jiter_objfile_data ();
+
+  /* Symbol for __jit_debug_register_code.  */
+  minimal_symbol *register_code = nullptr;
+
+  /* Symbol for __jit_debug_descriptor.  */
+  minimal_symbol *descriptor = nullptr;
+
+  /* This is the relocated address of the __jit_debug_register_code function
+     provided by this objfile.  This is used to detect relocations changes
+     requiring the breakpoint to be re-created.  */
+  CORE_ADDR cached_code_address = 0;
+
+  /* This is the JIT event breakpoint, or nullptr if it has been deleted.  */
+  breakpoint *jit_breakpoint = nullptr;
+};
+
+/* An objfile that is the product of JIT compilation and was registered
+   using the JIT interface has an instance of this type attached to it.  */
+
+struct jited_objfile_data
+{
+  jited_objfile_data (CORE_ADDR addr, CORE_ADDR symfile_addr,
+		      ULONGEST symfile_size)
+    : addr (addr),
+      symfile_addr (symfile_addr),
+      symfile_size (symfile_size)
+  {}
+
+  /* Address of struct jit_code_entry for this objfile.  */
+  CORE_ADDR addr;
+
+  /* Value of jit_code_entry->symfile_addr for this objfile.  */
+  CORE_ADDR symfile_addr;
+
+  /* Value of jit_code_entry->symfile_size for this objfile.  */
+  ULONGEST symfile_size;
+};
 
 /* Re-establish the jit breakpoint(s).  */
 
 extern void jit_breakpoint_re_set (void);
 
 /* This function is called by handle_inferior_event when it decides
-   that the JIT event breakpoint has fired.  */
+   that the JIT event breakpoint has fired.  JITER is the objfile
+   whose JIT event breakpoint has been hit.  */
 
-extern void jit_event_handler (struct gdbarch *gdbarch);
+extern void jit_event_handler (gdbarch *gdbarch, objfile *jiter);
 
-#endif /* JIT_H */
+#endif /* GDB_JIT_H */

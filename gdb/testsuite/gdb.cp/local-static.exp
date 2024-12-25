@@ -1,4 +1,4 @@
-# Copyright 2017-2019 Free Software Foundation, Inc.
+# Copyright 2017-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -130,11 +130,12 @@ proc do_test {lang} {
     global cxx_scopes_list
     global vars_list
     global srcfile testfile
+    global gdb_prompt
 
     set options {debug}
 
     if {$lang == "c++"} {
-	if { [skip_cplus_tests] } {
+	if { ![allow_cplus_tests] } {
 	    return
 	}
 	lappend options $lang
@@ -148,8 +149,7 @@ proc do_test {lang} {
 	return -1
     }
 
-    if ![runto_main] then {
-	fail "couldn't run to breakpoint"
+    if {![runto_main]} {
 	return
     }
 
@@ -201,12 +201,45 @@ proc do_test {lang} {
 	    set var [lindex $var_line 0]
 	    set print_re [lindex $var_line 1]
 
-	    gdb_test "print '${scope}'::${var_prefix}_${var}" $print_re
-	    gdb_test "print ${scope}::${var_prefix}_${var}" $print_re
+	    # The gcc PR debug/55541 has the effect that local statics are
+	    # wrapped in a DW_TAG_lexical_block, making them unaddressable from
+	    # outside the function.  XFAIL the relevant tests.
+	    set test "print '${scope}'::${var_prefix}_${var}"
+	    set xfail_pattern "No symbol \".*\" in specified context."
+	    gdb_test_multiple $test $test {
+		-re "\[\r\n\]*(?:$print_re)\[\r\n\]+$gdb_prompt $" {
+		    pass $test
+		}
+		-re "\[\r\n\]*(?:$xfail_pattern)\[\r\n\]+$gdb_prompt $" {
+		    xfail $test
+		}
+	    }
+	    set test "print ${scope}::${var_prefix}_${var}"
+	    gdb_test_multiple $test $test {
+		-re "\[\r\n\]*(?:$print_re)\[\r\n\]+$gdb_prompt $" {
+		    pass $test
+		}
+		-re "\[\r\n\]*(?:$xfail_pattern)\[\r\n\]+$gdb_prompt $" {
+		    xfail $test
+		}
+	    }
 
 	    set sym "${scope}::${var_prefix}_${var}"
 	    if {$lang == "c++"} {
-		gdb_test "print '${sym}'" $print_re
+		set test "print '${sym}'"
+		set xfail_pattern "No symbol .* in current context."
+		set xfail_pattern2 "has unknown type; cast it to its declared type"
+		gdb_test_multiple $test $test {
+		    -re "\[\r\n\]*(?:$print_re)\[\r\n\]+$gdb_prompt $" {
+			pass $test
+		    }
+		    -re "\[\r\n\]*(?:$xfail_pattern)\[\r\n\]+$gdb_prompt $" {
+			xfail $test
+		    }
+		    -re "\[\r\n\]*(?:$xfail_pattern2)\[\r\n\]+$gdb_prompt $" {
+			xfail $test
+		    }
+		}
 	    } else {
 		gdb_test "print '${sym}'" "No symbol \"$sym\" in current context\\."
 	    }

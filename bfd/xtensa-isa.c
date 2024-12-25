@@ -1,5 +1,5 @@
 /* Configurable Xtensa ISA support.
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -23,9 +23,10 @@
 #include "libbfd.h"
 #include "xtensa-isa.h"
 #include "xtensa-isa-internal.h"
+#include "xtensa-dynconfig.h"
 
-xtensa_isa_status xtisa_errno;
-char xtisa_error_msg[1024];
+static xtensa_isa_status xtisa_errno;
+static char xtisa_error_msg[1024];
 
 
 xtensa_isa_status
@@ -223,20 +224,30 @@ xtensa_insnbuf_from_chars (xtensa_isa isa,
       int word_inx = byte_to_word_index (i);
       int bit_inx = byte_to_bit_index (i);
 
-      insn[word_inx] |= (*cp & 0xff) << bit_inx;
+      insn[word_inx] |= (unsigned) (*cp & 0xff) << bit_inx;
     }
 }
-
 
 
 /* ISA information.  */
 
 extern xtensa_isa_internal xtensa_modules;
 
+static xtensa_isa_internal *xtensa_get_modules (void)
+{
+  static xtensa_isa_internal *modules;
+
+  if (!modules)
+    modules = (xtensa_isa_internal *) xtensa_load_config ("xtensa_modules",
+							  &xtensa_modules,
+							  NULL);
+  return modules;
+}
+
 xtensa_isa
 xtensa_isa_init (xtensa_isa_status *errno_p, char **error_msg_p)
 {
-  xtensa_isa_internal *isa = &xtensa_modules;
+  xtensa_isa_internal *isa = xtensa_get_modules ();
   int n, is_user;
 
   /* Set up the opcode name lookup table.  */
@@ -340,43 +351,26 @@ xtensa_isa_free (xtensa_isa isa)
      the memory allocated by xtensa_isa_init and restore the xtensa_isa
      structure to its initial state.  */
 
-  if (intisa->opname_lookup_table)
-    {
-      free (intisa->opname_lookup_table);
-      intisa->opname_lookup_table = 0;
-    }
+  free (intisa->opname_lookup_table);
+  intisa->opname_lookup_table = 0;
 
-  if (intisa->state_lookup_table)
-    {
-      free (intisa->state_lookup_table);
-      intisa->state_lookup_table = 0;
-    }
+  free (intisa->state_lookup_table);
+  intisa->state_lookup_table = 0;
 
-  if (intisa->sysreg_lookup_table)
-    {
-      free (intisa->sysreg_lookup_table);
-      intisa->sysreg_lookup_table = 0;
-    }
+  free (intisa->sysreg_lookup_table);
+  intisa->sysreg_lookup_table = 0;
+
   for (n = 0; n < 2; n++)
     {
-      if (intisa->sysreg_table[n])
-	{
-	  free (intisa->sysreg_table[n]);
-	  intisa->sysreg_table[n] = 0;
-	}
+      free (intisa->sysreg_table[n]);
+      intisa->sysreg_table[n] = 0;
     }
 
-  if (intisa->interface_lookup_table)
-    {
-      free (intisa->interface_lookup_table);
-      intisa->interface_lookup_table = 0;
-    }
+  free (intisa->interface_lookup_table);
+  intisa->interface_lookup_table = 0;
 
-  if (intisa->funcUnit_lookup_table)
-    {
-      free (intisa->funcUnit_lookup_table);
-      intisa->funcUnit_lookup_table = 0;
-    }
+  free (intisa->funcUnit_lookup_table);
+  intisa->funcUnit_lookup_table = 0;
 }
 
 

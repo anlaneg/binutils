@@ -1,5 +1,5 @@
 /* tc-m68hc11.c -- Assembler code for the Motorola 68HC11 & 68HC12.
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
    Written by Stephane Carrez (stcarrez@nerim.fr)
    XGATE and S12X added by James Murray (jsm@jsm-net.demon.co.uk)
 
@@ -263,7 +263,7 @@ static short flag_print_insn_syntax = 0;
 static short flag_print_opcodes = 0;
 
 /* Opcode hash table.  */
-static struct hash_control *m68hc11_hash;
+static htab_t m68hc11_hash;
 
 /* Current cpu (either cpu6811 or cpu6812).  This is determined automagically
    by 'get_default_target' by looking at default BFD vector.  This is overridden
@@ -323,9 +323,9 @@ const pseudo_typeS md_pseudo_table[] =
 
 /* Options and initialization.  */
 
-const char *md_shortopts = "Sm:";
+const char md_shortopts[] = "Sm:";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_FORCE_LONG_BRANCH (OPTION_MD_BASE)
   {"force-long-branches", no_argument, NULL, OPTION_FORCE_LONG_BRANCH},
@@ -364,7 +364,7 @@ struct option md_longopts[] =
 
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* Get the target cpu for the assembler.  This is based on the configure
    options and on the -m68hc11/-m68hc12 option.  If no option is specified,
@@ -472,7 +472,7 @@ m68hc11_print_statistics (FILE *file)
   int i;
   struct m68hc11_opcode_def *opc;
 
-  hash_print_statistics (file, "opcode table", m68hc11_hash);
+  htab_print_statistics (file, "opcode table", m68hc11_hash);
 
   opc = m68hc11_opcode_defs;
   if (opc == 0 || m68hc11_nb_opcode_defs == 0)
@@ -577,13 +577,13 @@ md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
 const char *
 md_atof (int type, char *litP, int *sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
 valueT
 md_section_align (asection *seg, valueT addr)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
+  int align = bfd_section_alignment (seg);
   return ((addr + (1 << align) - 1) & -(1 << align));
 }
 
@@ -610,7 +610,7 @@ md_begin (void)
 
   get_default_target ();
 
-  m68hc11_hash = hash_new ();
+  m68hc11_hash = str_htab_create ();
 
   /* Get a writable copy of the opcode table and sort it on the names.  */
   opcodes = XNEWVEC (struct m68hc11_opcode, m68hc11_num_opcodes);
@@ -643,7 +643,7 @@ md_begin (void)
          (int (*) (const void*, const void*)) cmp_opcode);
 
   opc = XNEWVEC (struct m68hc11_opcode_def, num_opcodes);
-  m68hc11_opcode_defs = opc--;
+  m68hc11_opcode_defs = opc;
 
   /* Insert unique names into hash table.  The M6811 instruction set
      has several identical opcode names that have different opcodes based
@@ -655,19 +655,18 @@ md_begin (void)
 
       if (strcmp (prev_name, opcodes->name))
 	{
-	  prev_name = (char *) opcodes->name;
-
+	  prev_name = opcodes->name;
 	  opc++;
-	  opc->format = 0;
-	  opc->min_operands = 100;
-	  opc->max_operands = 0;
-	  opc->nb_modes = 0;
-	  opc->opcode = opcodes;
-	  opc->used = 0;
-	  hash_insert (m68hc11_hash, opcodes->name, opc);
+	  (opc - 1)->format = 0;
+	  (opc - 1)->min_operands = 100;
+	  (opc - 1)->max_operands = 0;
+	  (opc - 1)->nb_modes = 0;
+	  (opc - 1)->opcode = opcodes;
+	  (opc - 1)->used = 0;
+	  str_hash_insert (m68hc11_hash, opcodes->name, opc - 1, 0);
 	}
-      opc->nb_modes++;
-      opc->format |= opcodes->format;
+      (opc - 1)->nb_modes++;
+      (opc - 1)->format |= opcodes->format;
 
       /* See how many operands this opcode needs.  */
       expect = 0;
@@ -700,14 +699,13 @@ md_begin (void)
 	    expect++;
 	}
 
-      if (expect < opc->min_operands)
-	opc->min_operands = expect;
+      if (expect < (opc - 1)->min_operands)
+	(opc - 1)->min_operands = expect;
       if (IS_CALL_SYMBOL (opcodes->format))
 	expect++;
-      if (expect > opc->max_operands)
-	opc->max_operands = expect;
+      if (expect > (opc - 1)->max_operands)
+	(opc - 1)->max_operands = expect;
     }
-  opc++;
   m68hc11_nb_opcode_defs = opc - m68hc11_opcode_defs;
 
   if (flag_print_opcodes)
@@ -1010,7 +1008,7 @@ print_insn_format (char *name)
   struct m68hc11_opcode *opcode;
   char buf[128];
 
-  opc = (struct m68hc11_opcode_def *) hash_find (m68hc11_hash, name);
+  opc = (struct m68hc11_opcode_def *) str_hash_find (m68hc11_hash, name);
   if (opc == NULL)
     {
       as_bad (_("Instruction `%s' is not recognized."), name);
@@ -1177,19 +1175,19 @@ get_operand (operand *oper, int which, long opmode)
 
       mode = M6811_OP_IMM16;
       p++;
-      if (strncmp (p, "%hi", 3) == 0)
+      if (startswith (p, "%hi"))
 	{
 	  p += 3;
 	  mode |= M6811_OP_HIGH_ADDR;
 	}
-      else if (strncmp (p, "%lo", 3) == 0)
+      else if (startswith (p, "%lo"))
 	{
 	  p += 3;
 	  mode |= M6811_OP_LOW_ADDR;
 	}
       /* %page modifier is used to obtain only the page number
          of the address of a function.  */
-      else if (strncmp (p, "%page", 5) == 0)
+      else if (startswith (p, "%page"))
 	{
 	  p += 5;
 	  mode |= M6811_OP_PAGE_ADDR;
@@ -1200,7 +1198,7 @@ get_operand (operand *oper, int which, long opmode)
          mapped in the 16K window at 0x8000 and the value will be
          within that window (although the function address may not fit
          in 16-bit).  See bfd/elf32-m68hc12.c for the translation.  */
-      else if (strncmp (p, "%addr", 5) == 0)
+      else if (startswith (p, "%addr"))
 	{
 	  p += 5;
 	  mode |= M6811_OP_CALL_ADDR;
@@ -1238,7 +1236,7 @@ get_operand (operand *oper, int which, long opmode)
       return -1;
     }
   /* Handle 68HC12 page specification in 'call foo,%page(bar)'.  */
-  else if ((opmode & M6812_OP_PAGE) && strncmp (p, "%page", 5) == 0)
+  else if ((opmode & M6812_OP_PAGE) && startswith (p, "%page"))
     {
       p += 5;
       mode = M6811_OP_PAGE_ADDR | M6812_OP_PAGE | M6811_OP_IND16;
@@ -1576,7 +1574,8 @@ fixup8 (expressionS *oper, int mode, int opmode)
 	{
 	  static char trap_id_warn_once = 0;
 
-	  as_bad (_("Trap id `%ld' is out of range."), oper->X_add_number);
+	  as_bad (_("Trap id `%" PRId64 "' is out of range."),
+		  (int64_t) oper->X_add_number);
 	  if (trap_id_warn_once == 0)
 	    {
 	      trap_id_warn_once = 1;
@@ -1587,7 +1586,8 @@ fixup8 (expressionS *oper, int mode, int opmode)
       if (!(mode & M6812_OP_TRAP_ID)
 	  && !check_range (oper->X_add_number, mode))
 	{
-	  as_bad (_("Operand out of 8-bit range: `%ld'."), oper->X_add_number);
+	  as_bad (_("Operand out of 8-bit range: `%" PRId64 "'."),
+		  (int64_t) oper->X_add_number);
 	}
       number_to_chars_bigendian (f, oper->X_add_number & 0x0FF, 1);
     }
@@ -1599,7 +1599,7 @@ fixup8 (expressionS *oper, int mode, int opmode)
       if (mode == M6811_OP_JUMP_REL)
 	{
 	  fix_new_exp (frag_now, f - frag_now->fr_literal, 1,
-		       oper, TRUE, BFD_RELOC_8_PCREL);
+		       oper, true, BFD_RELOC_8_PCREL);
 	}
       else
 	{
@@ -1618,7 +1618,7 @@ fixup8 (expressionS *oper, int mode, int opmode)
             reloc = BFD_RELOC_8;
 
 	  fixp = fix_new_exp (frag_now, f - frag_now->fr_literal, 1,
-                              oper, FALSE, reloc);
+                              oper, false, reloc);
           if (reloc != BFD_RELOC_8)
             fixp->fx_no_overflow = 1;
 	}
@@ -1643,8 +1643,8 @@ fixup16 (expressionS *oper, int mode, int opmode ATTRIBUTE_UNUSED)
     {
       if (!check_range (oper->X_add_number, mode))
 	{
-	  as_bad (_("Operand out of 16-bit range: `%ld'."),
-		  oper->X_add_number);
+	  as_bad (_("Operand out of 16-bit range: `%" PRId64 "'."),
+		  (int64_t) oper->X_add_number);
 	}
       number_to_chars_bigendian (f, oper->X_add_number & 0x0FFFF, 2);
     }
@@ -1691,8 +1691,8 @@ fixup24 (expressionS *oper, int mode, int opmode ATTRIBUTE_UNUSED)
     {
       if (!check_range (oper->X_add_number, mode))
 	{
-	  as_bad (_("Operand out of 16-bit range: `%ld'."),
-		  oper->X_add_number);
+	  as_bad (_("Operand out of 16-bit range: `%" PRId64 "'."),
+		  (int64_t) oper->X_add_number);
 	}
       number_to_chars_bigendian (f, oper->X_add_number & 0x0FFFFFF, 3);
     }
@@ -1700,7 +1700,7 @@ fixup24 (expressionS *oper, int mode, int opmode ATTRIBUTE_UNUSED)
     {
       /* Now create a 24-bit fixup.  */
       fix_new_exp (frag_now, f - frag_now->fr_literal, 3,
-		   oper, FALSE, BFD_RELOC_M68HC11_24);
+		   oper, false, BFD_RELOC_M68HC11_24);
       number_to_chars_bigendian (f, 0, 3);
     }
   else
@@ -1731,15 +1731,15 @@ fixup8_xg (expressionS *oper, int mode, int opmode)
             reloc = BFD_RELOC_M68HC11_LO8;
 
           fixp = fix_new_exp (frag_now, f - frag_now->fr_literal, 1,
-			      oper, FALSE, reloc);
+			      oper, false, reloc);
           fixp->fx_no_overflow = 1;
           number_to_chars_bigendian (f, 0, 1);
         }
      else
         {
 	  if (!(check_range (oper->X_add_number, mode)))
-	    as_bad (_("Operand out of 8-bit range: `%ld'."),
-		    oper->X_add_number);
+	    as_bad (_("Operand out of 8-bit range: `%" PRId64 "'."),
+		    (int64_t) oper->X_add_number);
           number_to_chars_bigendian (f, oper->X_add_number & 0x0FF, 1);
         }
     }
@@ -1750,14 +1750,14 @@ fixup8_xg (expressionS *oper, int mode, int opmode)
           /* Future improvement:
 	     This fixup/reloc isn't adding on constants to symbols.  */
           fix_new_exp (frag_now, f - frag_now->fr_literal -1, 2,
-		       oper, TRUE, BFD_RELOC_M68HC12_9_PCREL);
+		       oper, true, BFD_RELOC_M68HC12_9_PCREL);
       	}
       else if (mode == M68XG_OP_REL10)
         {
           /* Future improvement:
 	     This fixup/reloc isn't adding on constants to symbols.  */
           fix_new_exp (frag_now, f - frag_now->fr_literal -1, 2,
-    	               oper, TRUE, BFD_RELOC_M68HC12_10_PCREL);
+    	               oper, true, BFD_RELOC_M68HC12_10_PCREL);
         }
       else
         {
@@ -1774,7 +1774,7 @@ fixup8_xg (expressionS *oper, int mode, int opmode)
             reloc = BFD_RELOC_8;
 
           fixp = fix_new_exp (frag_now, f - frag_now->fr_literal, 1,
-            oper, FALSE, reloc);
+            oper, false, reloc);
           if (reloc != BFD_RELOC_8)
               fixp->fx_no_overflow = 1;
         }
@@ -2398,7 +2398,7 @@ build_insn_xg (struct m68hc11_opcode *opcode,
       operands[0].mode = M6811_OP_LOW_ADDR;
       f = frag_more (1);
       fixp = fix_new_exp (frag_now, f - frag_now->fr_literal, 1,
-                          &operands[0].exp, FALSE, BFD_RELOC_M68HC12_LO8XG);
+                          &operands[0].exp, false, BFD_RELOC_M68HC12_LO8XG);
       fixp->fx_no_overflow = 1;
       number_to_chars_bigendian (f, 0, 1);
 
@@ -2408,7 +2408,7 @@ build_insn_xg (struct m68hc11_opcode *opcode,
       operands[0].mode = M6811_OP_HIGH_ADDR;
       f = frag_more (1);
       fixp = fix_new_exp (frag_now, f - frag_now->fr_literal, 1,
-                          &operands[0].exp, FALSE, BFD_RELOC_M68HC12_HI8XG);
+                          &operands[0].exp, false, BFD_RELOC_M68HC12_HI8XG);
       fixp->fx_no_overflow = 1;
       number_to_chars_bigendian (f, 0, 1);
 
@@ -2848,7 +2848,7 @@ md_assemble (char *str)
   if (current_architecture == cpuxgate)
     {
       /* Find the opcode definition given its name.  */
-      opc = (struct m68hc11_opcode_def *) hash_find (m68hc11_hash, name);
+      opc = (struct m68hc11_opcode_def *) str_hash_find (m68hc11_hash, name);
       if (opc == NULL)
         {
           as_bad (_("Opcode `%s' is not recognized."), name);
@@ -2873,7 +2873,7 @@ md_assemble (char *str)
         }
 
       /* Special handling of TFR. */
-      if (strncmp (opc->opcode->name, "tfr",3) == 0)
+      if (startswith (opc->opcode->name, "tfr"))
         {
           /* There must be two operands with a comma. */
           input_line_pointer = skip_whites (input_line_pointer);
@@ -2995,7 +2995,7 @@ md_assemble (char *str)
 	}
 
       /* Special handling of SIF. */
-      if (strncmp (opc->opcode->name, "sif",3) == 0)
+      if (startswith (opc->opcode->name, "sif"))
         {
           /* Either OP_NONE or OP_RS. */
           if (*input_line_pointer != '\n')
@@ -3040,13 +3040,13 @@ md_assemble (char *str)
                   opcode = find (opc, operands, 1);
                   if (opcode)
 		    {
-                      if ((strncmp (opc->opcode->name, "com",3) == 0)
-                          || (strncmp (opc->opcode->name, "neg",3) == 0))
+                      if ((startswith (opc->opcode->name, "com"))
+                          || (startswith (opc->opcode->name, "neg")))
                         /* Special case for com RD as alias for sub RD,R0,RS */
                         /* Special case for neg RD as alias for sub RD,R0,RS */
                         opcode_local.opcode = opcode->opcode
                           | (operands[0].reg1 << 8) | (operands[0].reg1 << 2);
-		      else if (strncmp (opc->opcode->name, "tst",3) == 0)
+		      else if (startswith (opc->opcode->name, "tst"))
                         /* Special case for tst RS alias for sub R0, RS, R0 */
                         opcode_local.opcode = opcode->opcode
                           | (operands[0].reg1 << 5);
@@ -3128,12 +3128,12 @@ md_assemble (char *str)
             {
               input_line_pointer++;
               input_line_pointer = skip_whites (input_line_pointer);
-              if (strncmp (input_line_pointer, "%hi", 3) == 0)
+              if (startswith (input_line_pointer, "%hi"))
                 {
                   input_line_pointer += 3;
                   operands[0].mode = M6811_OP_HIGH_ADDR;
                 }
-              else if (strncmp (input_line_pointer, "%lo", 3) == 0)
+              else if (startswith (input_line_pointer, "%lo"))
                 {
 		  input_line_pointer += 3;
 		  operands[0].mode = M6811_OP_LOW_ADDR;
@@ -3216,9 +3216,9 @@ md_assemble (char *str)
                   opcode = find (opc, operands, 1);
                   if (opcode)
                     {
-                      if ((strncmp (opc->opcode->name, "com",3) == 0)
-			  || (strncmp (opc->opcode->name, "mov",3) == 0)
-			  || (strncmp (opc->opcode->name, "neg",3) == 0))
+                      if ((startswith (opc->opcode->name, "com"))
+			  || (startswith (opc->opcode->name, "mov"))
+			  || (startswith (opc->opcode->name, "neg")))
                         {
                           /* Special cases for:
                              com RD, RS alias for xnor RD,R0,RS
@@ -3227,8 +3227,8 @@ md_assemble (char *str)
                           opcode_local.opcode = opcode->opcode
                             | (operands[0].reg1 << 8) | (operands[1].reg1 << 2);
                         }
-                      else if ((strncmp (opc->opcode->name, "cmp",3) == 0)
-			       || (strncmp (opc->opcode->name, "cpc",3) == 0))
+                      else if ((startswith (opc->opcode->name, "cmp"))
+			       || (startswith (opc->opcode->name, "cpc")))
                         {
                           /* special cases for:
                              cmp RS1, RS2 alias for sub R0, RS1, RS2
@@ -3469,7 +3469,7 @@ md_assemble (char *str)
     }
 
   /* Find the opcode definition given its name.  */
-  opc = (struct m68hc11_opcode_def *) hash_find (m68hc11_hash, name);
+  opc = (struct m68hc11_opcode_def *) str_hash_find (m68hc11_hash, name);
 
   /* If it's not recognized, look for 'jbsr' and 'jbxx'.  These are
      pseudo insns for relative branch.  For these branches, we always
@@ -3477,7 +3477,8 @@ md_assemble (char *str)
      is given.  */
   if (opc == NULL && name[0] == 'j' && name[1] == 'b')
     {
-      opc = (struct m68hc11_opcode_def *) hash_find (m68hc11_hash, &name[1]);
+      opc = (struct m68hc11_opcode_def *) str_hash_find (m68hc11_hash,
+							 &name[1]);
       if (opc
 	  && (!(opc->format & M6811_OP_JUMP_REL)
 	      || (opc->format & M6811_OP_BITMASK)))
@@ -3508,8 +3509,8 @@ md_assemble (char *str)
 	    {
 	      name[nlen++] = TOLOWER (*op_end++);
 	      name[nlen] = 0;
-	      opc = (struct m68hc11_opcode_def *) hash_find (m68hc11_hash,
-							     name);
+	      opc = (struct m68hc11_opcode_def *) str_hash_find (m68hc11_hash,
+								 name);
 	    }
 	}
     }
@@ -3765,7 +3766,7 @@ s_m68hc11_mark_symbol (int mark)
       SKIP_WHITESPACE ();
 
       bfdsym = symbol_get_bfdsym (symbolP);
-      elfsym = elf_symbol_from (bfd_asymbol_bfd (bfdsym), bfdsym);
+      elfsym = elf_symbol_from (bfdsym);
 
       gas_assert (elfsym);
 
@@ -3891,17 +3892,17 @@ m68hc11_relax_frag (segT seg ATTRIBUTE_UNUSED, fragS *fragP,
       if (fragP->fr_symbol == NULL
 	  || S_GET_SEGMENT (fragP->fr_symbol) != absolute_section)
 	as_fatal (_("internal inconsistency problem in %s: fr_symbol %lx"),
-		  __FUNCTION__, (long) fragP->fr_symbol);
+		  __func__, (long) fragP->fr_symbol);
       symbolP = fragP->fr_symbol;
       if (symbol_resolved_p (symbolP))
 	as_fatal (_("internal inconsistency problem in %s: resolved symbol"),
-		  __FUNCTION__);
+		  __func__);
       aim = S_GET_VALUE (symbolP);
       break;
 
     default:
       as_fatal (_("internal inconsistency problem in %s: fr_subtype %d"),
-		  __FUNCTION__, fragP->fr_subtype);
+		  __func__, fragP->fr_subtype);
     }
 
   /* The rest is stolen from relax_frag.  There's no obvious way to
@@ -4333,7 +4334,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 
   /* We don't actually support subtracting a symbol.  */
   if (fixP->fx_subsy != (symbolS *) NULL)
-    as_bad_where (fixP->fx_file, fixP->fx_line, _("Expression too complex."));
+    as_bad_subtract (fixP);
 
   /* Patch the instruction with the resolved operand.  Elf relocation
      info will also be generated to take care of linker/loader fixups.

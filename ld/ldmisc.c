@@ -1,5 +1,5 @@
 /* ldmisc.c
-   Copyright (C) 1991-2019 Free Software Foundation, Inc.
+   Copyright (C) 1991-2024 Free Software Foundation, Inc.
    Written by Steve Chamberlain of Cygnus Support.
 
    This file is part of the GNU Binutils.
@@ -23,6 +23,7 @@
 #include "bfd.h"
 #include "bfdlink.h"
 #include "libiberty.h"
+#include "ctf-api.h"
 #include "safe-ctype.h"
 #include "filenames.h"
 #include "demangle.h"
@@ -35,8 +36,6 @@
 #include "ldlex.h"
 #include "ldmain.h"
 #include "ldfile.h"
-#include "elf-bfd.h"
-#include "coff-bfd.h"
 
 /*
  %% literal %
@@ -48,11 +47,12 @@
  %H like %C but in addition emit section+offset
  %P print program name
  %V hex bfd_vma
- %W hex bfd_vma with 0x with no leading zeros taking up 8 spaces
+ %W hex bfd_vma with 0x with no leading zeros taking up 10 spaces
  %X no object output, fail return
  %d integer, like printf
  %ld long, like printf
  %lu unsigned long, like printf
+ %lx unsigned long, like printf
  %p native (host) void* pointer, like printf
  %pA section name from a section
  %pB filename from a bfd
@@ -60,15 +60,17 @@
  %pR info about a relent
  %pS print script file and linenumber from etree_type.
  %pT symbol name
+ %pU print script file without linenumber from etree_type.
  %s arbitrary string, like printf
  %u integer, like printf
  %v hex bfd_vma, no leading zeros
+ %x integer, like printf
 */
 
 void
-vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
+vfinfo (FILE *fp, const char *fmt, va_list ap, bool is_warning)
 {
-  bfd_boolean fatal = FALSE;
+  bool fatal = false;
   const char *scan;
   int arg_type;
   unsigned int arg_count = 0;
@@ -95,6 +97,9 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
       } type;
   } args[9];
 
+  if (is_warning && config.no_warnings)
+    return;
+  
   for (arg_no = 0; arg_no < sizeof (args) / sizeof (args[0]); arg_no++)
     args[arg_no].type = Bad;
 
@@ -149,11 +154,12 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 
 	    case 'd':
 	    case 'u':
+	    case 'x':
 	      arg_type = Int;
 	      break;
 
 	    case 'l':
-	      if (*scan == 'd' || *scan == 'u')
+	      if (*scan == 'd' || *scan == 'u' || *scan == 'x')
 		{
 		  ++scan;
 		  arg_type = Long;
@@ -235,63 +241,48 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 
 	    case 'X':
 	      /* no object output, fail return */
-	      config.make_executable = FALSE;
+	      config.make_executable = false;
 	      break;
 
 	    case 'V':
 	      /* hex bfd_vma */
 	      {
-		bfd_vma value = args[arg_no].v;
+		char buf[32];
+		bfd_vma value;
+
+		value = args[arg_no].v;
 		++arg_count;
-		fprintf_vma (fp, value);
+		bfd_sprintf_vma (link_info.output_bfd, buf, value);
+		fprintf (fp, "%s", buf);
 	      }
 	      break;
 
 	    case 'v':
 	      /* hex bfd_vma, no leading zeros */
 	      {
-		char buf[100];
-		char *p = buf;
-		bfd_vma value = args[arg_no].v;
+		uint64_t value = args[arg_no].v;
 		++arg_count;
-		sprintf_vma (p, value);
-		while (*p == '0')
-		  p++;
-		if (!*p)
-		  p--;
-		fputs (p, fp);
+		fprintf (fp, "%" PRIx64, value);
 	      }
 	      break;
 
 	    case 'W':
 	      /* hex bfd_vma with 0x with no leading zeroes taking up
-		 8 spaces.  */
+		 10 spaces (including the 0x).  */
 	      {
-		char buf[100];
-		bfd_vma value;
-		char *p;
-		int len;
+		char buf[32];
+		uint64_t value;
 
 		value = args[arg_no].v;
 		++arg_count;
-		sprintf_vma (buf, value);
-		for (p = buf; *p == '0'; ++p)
-		  ;
-		if (*p == '\0')
-		  --p;
-		len = strlen (p);
-		while (len < 8)
-		  {
-		    putc (' ', fp);
-		    ++len;
-		  }
-		fprintf (fp, "0x%s", p);
+		sprintf (buf, "0x%" PRIx64, value);
+		fprintf (fp, "%10s", buf);
 	      }
 	      break;
 
 	    case 'F':
 	      /* Error is fatal.  */
-	      fatal = TRUE;
+	      fatal = true;
 	      break;
 
 	    case 'P':
@@ -321,8 +312,9 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		const char *filename;
 		const char *functionname;
 		unsigned int linenumber;
-		bfd_boolean discard_last;
-		bfd_boolean done;
+		bool discard_last;
+		bool done;
+		bfd_error_type last_bfd_error = bfd_get_error ();
 
 		abfd = args[arg_no].reladdr.abfd;
 		section = args[arg_no].reladdr.sec;
@@ -345,7 +337,7 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		   We do not always have a line number available so if
 		   we cannot find them we print out the section name and
 		   offset instead.  */
-		discard_last = TRUE;
+		discard_last = true;
 		if (abfd != NULL
 		    && bfd_find_nearest_line (abfd, section, asymbols, offset,
 					      &filename, &functionname,
@@ -375,16 +367,14 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 				    abfd, functionname);
 
 			    last_bfd = abfd;
-			    if (last_file != NULL)
-			      free (last_file);
+			    free (last_file);
 			    last_file = NULL;
 			    if (filename)
 			      last_file = xstrdup (filename);
-			    if (last_function != NULL)
-			      free (last_function);
+			    free (last_function);
 			    last_function = xstrdup (functionname);
 			  }
-			discard_last = FALSE;
+			discard_last = false;
 		      }
 		    else
 		      lfinfo (fp, "%pB:", abfd);
@@ -398,29 +388,24 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		    else if (filename != NULL && linenumber != 0)
 		      fprintf (fp, "%u%s", linenumber, done ? "" : ":");
 		    else
-		      done = FALSE;
+		      done = false;
 		  }
 		else
 		  {
 		    lfinfo (fp, "%pB:", abfd);
-		    done = FALSE;
+		    done = false;
 		  }
 		if (!done)
 		  lfinfo (fp, "(%pA+0x%v)", section, offset);
+		bfd_set_error (last_bfd_error);
 
 		if (discard_last)
 		  {
 		    last_bfd = NULL;
-		    if (last_file != NULL)
-		      {
-			free (last_file);
-			last_file = NULL;
-		      }
-		    if (last_function != NULL)
-		      {
-			free (last_function);
-			last_function = NULL;
-		      }
+		    free (last_file);
+		    last_file = NULL;
+		    free (last_function);
+		    last_function = NULL;
 		  }
 	      }
 	      break;
@@ -431,26 +416,18 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		  /* section name from a section */
 		  asection *sec;
 		  bfd *abfd;
-		  const char *group = NULL;
-		  struct coff_comdat_info *ci;
 
 		  fmt++;
 		  sec = (asection *) args[arg_no].p;
 		  ++arg_count;
-		  abfd = sec->owner;
 		  fprintf (fp, "%s", sec->name);
-		  if (abfd != NULL
-		      && bfd_get_flavour (abfd) == bfd_target_elf_flavour
-		      && elf_next_in_group (sec) != NULL
-		      && (sec->flags & SEC_GROUP) == 0)
-		    group = elf_group_name (sec);
-		  else if (abfd != NULL
-			   && bfd_get_flavour (abfd) == bfd_target_coff_flavour
-			   && (ci = bfd_coff_get_comdat_section (sec->owner,
-								 sec)) != NULL)
-		    group = ci->name;
-		  if (group != NULL)
-		    fprintf (fp, "[%s]", group);
+		  abfd = sec->owner;
+		  if (abfd != NULL)
+		    {
+		      const char *group = bfd_group_name (abfd, sec);
+		      if (group != NULL)
+			fprintf (fp, "[%s]", group);
+		    }
 		}
 	      else if (*fmt == 'B')
 		{
@@ -463,10 +440,11 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		    fprintf (fp, "%s generated", program_name);
 		  else if (abfd->my_archive != NULL
 			   && !bfd_is_thin_archive (abfd->my_archive))
-		    fprintf (fp, "%s(%s)", abfd->my_archive->filename,
-			     abfd->filename);
+		    fprintf (fp, "%s(%s)",
+			     bfd_get_filename (abfd->my_archive),
+			     bfd_get_filename (abfd));
 		  else
-		    fprintf (fp, "%s", abfd->filename);
+		    fprintf (fp, "%s", bfd_get_filename (abfd));
 		}
 	      else if (*fmt == 'I')
 		{
@@ -479,7 +457,8 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		  if (i->the_bfd != NULL
 		      && i->the_bfd->my_archive != NULL
 		      && !bfd_is_thin_archive (i->the_bfd->my_archive))
-		    fprintf (fp, "(%s)%s", i->the_bfd->my_archive->filename,
+		    fprintf (fp, "(%s)%s",
+			     bfd_get_filename (i->the_bfd->my_archive),
 			     i->local_sym_name);
 		  else
 		    fprintf (fp, "%s", i->filename);
@@ -496,9 +475,9 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 			  relent->addend,
 			  relent->howto->name);
 		}
-	      else if (*fmt == 'S')
+	      else if (*fmt == 'S' || *fmt == 'U')
 		{
-		  /* Print script file and linenumber.  */
+		  /* Print script file and perhaps the associated linenumber.  */
 		  etree_type node;
 		  etree_type *tp = (etree_type *) args[arg_no].p;
 
@@ -510,8 +489,10 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		      tp->type.filename = ldlex_filename ();
 		      tp->type.lineno = lineno;
 		    }
-		  if (tp->type.filename != NULL)
+		  if (tp->type.filename != NULL && fmt[-1] == 'S')
 		    fprintf (fp, "%s:%u", tp->type.filename, tp->type.lineno);
+		  else if (tp->type.filename != NULL && fmt[-1] == 'U')
+		    fprintf (fp, "%s", tp->type.filename);
 		}
 	      else if (*fmt == 'T')
 		{
@@ -566,6 +547,12 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 	      ++arg_count;
 	      break;
 
+	    case 'x':
+	      /* unsigned integer, like printf */
+	      fprintf (fp, "%x", args[arg_no].i);
+	      ++arg_count;
+	      break;
+
 	    case 'l':
 	      if (*fmt == 'd')
 		{
@@ -581,6 +568,13 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
 		  ++fmt;
 		  break;
 		}
+	      else if (*fmt == 'x')
+		{
+		  fprintf (fp, "%lx", args[arg_no].l);
+		  ++arg_count;
+		  ++fmt;
+		  break;
+		}
 	      /* Fallthru */
 
 	    default:
@@ -591,7 +585,7 @@ vfinfo (FILE *fp, const char *fmt, va_list ap, bfd_boolean is_warning)
     }
 
   if (is_warning && config.fatal_warnings)
-    config.make_executable = FALSE;
+    config.make_executable = false;
 
   if (fatal)
     xexit (1);
@@ -608,7 +602,7 @@ info_msg (const char *fmt, ...)
   va_list arg;
 
   va_start (arg, fmt);
-  vfinfo (stdout, fmt, arg, FALSE);
+  vfinfo (stdout, fmt, arg, false);
   va_end (arg);
 }
 
@@ -621,8 +615,83 @@ einfo (const char *fmt, ...)
 
   fflush (stdout);
   va_start (arg, fmt);
-  vfinfo (stderr, fmt, arg, TRUE);
+  vfinfo (stderr, fmt, arg, true);
   va_end (arg);
+  fflush (stderr);
+}
+
+/* The buffer size for each command-line option warning.  */
+#define CMDLINE_WARNING_SIZE	256
+
+/* A linked list of command-line option warnings.  */
+
+struct cmdline_warning_list
+{
+  struct cmdline_warning_list *next;
+  char *warning;
+};
+
+/* The head of the linked list of command-line option warnings.  */
+static struct cmdline_warning_list *cmdline_warning_head = NULL;
+
+/* The tail of the linked list of command-line option warnings.  */
+static struct cmdline_warning_list **cmdline_warning_tail
+  = &cmdline_warning_head;
+
+/* Queue an unknown command-line option warning.  */
+
+void
+queue_unknown_cmdline_warning (const char *fmt, ...)
+{
+  va_list arg;
+  struct cmdline_warning_list *warning_ptr
+    = xmalloc (sizeof (*warning_ptr));
+  warning_ptr->warning = xmalloc (CMDLINE_WARNING_SIZE);
+  warning_ptr->next = NULL;
+  int written;
+
+  va_start (arg, fmt);
+  written = vsnprintf (warning_ptr->warning, CMDLINE_WARNING_SIZE, fmt,
+		       arg);
+  if (written < 0 || written >= CMDLINE_WARNING_SIZE)
+    {
+      /* If vsnprintf fails or truncates, output the warning directly.  */
+      fflush (stdout);
+      va_start (arg, fmt);
+      vfinfo (stderr, fmt, arg, true);
+      fflush (stderr);
+    }
+  else
+    {
+      *cmdline_warning_tail = warning_ptr;
+      cmdline_warning_tail = &warning_ptr->next;
+    }
+  va_end (arg);
+}
+
+/* Output queued unknown command-line option warnings.  */
+
+void
+output_unknown_cmdline_warnings (void)
+{
+  struct cmdline_warning_list *list = cmdline_warning_head;
+  struct cmdline_warning_list *next;
+  if (list == NULL)
+    return;
+
+  fflush (stdout);
+
+  for (; list != NULL; list = next)
+    {
+      next = list->next;
+      if (config.fatal_warnings)
+	einfo (_("%P: error: unsupported option: %s\n"), list->warning);
+      else
+	einfo (_("%P: warning: %s ignored\n"), list->warning);
+      free (list->warning);
+      free (list);
+    }
+
   fflush (stderr);
 }
 
@@ -657,7 +726,7 @@ minfo (const char *fmt, ...)
 	  asneeded_list_tail = &m->next;
 	}
       else
-	vfinfo (config.map_file, fmt, arg, FALSE);
+	vfinfo (config.map_file, fmt, arg, false);
       va_end (arg);
     }
 }
@@ -668,16 +737,16 @@ lfinfo (FILE *file, const char *fmt, ...)
   va_list arg;
 
   va_start (arg, fmt);
-  vfinfo (file, fmt, arg, FALSE);
+  vfinfo (file, fmt, arg, false);
   va_end (arg);
 }
 
 /* Functions to print the link map.  */
 
 void
-print_space (void)
+print_spaces (int count)
 {
-  fprintf (config.map_file, " ");
+  fprintf (config.map_file, "%*s", count, "");
 }
 
 void
@@ -700,4 +769,82 @@ ld_abort (const char *file, int line, const char *fn)
 	   file, line);
   einfo (_("%F%P: please report this bug\n"));
   xexit (1);
+}
+
+/* Decode a hexadecimal character. Return -1 on error. */
+static int
+hexdecode (char c)
+{
+  if ('0' <= c && c <= '9')
+    return c - '0';
+  if ('A' <= c && c <= 'F')
+    return c - 'A' + 10;
+  if ('a' <= c && c <= 'f')
+    return c - 'a' + 10;
+  return -1;
+}
+
+/* Decode a percent and/or %[string] encoded string. dst must be at least
+   the same size as src. It can be converted in place.
+
+   Following %[string] encodings are supported:
+
+   %[comma] for ,
+   %[lbrace] for {
+   %[quot] for "
+   %[rbrace] for }
+   %[space] for ' '
+
+   The percent decoding behaves the same as Python's urllib.parse.unquote. */
+void
+percent_decode (const char *src, char *dst)
+{
+  while (*src != '\0')
+    {
+      char c = *src++;
+      if (c == '%')
+	{
+	  char next1 = *src;
+	  int hex1 = hexdecode (next1);
+	  if (hex1 != -1)
+	    {
+	      int hex2 = hexdecode (*(src + 1));
+	      if (hex2 != -1)
+		{
+		  c = (char) ((hex1 << 4) + hex2);
+		  src += 2;
+		}
+	    }
+	  else if (next1 == '[')
+	    {
+	      if (strncmp (src + 1, "comma]", 6) == 0)
+		{
+		  c = ',';
+		  src += 7;
+		}
+	      else if (strncmp (src + 1, "lbrace]", 7) == 0)
+		{
+		  c = '{';
+		  src += 8;
+		}
+	      else if (strncmp (src + 1, "quot]", 5) == 0)
+		{
+		  c = '"';
+		  src += 6;
+		}
+	      else if (strncmp (src + 1, "rbrace]", 7) == 0)
+		{
+		  c = '}';
+		  src += 8;
+		}
+	      else if (strncmp (src + 1, "space]", 6) == 0)
+		{
+		  c = ' ';
+		  src += 7;
+		}
+	    }
+	}
+      *dst++ = c;
+    }
+  *dst = '\0';
 }

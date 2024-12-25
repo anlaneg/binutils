@@ -1,4 +1,4 @@
-# Copyright (C) 2013-2019 Free Software Foundation, Inc.
+# Copyright (C) 2013-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from time import asctime, gmtime
+
 import gdb  # silence pyflakes
 
 
@@ -27,7 +28,7 @@ class TimePrinter:
 
 
 def time_sniffer(val):
-    if hasattr(val.type, 'name') and val.type.name == "time_t":
+    if hasattr(val.type, "name") and val.type.name == "time_t":
         return TimePrinter(val)
     return None
 

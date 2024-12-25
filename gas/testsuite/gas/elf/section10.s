@@ -3,11 +3,11 @@
 	.word 1
 
 	# Make sure that a numeric value can be mixed with alpha values.
-	.section sec2, "a2048x"
+	.section sec2, "a128x"
 	.word 2
 
 	# Make sure that specifying further arguments to .sections is still supported
-	.section sec3, "0xfefff000MS", %progbits, 32
+	.section sec3, "0xfedff000MS", %progbits, 32
 	.word 3
 
 	# Make sure that extra flags can be set for well known sections as well.
@@ -19,7 +19,7 @@
 	.word 5
 
 	# Test both together, with a quoted type value.
-	.section sec5, "0xfeff0000", "0x80000009"
+	.section sec5, "0xfedf0000", "0x80000009"
 	.word 6
 
 	# Test that declaring an extended version of a known special section works.

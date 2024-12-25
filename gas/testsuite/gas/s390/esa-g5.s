@@ -72,10 +72,15 @@ foo:
 	bpr	%r9
 	br	%r9
 	bras	%r9,.
+	jas	%r6,.
 	brc	6,.
+	jc	6,.
 	brct	6,.
+	jct	%r6,.
 	brxh	%r6,%r9,.
+	jxh	%r6,%r9,.
 	brxle	%r6,%r9,.
+	jxle	%r6,%r9,.
 	bsa	%r6,%r9
 	bsg	%r6,%r9
 	bsm	%r6,%r9
@@ -141,8 +146,8 @@ foo:
 	debr	%f6,%f9
 	der	%f6,%f9
 	diag	%r6,%r9,4095(%r5)
-	didbr	%f6,%r9,%r5,10
-	diebr	%f6,%r9,%r5,10
+	didbr	%f6,%f9,%f5,10
+	diebr	%f6,%f9,%f5,10
 	dp	4095(6,%r5),4095(9,%r10)
 	dr	%r6,%r9
 	dxbr	%f5,%f8
@@ -195,6 +200,28 @@ foo:
 	jo	.
 	jp	.
 	jz	.
+	jnop	.
+	bro	.
+	brh	.
+	brp	.
+	brnle	.
+	brl	.
+	brm	.
+	brnhe	.
+	brlh	.
+	brne	.
+	brnz	.
+	bre	.
+	brz	.
+	brnlh	.
+	brhe	.
+	brnl	.
+	brnm	.
+	brle	.
+	brnh	.
+	brnp	.
+	brno	.
+	bru	.
 	kdb	%f6,4095(%r5,%r10)
 	kdbr	%f6,%f9
 	keb	%f6,4095(%r5,%r10)
@@ -438,8 +465,8 @@ foo:
 	sxr	%f5,%f8
 	tar	%a6,%r9
 	tb	%r6,%r9
-	tbdr	%r6,5,%r9
-	tbedr	%r6,5,%r9
+	tbdr	%f6,5,%f9
+	tbedr	%f6,5,%f9
 	tcdb	%f6,4095(%r5,%r10)
 	tceb	%f6,4095(%r5,%r10)
 	tcxb	%f5,4095(%r5,%r10)

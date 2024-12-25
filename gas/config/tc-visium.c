@@ -1,6 +1,6 @@
 /* This is the machine dependent code of the Visium Assembler.
 
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -53,9 +53,8 @@
 
 
 /* This string holds the chars that always start a comment. If the
-   pre-processor is disabled, these aren't very useful. The macro
-   tc_comment_chars points to this.  */
-const char *visium_comment_chars = "!;";
+   pre-processor is disabled, these aren't very useful.  */
+const char comment_chars[] = "!;";
 
 /* This array holds the chars that only start a comment at the beginning
    of a line.  If the line seems to have the form '# 123 filename' .line
@@ -163,40 +162,19 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
   return reloc;
 }
 
-extern char *input_line_pointer;
-
-
-static void s_bss (int);
 static void visium_rdata (int);
 
 static void visium_update_parity_bit (char *);
 static char *parse_exp (char *, expressionS *);
 
-/* These are the back-ends for the various machine dependent pseudo-ops.  */
-void demand_empty_rest_of_line (void);
-
-
-static void
-s_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  /* We don't support putting frags in the BSS segment, we fake it
-     by marking in_bss, then looking at s_skip for clues.  */
-
-  subseg_set (bss_section, 0);
-  demand_empty_rest_of_line ();
-}
-
-
 /* This table describes all the machine specific pseudo-ops the assembler
-   has to support. The fields are:
+   has to support, and that aren't handled elsewhere. The fields are:
 
    1: Pseudo-op name without dot.
    2: Function to call to execute this pseudo-op.
    3: Integer arg to pass to the function.  */
 const pseudo_typeS md_pseudo_table[] =
 {
-  {"bss", s_bss, 0},
-  {"skip", s_space, 0},
   {"align", s_align_bytes, 0},
   {"noopt", s_ignore, 0},
   {"optim", s_ignore, 0},
@@ -222,7 +200,7 @@ visium_rdata (int xxx)
 valueT
 md_section_align (asection *seg, valueT addr)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
+  int align = bfd_section_alignment (seg);
 
   return ((addr + (1 << align) - 1) & -(1 << align));
 }
@@ -240,14 +218,14 @@ md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
 }
 
 /* The parse options.  */
-const char *md_shortopts = "m:";
+const char md_shortopts[] = "m:";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   {NULL, no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 struct visium_option_table
 {
@@ -484,7 +462,7 @@ void
 md_convert_frag (bfd * abfd ATTRIBUTE_UNUSED, segT sec ATTRIBUTE_UNUSED,
 		 fragS * fragP)
 {
-  char *buf = fragP->fr_literal + fragP->fr_fix;
+  char *buf = &fragP->fr_literal[0] + fragP->fr_fix;
   expressionS exp;
   fixS *fixP;
 
@@ -532,7 +510,7 @@ visium_pcrel_from_section (fixS *fixP, segT sec)
 /* Indicate whether a fixup against a locally defined
    symbol should be adjusted to be against the section
    symbol.  */
-bfd_boolean
+bool
 visium_fix_adjustable (fixS *fix)
 {
   /* We need the symbol name for the VTABLE entries.  */
@@ -820,9 +798,6 @@ md_begin (void)
    type, and store the appropriate bytes in *litP.  The number of LITTLENUMS
    emitted is stored in *sizeP .  An error message is returned,
    or NULL on OK.  */
-
-/* Equal to MAX_PRECISION in atof-ieee.c.  */
-#define MAX_LITTLENUMS 6
 
 const char *
 md_atof (int type, char *litP, int *sizeP)

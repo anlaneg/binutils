@@ -1,5 +1,5 @@
 /* tc-rl78.c -- Assembler for the Renesas RL78
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -288,10 +288,10 @@ enum options
 };
 
 #define RL78_SHORTOPTS ""
-const char * md_shortopts = RL78_SHORTOPTS;
+const char md_shortopts[] = RL78_SHORTOPTS;
 
 /* Assembler options.  */
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   {"relax", no_argument, NULL, OPTION_RELAX},
   {"norelax", no_argument, NULL, OPTION_NORELAX},
@@ -303,7 +303,7 @@ struct option md_longopts[] =
   {"m64bit-doubles", no_argument, NULL, OPTION_64BIT_DOUBLES},
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char * arg ATTRIBUTE_UNUSED)
@@ -375,16 +375,6 @@ md_show_usage (FILE * stream)
 }
 
 static void
-s_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  int temp;
-
-  temp = get_absolute_expression ();
-  subseg_set (bss_section, (subsegT) temp);
-  demand_empty_rest_of_line ();
-}
-
-static void
 rl78_float_cons (int ignore ATTRIBUTE_UNUSED)
 {
   if (elf_flags & E_FLAG_RL78_64BIT_DOUBLES)
@@ -397,7 +387,6 @@ const pseudo_typeS md_pseudo_table[] =
 {
   /* Our "standard" pseudos.  */
   { "double", rl78_float_cons,	'd' },
-  { "bss",    s_bss, 		0 },
   { "3byte",  cons,		3 },
   { "int",    cons,		4 },
   { "word",   cons,		4 },
@@ -1233,8 +1222,7 @@ md_convert_frag (bfd *   abfd ATTRIBUTE_UNUSED,
 	   fragP->fr_next);
 
   if (fragP->fr_next != NULL
-	  && ((offsetT) (fragP->fr_next->fr_address - fragP->fr_address)
-	      != fragP->fr_fix))
+      && fragP->fr_next->fr_address - fragP->fr_address != fragP->fr_fix)
     as_bad (_("bad frag at %p : fix %ld addr %ld %ld \n"), fragP,
 	    (long) fragP->fr_fix,
 	    (long) fragP->fr_address, (long) fragP->fr_next->fr_address);
@@ -1521,6 +1509,6 @@ md_apply_fix (struct fix * f ATTRIBUTE_UNUSED,
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
+  int align = bfd_section_alignment (segment);
   return ((size + (1 << align) - 1) & -(1 << align));
 }

@@ -34,6 +34,7 @@
 #include "os_emul.h"
 #include "mon.h"
 #include "model.h"
+#include "ansidecl.h"
 #include "libiberty.h"
 
 #ifndef CONST_ATTRIBUTE
@@ -99,46 +100,46 @@ INLINE_CPU\
 INLINE_CPU\
 (void) cpu_restart
 (cpu *processor,
- unsigned_word nia);
+ unsigned_word nia) ATTRIBUTE_NORETURN;
 
 INLINE_CPU\
 (void) cpu_halt
 (cpu *processor,
  unsigned_word nia,
  stop_reason reason,
- int signal);
+ int signal) ATTRIBUTE_NORETURN;
 
 EXTERN_CPU\
 (void) cpu_error
 (cpu *processor,
  unsigned_word cia,
  const char *fmt,
- ...) __attribute__ ((format (printf, 3, 4)));
+ ...) ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF_3;
 
 
 /* The processors local concept of time */
 
 INLINE_CPU\
-(signed64) cpu_get_time_base
+(int64_t) cpu_get_time_base
 (cpu *processor);
 
 INLINE_CPU\
 (void) cpu_set_time_base
 (cpu *processor,
- signed64 time_base);
+ int64_t time_base);
 
 INLINE_CPU\
-(signed32) cpu_get_decrementer
+(int32_t) cpu_get_decrementer
 (cpu *processor);
 
 INLINE_CPU\
 (void) cpu_set_decrementer
 (cpu *processor,
- signed32 decrementer);
+ int32_t decrementer);
 
 
 #if WITH_IDECODE_CACHE_SIZE
-/* Return the cache entry that matches the given CIA.  No guarentee
+/* Return the cache entry that matches the given CIA.  No guarantee
    that the cache entry actually contains the instruction for that
    address */
 
@@ -159,7 +160,7 @@ INLINE_CPU\
    inner vm maps, to have the cpu its self provide memory manipulation
    functions. (eg cpu_instruction_fetch() cpu_data_read_4())
 
-   Unfortunatly in addition to these functions is the need (for the
+   Unfortunately in addition to these functions is the need (for the
    debugger) to be able to read/write to memory in ways that violate
    the vm protection (eg store breakpoint instruction in the
    instruction map). */

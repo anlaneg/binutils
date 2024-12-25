@@ -1,9 +1,8 @@
 #source: ifunc-20.s
-#ld: -shared -m elf_x86_64 -z nocombreloc
+#ld: -shared -m elf_x86_64 -z nocombreloc -z nomark-plt
 #as: --64
 #readelf: -r --wide
 #target: x86_64-*-*
-#notarget: x86_64-*-nacl*
 
 Relocation section '.rela.ifunc' at offset 0x[0-9a-f]+ contains 1 entry:
 [ ]+Offset[ ]+Info[ ]+Type[ ]+.*

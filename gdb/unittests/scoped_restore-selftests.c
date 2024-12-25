@@ -1,6 +1,6 @@
 /* Self tests for scoped_restore for GDB, the GNU debugger.
 
-   Copyright (C) 2017-2019 Free Software Foundation, Inc.
+   Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,9 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
-#include "common/selftest.h"
-#include "common/scoped_restore.h"
+#include "gdbsupport/selftest.h"
+#include "gdbsupport/scoped_restore.h"
 
 namespace selftests {
 namespace scoped_restore_tests {
@@ -103,6 +102,7 @@ run_tests ()
 } /* namespace scoped_restore_tests */
 } /* namespace selftests */
 
+void _initialize_scoped_restore_selftests ();
 void
 _initialize_scoped_restore_selftests ()
 {

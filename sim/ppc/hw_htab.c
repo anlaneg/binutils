@@ -204,8 +204,8 @@
 
 static void
 htab_decode_hash_table(device *me,
-		       unsigned32 *htaborg,
-		       unsigned32 *htabmask)
+		       uint32_t *htaborg,
+		       uint32_t *htabmask)
 {
   unsigned_word htab_ra;
   unsigned htab_nr_bytes;
@@ -242,27 +242,27 @@ htab_decode_hash_table(device *me,
 static void
 htab_map_page(device *me,
 	      unsigned_word ra,
-	      unsigned64 va,
+	      uint64_t va,
 	      unsigned wimg,
 	      unsigned pp,
-	      unsigned32 htaborg,
-	      unsigned32 htabmask)
+	      uint32_t htaborg,
+	      uint32_t htabmask)
 {
   /* keep everything left shifted so that the numbering is easier */
-  unsigned64 vpn = va << 12;
-  unsigned32 vsid = INSERTED32(EXTRACTED64(vpn, 0, 23), 0, 23);
-  unsigned32 vpage = INSERTED32(EXTRACTED64(vpn, 24, 39), 0, 15);
-  unsigned32 hash = INSERTED32(EXTRACTED32(vsid, 5, 23)
+  uint64_t vpn = va << 12;
+  uint32_t vsid = INSERTED32(EXTRACTED64(vpn, 0, 23), 0, 23);
+  uint32_t vpage = INSERTED32(EXTRACTED64(vpn, 24, 39), 0, 15);
+  uint32_t hash = INSERTED32(EXTRACTED32(vsid, 5, 23)
 			       ^ EXTRACTED32(vpage, 0, 15),
 			       7, 31-6);
   int h;
   for (h = 0; h < 2; h++) {
-    unsigned32 pteg = (htaborg | (hash & htabmask));
+    uint32_t pteg = (htaborg | (hash & htabmask));
     int pti;
     for (pti = 0; pti < 8; pti++) {
-      unsigned32 pte = pteg + 8 * pti;
-      unsigned32 current_target_pte0;
-      unsigned32 current_pte0;
+      uint32_t pte = pteg + 8 * pti;
+      uint32_t current_target_pte0;
+      uint32_t current_pte0;
       if (device_dma_read_buffer(device_parent(me),
 				 &current_target_pte0,
 				 0, /*space*/
@@ -273,9 +273,9 @@ htab_map_page(device *me,
       if (MASKED32(current_pte0, 0, 0)) {
 	/* full pte, check it isn't already mapping the same virtual
            address */
-	unsigned32 curr_vsid = INSERTED32(EXTRACTED32(current_pte0, 1, 24), 0, 23);
-	unsigned32 curr_api = INSERTED32(EXTRACTED32(current_pte0, 26, 31), 0, 5);
-	unsigned32 curr_h = EXTRACTED32(current_pte0, 25, 25);
+	uint32_t curr_vsid = INSERTED32(EXTRACTED32(current_pte0, 1, 24), 0, 23);
+	uint32_t curr_api = INSERTED32(EXTRACTED32(current_pte0, 26, 31), 0, 5);
+	uint32_t curr_h = EXTRACTED32(current_pte0, 25, 25);
 	if (curr_h == h
 	    && curr_vsid == vsid
 	    && curr_api == MASKED32(vpage, 0, 5))
@@ -292,15 +292,15 @@ htab_map_page(device *me,
       }
       else {
 	/* empty pte fill it */
-	unsigned32 pte0 = (MASK32(0, 0)
+	uint32_t pte0 = (MASK32(0, 0)
 			   | INSERTED32(EXTRACTED32(vsid, 0, 23), 1, 24)
 			   | INSERTED32(h, 25, 25)
 			   | INSERTED32(EXTRACTED32(vpage, 0, 5), 26, 31));
-	unsigned32 target_pte0 = H2T_4(pte0);
-	unsigned32 pte1 = (INSERTED32(EXTRACTED32(ra, 0, 19), 0, 19)
+	uint32_t target_pte0 = H2T_4(pte0);
+	uint32_t pte1 = (INSERTED32(EXTRACTED32(ra, 0, 19), 0, 19)
 			   | INSERTED32(wimg, 25, 28)
 			   | INSERTED32(pp, 30, 31));
-	unsigned32 target_pte1 = H2T_4(pte1);
+	uint32_t target_pte1 = H2T_4(pte1);
 	if (device_dma_write_buffer(device_parent(me),
 				    &target_pte0,
 				    0, /*space*/
@@ -339,8 +339,8 @@ claim_memory(device *me,
 	     unsigned_word ra,
 	     unsigned_word size)
 {
-  unsigned32 args[3];
-  unsigned32 results[1];
+  uint32_t args[3];
+  uint32_t results[1];
   int status;
   args[0] = 0; /* alignment */
   args[1] = size;
@@ -355,15 +355,15 @@ static void
 htab_map_region(device *me,
 		device_instance *memory,
 		unsigned_word pte_ra,
-		unsigned64 pte_va,
+		uint64_t pte_va,
 		unsigned nr_bytes,
 		unsigned wimg,
 		unsigned pp,
-		unsigned32 htaborg,
-		unsigned32 htabmask)
+		uint32_t htaborg,
+		uint32_t htabmask)
 {
   unsigned_word ra;
-  unsigned64 va;
+  uint64_t va;
   /* claim the memory */
   if (memory != NULL)
     claim_memory(me, memory, pte_ra, nr_bytes);
@@ -388,19 +388,19 @@ typedef struct _htab_binary_sizes {
 static void
 htab_sum_binary(bfd *abfd,
 		sec_ptr sec,
-		PTR data)
+		void *data)
 {
   htab_binary_sizes *sizes = (htab_binary_sizes*)data;
-  unsigned_word size = bfd_get_section_size (sec);
-  unsigned_word vma = bfd_get_section_vma (abfd, sec);
-  unsigned_word ra = bfd_get_section_lma (abfd, sec);
+  unsigned_word size = bfd_section_size (sec);
+  unsigned_word vma = bfd_section_vma (sec);
+  unsigned_word ra = bfd_section_lma (sec);
 
   /* skip the section if no memory to allocate */
-  if (! (bfd_get_section_flags(abfd, sec) & SEC_ALLOC))
+  if (! (bfd_section_flags (sec) & SEC_ALLOC))
     return;
 
-  if ((bfd_get_section_flags (abfd, sec) & SEC_CODE)
-      || (bfd_get_section_flags (abfd, sec) & SEC_READONLY)) {
+  if ((bfd_section_flags (sec) & SEC_CODE)
+      || (bfd_section_flags (sec) & SEC_READONLY)) {
     if (sizes->text_bound < vma + size)
       sizes->text_bound = ALIGN_PAGE(vma + size);
     if (sizes->text_base > vma)
@@ -408,8 +408,8 @@ htab_sum_binary(bfd *abfd,
     if (sizes->text_ra > ra)
       sizes->text_ra = FLOOR_PAGE(ra);
   }
-  else if ((bfd_get_section_flags (abfd, sec) & SEC_DATA)
-	   || (bfd_get_section_flags (abfd, sec) & SEC_ALLOC)) {
+  else if ((bfd_section_flags (sec) & SEC_DATA)
+	   || (bfd_section_flags (sec) & SEC_ALLOC)) {
     if (sizes->data_bound < vma + size)
       sizes->data_bound = ALIGN_PAGE(vma + size);
     if (sizes->data_base > vma)
@@ -422,7 +422,7 @@ htab_sum_binary(bfd *abfd,
 static void
 htab_dma_binary(bfd *abfd,
 		sec_ptr sec,
-		PTR data)
+		void *data)
 {
   htab_binary_sizes *sizes = (htab_binary_sizes*)data;
   void *section_init;
@@ -432,41 +432,41 @@ htab_dma_binary(bfd *abfd,
   device *me = sizes->me;
 
   /* skip the section if no memory to allocate */
-  if (! (bfd_get_section_flags(abfd, sec) & SEC_ALLOC))
+  if (! (bfd_section_flags (sec) & SEC_ALLOC))
     return;
 
   /* check/ignore any sections of size zero */
-  section_size = bfd_get_section_size (sec);
+  section_size = bfd_section_size (sec);
   if (section_size == 0)
     return;
 
   /* if nothing to load, ignore this one */
-  if (! (bfd_get_section_flags(abfd, sec) & SEC_LOAD))
+  if (! (bfd_section_flags (sec) & SEC_LOAD))
     return;
 
   /* find where it is to go */
-  section_vma = bfd_get_section_vma(abfd, sec);
+  section_vma = bfd_section_vma (sec);
   section_ra = 0;
-  if ((bfd_get_section_flags (abfd, sec) & SEC_CODE)
-      || (bfd_get_section_flags (abfd, sec) & SEC_READONLY))
+  if ((bfd_section_flags (sec) & SEC_CODE)
+      || (bfd_section_flags (sec) & SEC_READONLY))
     section_ra = (section_vma - sizes->text_base + sizes->text_ra);
-  else if ((bfd_get_section_flags (abfd, sec) & SEC_DATA))
+  else if ((bfd_section_flags (sec) & SEC_DATA))
     section_ra = (section_vma - sizes->data_base + sizes->data_ra);
   else 
     return; /* just ignore it */
 
   DTRACE(htab,
 	 ("load - name=%-7s vma=0x%.8lx size=%6ld ra=0x%.8lx flags=%3lx(%s%s%s%s%s )\n",
-	  bfd_get_section_name(abfd, sec),
+	  bfd_section_name (sec),
 	  (long)section_vma,
 	  (long)section_size,
 	  (long)section_ra,
-	  (long)bfd_get_section_flags(abfd, sec),
-	  bfd_get_section_flags(abfd, sec) & SEC_LOAD ? " LOAD" : "",
-	  bfd_get_section_flags(abfd, sec) & SEC_CODE ? " CODE" : "",
-	  bfd_get_section_flags(abfd, sec) & SEC_DATA ? " DATA" : "",
-	  bfd_get_section_flags(abfd, sec) & SEC_ALLOC ? " ALLOC" : "",
-	  bfd_get_section_flags(abfd, sec) & SEC_READONLY ? " READONLY" : ""
+	  (long)bfd_section_flags (sec),
+	  bfd_section_flags (sec) & SEC_LOAD ? " LOAD" : "",
+	  bfd_section_flags (sec) & SEC_CODE ? " CODE" : "",
+	  bfd_section_flags (sec) & SEC_DATA ? " DATA" : "",
+	  bfd_section_flags (sec) & SEC_ALLOC ? " ALLOC" : "",
+	  bfd_section_flags (sec) & SEC_READONLY ? " READONLY" : ""
 	  ));
 
   /* dma in the sections data */
@@ -499,8 +499,8 @@ htab_map_binary(device *me,
 		unsigned wimg,
 		unsigned pp,
 		const char *file_name,
-		unsigned32 htaborg,
-		unsigned32 htabmask)
+		uint32_t htaborg,
+		uint32_t htabmask)
 {
   htab_binary_sizes sizes;
   bfd *image;
@@ -526,7 +526,7 @@ htab_map_binary(device *me,
   }
 
   /* determine the size of each of the files regions */
-  bfd_map_over_sections (image, htab_sum_binary, (PTR) &sizes);
+  bfd_map_over_sections (image, htab_sum_binary, &sizes);
 
   /* if needed, determine the real addresses of the sections */
   if (ra != -1) {
@@ -590,7 +590,7 @@ htab_map_binary(device *me,
 		  htaborg, htabmask);
 
   /* dma the sections into physical memory */
-  bfd_map_over_sections (image, htab_dma_binary, (PTR) &sizes);
+  bfd_map_over_sections (image, htab_dma_binary, &sizes);
 }
 
 static void
@@ -615,8 +615,8 @@ htab_init_data_callback(device *me)
 
   /* for the pte, do all the real work */
   if (strcmp(device_name(me), "pte") == 0) {
-    unsigned32 htaborg;
-    unsigned32 htabmask;
+    uint32_t htaborg;
+    uint32_t htabmask;
 
     htab_decode_hash_table(me, &htaborg, &htabmask);
 
@@ -626,7 +626,7 @@ htab_init_data_callback(device *me)
       unsigned pte_pp = device_find_integer_property(me, "pp");
       const char *file_name = device_find_string_property(me, "file-name");
       if (device_find_property(me, "real-address") != NULL) {
-	unsigned32 pte_ra = device_find_integer_property(me, "real-address");
+	uint32_t pte_ra = device_find_integer_property(me, "real-address");
 	DTRACE(htab, ("pte - ra=0x%lx, wimg=%ld, pp=%ld, file-name=%s\n",
 		      (unsigned long)pte_ra,
 		      (unsigned long)pte_wimg,
@@ -646,8 +646,8 @@ htab_init_data_callback(device *me)
     }
     else {
       /* handle a normal mapping definition */
-      unsigned64 pte_va = 0;
-      unsigned32 pte_ra = device_find_integer_property(me, "real-address");
+      uint64_t pte_va = 0;
+      uint32_t pte_ra = device_find_integer_property(me, "real-address");
       unsigned pte_nr_bytes = device_find_integer_property(me, "nr-bytes");
       unsigned pte_wimg = device_find_integer_property(me, "wimg");
       unsigned pte_pp = device_find_integer_property(me, "pp");

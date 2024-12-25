@@ -1,5 +1,5 @@
 /* input_file.c - Deal with Input Files -
-   Copyright (C) 1987-2019 Free Software Foundation, Inc.
+   Copyright (C) 1987-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -169,21 +169,25 @@ input_file_open (const char *filename,
     }
   gas_assert (c != EOF);
 
-  if (c == '#')
+  if (strchr (line_comment_chars, '#')
+      ? c == '#'
+      : c && strchr (line_comment_chars, c))
     {
 	  /*遇到注释字符，检查后面的字符，确认是否为preprocess*/
       /* Begins with comment, may not want to preprocess.  */
+      int lead = c;
+
       c = getc (f_in);/*遇到了'#'，再get一个字符*/
       if (c == 'N')
 	{
     	  /*遇到'#N'*/
-	  if (fgets (buf, sizeof (buf), f_in)/*尝试读取一行，最多80字符*/
-	      && !strncmp (buf, "O_APP", 5) && ISSPACE (buf[5])/*遇到'#NO_APP '*/)
-		  /*遇到'#NO_APP ',指明preprocess为零*/
+	  char *p = fgets (buf, sizeof (buf), f_in);/*尝试读取一行，最多80字符*/
+	  if (p && startswith (p, "O_APP")/*遇到'#NO_APP '*/ && is_end_of_line (p[5]))
+            /*遇到'#NO_APP ',指明preprocess为零*/
 	    preprocess = 0;
-	  if (!strchr (buf, '\n'))
-		  /*遇到'#N'后，我们尝试读了一行，最终因为太长，没有返回完整的行，我们回退'#'*/
-	    ungetc ('#', f_in);	/* It was longer.  */
+	  if (!p || !strchr (p, '\n'))
+            /*遇到'#N'后，我们尝试读了一行，最终因为太长，没有返回完整的行，我们回退'#'*/
+	    ungetc (lead, f_in);
 	  else
 		  /*遇到'#N'后，我们尝试读了一行，回退行尾的'\n'*/
 	    ungetc ('\n', f_in);
@@ -191,13 +195,13 @@ input_file_open (const char *filename,
       else if (c == 'A')
 	{
     	  /*遇到‘#A’*/
-	  if (fgets (buf, sizeof (buf), f_in)
-	      && !strncmp (buf, "PP", 2) && ISSPACE (buf[2]))
-		  /*遇到'#APP ',指明preprocess为1*/
+	  char *p = fgets (buf, sizeof (buf), f_in);
+	  if (p && startswith (p, "PP") && is_end_of_line (p[2]))
+            /*遇到'#APP ',指明preprocess为1*/
 	    preprocess = 1;
-	  if (!strchr (buf, '\n'))
-		  /*遇到'#N'后，我们尝试读了一行，最终因为太长，没有返回完整的行，我们回退'#'*/
-	    ungetc ('#', f_in);
+	  if (!p || !strchr (p, '\n'))
+	    /*遇到'#N'后，我们尝试读了一行，最终因为太长，没有返回完整的行，我们回退'#'*/
+	    ungetc (lead, f_in);
 	  else
 		  /*遇到'#N'后，我们尝试读了一行，回退行尾的'\n'*/
 	    ungetc ('\n', f_in);
@@ -206,11 +210,11 @@ input_file_open (const char *filename,
     	  /*遇到'#\n',回退字符'\n'*/
 	ungetc ('\n', f_in);
       else
-    	  /*遇到其它字符，回退‘#’号，刚get的字符被丢弃了*/
-	ungetc ('#', f_in);
+    	/*遇到其它字符，回退‘#’号，刚get的字符被丢弃了*/
+	ungetc (lead, f_in);
     }
   else
-	  /*遇到非'#'字符，回退这个字符*/
+    /*遇到非'#'字符，回退这个字符*/
     ungetc (c, f_in);
 }
 
@@ -257,9 +261,20 @@ input_file_give_next_buffer (char *where /* Where to place 1st character of new 
      Since the assembler shouldn't do any output to stdout, we
      don't bother to synch output and input.  */
   if (preprocess)
-    size = do_scrub_chars (input_file_get, where, BUFFER_SIZE);
+    size = do_scrub_chars (input_file_get, where, BUFFER_SIZE,
+                           multibyte_handling == multibyte_warn);
   else
-    size = input_file_get (where, BUFFER_SIZE);
+    {
+      size = input_file_get (where, BUFFER_SIZE);
+
+      if (multibyte_handling == multibyte_warn)
+	{
+	  const unsigned char *start = (const unsigned char *) where;
+
+	  (void) scan_for_multibyte_characters (start, start + size,
+						true /* Generate warnings */);
+	}
+    }
 
   if (size)
     return_value = where + size;

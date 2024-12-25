@@ -1,4 +1,4 @@
-#   Copyright 1997-2019 Free Software Foundation, Inc.
+#   Copyright 1997-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,9 +18,7 @@
 
 # Until "catch exec" is implemented on other targets...
 #
-if { ![istarget "*-linux*"] } then {
-    continue
-}
+require {istarget "*-linux*"}
 
 standard_testfile foll-exec.c
 
@@ -36,6 +34,10 @@ if  { [gdb_compile "${srcdir}/${subdir}/${srcfile2}" "${binfile2}" executable $c
      return -1
 }
 
+if { [is_remote target] } {
+    gdb_remote_download target $binfile2
+}
+
 if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable $compile_options] != "" } {
      untested "failed to compile"
      return -1
@@ -47,8 +49,7 @@ proc do_exec_tests {} {
 
    # Start the program running, and stop at main.
    #
-   if ![runto_main] then {
-     fail "couldn't run ${testfile}"
+   if {![runto_main]} {
      return
    }
 
@@ -74,14 +75,16 @@ proc do_exec_tests {} {
 
    # Start the program running, and stop at main.
    #
-   if ![runto_main] then {
-     fail "couldn't run ${testfile}"
+   if {![runto_main]} {
      return
    }
-   # Execute the code setting up variable PROG.
-   set tbreak_line [gdb_get_line_number " tbreak-execlp " $srcfile]
-   gdb_test "tbreak ${tbreak_line}"
-   gdb_continue_to_breakpoint "line tbreak-execlp" ".*execlp \\(.*"
+
+   with_test_prefix "1st run" {
+       # Execute the code setting up variable PROG.
+       set tbreak_line [gdb_get_line_number " tbreak-execlp " $srcfile]
+       gdb_test "tbreak ${tbreak_line}" "" "insert breakpoint"
+       gdb_continue_to_breakpoint "line tbreak-execlp" ".*execlp \\(.*"
+   }
 
    # Verify that we can see various global and local variables
    # in this program, and that they have expected values.  Some
@@ -136,23 +139,23 @@ proc do_exec_tests {} {
    send_gdb "print global_i\n"
    gdb_expect {
      -re ".* = 0.*$gdb_prompt $"\
-                     {pass "print execd-program/global_i (after execlp)"}
-     -re "$gdb_prompt $" {fail "print execd-program/global_i (after execlp)"}
-     timeout         {fail "(timeout) print execd-program/global_i (after execlp)"}
+		     {pass "print execd-program/global_i, after execlp"}
+     -re "$gdb_prompt $" {fail "print execd-program/global_i, after execlp"}
+     timeout         {fail "(timeout) print execd-program/global_i, after execlp"}
    }
    send_gdb "print local_j\n"
    gdb_expect {
      -re ".* = 2.*$gdb_prompt $"\
-                     {pass "print execd-program/local_j (after execlp)"}
-     -re "$gdb_prompt $" {fail "print execd-program/local_j (after execlp)"}
-     timeout         {fail "(timeout) print execd-program/local_j (after execlp)"}
+		     {pass "print execd-program/local_j, after execlp"}
+     -re "$gdb_prompt $" {fail "print execd-program/local_j, after execlp"}
+     timeout         {fail "(timeout) print execd-program/local_j, after execlp"}
    }
    send_gdb "print local_k\n"
    gdb_expect {
      -re "No symbol \"local_k\" in current context.*$gdb_prompt $"\
-                     {pass "print follow-exec/local_k (after execlp)"}
-     -re "$gdb_prompt $" {fail "print follow-exec/local_k (after execlp)"}
-     timeout         {fail "(timeout) print follow-exec/local_k (after execlp)"}
+		     {pass "print follow-exec/local_k, after execlp"}
+     -re "$gdb_prompt $" {fail "print follow-exec/local_k, after execlp"}
+     timeout         {fail "(timeout) print follow-exec/local_k, after execlp"}
    }
 
    # Explicitly kill this program, or a subsequent rerun actually runs
@@ -161,8 +164,7 @@ proc do_exec_tests {} {
 
    # Start the program running, and stop at main.
    #
-   if ![runto_main] then {
-     fail "couldn't run ${testfile} (2nd try)"
+   if {![runto_main]} {
      return
    }
 
@@ -230,14 +232,16 @@ proc do_exec_tests {} {
 
    # Start the program running, and stop at main.
    #
-   if ![runto_main] then {
-     fail "couldn't run ${testfile} (3rd try)"
+   if {![runto_main]} {
      return
    }
-   # Execute the code setting up variable PROG.
-   set tbreak_line [gdb_get_line_number " tbreak-execlp " $srcfile]
-   gdb_test "tbreak ${tbreak_line}"
-   gdb_continue_to_breakpoint "line tbreak-execlp" ".*execlp \\(.*"
+
+   with_test_prefix "2nd run" {
+       # Execute the code setting up variable PROG.
+       set tbreak_line [gdb_get_line_number " tbreak-execlp " $srcfile]
+       gdb_test "tbreak ${tbreak_line}" "" "insert breakpoint"
+       gdb_continue_to_breakpoint "line tbreak-execlp" ".*execlp \\(.*"
+   }
 
    # Verify that we can follow through follow an execl()
    # call.  (We must jump around earlier exec* calls.)
@@ -284,9 +288,9 @@ proc do_exec_tests {} {
    send_gdb "print local_j\n"
    gdb_expect {
      -re ".* = 3.*$gdb_prompt $"\
-                     {pass "print execd-program/local_j (after execl)"}
-     -re "$gdb_prompt $" {fail "print execd-program/local_j (after execl)"}
-     timeout         {fail "(timeout) print execd-program/local_j (after execl)"}
+		     {pass "print execd-program/local_j, after execl"}
+     -re "$gdb_prompt $" {fail "print execd-program/local_j, after execl"}
+     timeout         {fail "(timeout) print execd-program/local_j, after execl"}
    }
 
    # Explicitly kill this program, or a subsequent rerun actually runs
@@ -295,14 +299,16 @@ proc do_exec_tests {} {
 
    # Start the program running, and stop at main.
    #
-   if ![runto_main] then {
-     fail "couldn't run ${testfile} (4th try)"
+   if {![runto_main]} {
      return
    }
-   # Execute the code setting up variable PROG.
-   set tbreak_line [gdb_get_line_number " tbreak-execlp " $srcfile]
-   gdb_test "tbreak ${tbreak_line}"
-   gdb_continue_to_breakpoint "line tbreak-execlp" ".*execlp \\(.*"
+
+   with_test_prefix "3rd run" {
+       # Execute the code setting up variable PROG.
+       set tbreak_line [gdb_get_line_number " tbreak-execlp " $srcfile]
+       gdb_test "tbreak ${tbreak_line}" "" "insert breakpoint"
+       gdb_continue_to_breakpoint "line tbreak-execlp" ".*execlp \\(.*"
+   }
 
    # Verify that we can follow through follow an execv()
    # call.  (We must jump around earlier exec* calls.)
@@ -343,9 +349,9 @@ proc do_exec_tests {} {
    send_gdb "print local_j\n"
    gdb_expect {
      -re ".* = 2.*$gdb_prompt $"\
-                     {pass "print execd-program/local_j (after execv)"}
-     -re "$gdb_prompt $" {fail "print execd-program/local_j (after execv)"}
-     timeout         {fail "(timeout) print execd-program/local_j (after execv)"}
+		     {pass "print execd-program/local_j, after execv"}
+     -re "$gdb_prompt $" {fail "print execd-program/local_j, after execv"}
+     timeout         {fail "(timeout) print execd-program/local_j, after execv"}
    }
 
    # Explicitly kill this program, or a subsequent rerun actually runs
@@ -354,8 +360,7 @@ proc do_exec_tests {} {
 
    # Start the program running, and stop at main.
    #
-   if ![runto_main] then {
-     fail "couldn't run ${testfile} (5th try)"
+   if {![runto_main]} {
      return
    }
 
@@ -372,11 +377,6 @@ proc do_exec_tests {} {
    }
 }
 
-# Start with a fresh gdb
-
-gdb_exit
 clean_restart $binfile
 
 do_exec_tests
-
-return 0

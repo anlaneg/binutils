@@ -15,6 +15,9 @@
     You should have received a copy of the GNU General Public License
     along with this program; if not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "armdefs.h"
 #include "armemu.h"
 #include "armos.h"
@@ -915,6 +918,68 @@ handle_v6_insn (ARMul_State * state, ARMword instr)
       }
       return 1;
 
+    case 0x71:
+    case 0x73:
+      {
+	ARMword valn, valm;
+	/* SDIV<c> <Rd>,<Rn>,<Rm>
+	   UDIV<c> <Rd>,<Rn>,<Rm>
+	   instr[31,28] = cond
+	   instr[27,20] = 0111 0001 (SDIV), 0111 0011 (UDIV)
+	   instr[21,21] = sign
+	   instr[19,16] = Rn
+	   instr[15,12] = 1111
+	   instr[11, 8] = Rd
+	   instr[ 7, 4] = 1111
+	   instr[ 3, 0] = Rm	*/
+	/* These bit-positions are confusing!
+           instr[15,12] = Rd
+	   instr[11, 8] = 1111	*/
+
+#if 0	/* This is what I would expect:  */
+	Rn = BITS (16, 19);
+	Rd = BITS (8, 11);
+	Rm = BITS (0, 3);
+#else	/* This seem to work:  */
+	Rd = BITS (16, 19);
+	Rm = BITS (8, 11);
+	Rn = BITS (0, 3);
+#endif
+	if (Rn == 15 || Rd == 15 || Rm == 15
+	    || Rn == 13 || Rd == 13 || Rm == 13)
+	  {
+	    ARMul_UndefInstr (state, instr);
+	    state->Emulate = FALSE;
+	    break;
+	  }
+
+	valn = state->Reg[Rn];
+	valm = state->Reg[Rm];
+
+	if (valm == 0)
+	  {
+#if 0	
+	    /* Exceptions: UsageFault, address 20
+	       Note: UsageFault is for Cortex-M; I don't know what it would be on non-Cortex-M.  */
+	    ARMul_Abort (state, address);
+#endif
+	    printf ("Unhandled v6 insn: %cDIV divide by zero exception\n", "SU"[BIT(21)]);
+	  }
+	else
+	  {
+	    if(BIT(21))
+	      {
+		val = valn / valm;
+	      }
+	    else
+	      {
+		val = ((ARMsword)valn / (ARMsword)valm);
+	      }
+	    state->Reg[Rd] = val;
+	  }
+	return 1;
+      }
+
     case 0x7c:
     case 0x7d:
       {
@@ -958,12 +1023,11 @@ handle_v6_insn (ARMul_State * state, ARMword instr)
 	Rn = BITS (0, 3);
 	if (Rn != 0xF)
 	  {
-	    ARMword val = state->Reg[Rn] & ~(-(1 << ((msb + 1) - lsb)));
+	    val = state->Reg[Rn] & ~(-(1 << ((msb + 1) - lsb)));
 	    state->Reg[Rd] |= val << lsb;
 	  }
 	return 1;
       }
-
     case 0x7b:
     case 0x7a: /* SBFX<c> <Rd>,<Rn>,#<lsb>,#<width>.  */
       {
@@ -1139,10 +1203,6 @@ handle_VFP_move (ARMul_State * state, ARMword instr)
 }
 
 /* EMULATION of ARM6.  */
-
-/* The PC pipeline value depends on whether ARM
-   or Thumb instructions are being executed.  */
-ARMword isize;
 
 ARMword
 #ifdef MODE32
@@ -1374,8 +1434,6 @@ ARMul_Emulate26 (ARMul_State * state)
 	    {
 	      if (BITS (25, 27) == 5) /* BLX(1) */
 		{
-		  ARMword dest;
-
 		  state->Reg[14] = pc + 4;
 
 		  /* Force entry into Thumb mode.  */
@@ -1508,10 +1566,10 @@ check_PMUintr:
 
 		  if (do_int && (cp14r0 & ARMul_CP14_R0_INTEN2))
 		    {
-		      ARMword temp;
+		      ARMword cp;
 
-		      if (state->CPRead[13] (state, 8, & temp)
-			  && (temp & ARMul_CP13_R8_PMUS))
+		      if (state->CPRead[13] (state, 8, & cp)
+			  && (cp & ARMul_CP13_R8_PMUS))
 		        ARMul_Abort (state, ARMul_FIQV);
 		      else
 		        ARMul_Abort (state, ARMul_IRQV);
@@ -1544,8 +1602,8 @@ check_PMUintr:
 		  if (BITS (4, 7) == 0xD)
 		    {
 		      /* XScale Load Consecutive insn.  */
-		      ARMword temp = GetLS7RHS (state, instr);
-		      ARMword temp2 = BIT (23) ? LHS + temp : LHS - temp;
+		      ARMword temp1 = GetLS7RHS (state, instr);
+		      ARMword temp2 = BIT (23) ? LHS + temp1 : LHS - temp1;
 		      ARMword addr = BIT (24) ? temp2 : LHS;
 
 		      if (BIT (12))
@@ -1570,8 +1628,8 @@ check_PMUintr:
 		  else if (BITS (4, 7) == 0xF)
 		    {
 		      /* XScale Store Consecutive insn.  */
-		      ARMword temp = GetLS7RHS (state, instr);
-		      ARMword temp2 = BIT (23) ? LHS + temp : LHS - temp;
+		      ARMword temp1 = GetLS7RHS (state, instr);
+		      ARMword temp2 = BIT (23) ? LHS + temp1 : LHS - temp1;
 		      ARMword addr = BIT (24) ? temp2 : LHS;
 
 		      if (BIT (12))
@@ -2253,15 +2311,13 @@ check_PMUintr:
 		  if (BITS (4, 7) == 3)
 		    {
 		      /* BLX(2) */
-		      ARMword temp;
-
 		      if (TFLAG)
-			temp = (pc + 2) | 1;
+			dest = (pc + 2) | 1;
 		      else
-			temp = pc + 4;
+			dest = pc + 4;
 
 		      WriteR15Branch (state, state->Reg[RHSReg]);
-		      state->Reg[14] = temp;
+		      state->Reg[14] = dest;
 		      break;
 		    }
 		}
@@ -2427,7 +2483,7 @@ check_PMUintr:
 		      /* ElSegundo SMLALxy insn.  */
 		      ARMdword op1 = state->Reg[BITS (0, 3)];
 		      ARMdword op2 = state->Reg[BITS (8, 11)];
-		      ARMdword dest;
+		      ARMdword result;
 
 		      if (BIT (5))
 			op1 >>= 16;
@@ -2440,11 +2496,11 @@ check_PMUintr:
 		      if (op2 & 0x8000)
 			op2 -= 65536;
 
-		      dest = (ARMdword) state->Reg[BITS (16, 19)] << 32;
-		      dest |= state->Reg[BITS (12, 15)];
-		      dest += op1 * op2;
-		      state->Reg[BITS (12, 15)] = dest;
-		      state->Reg[BITS (16, 19)] = dest >> 32;
+		      result = (ARMdword) state->Reg[BITS (16, 19)] << 32;
+		      result |= state->Reg[BITS (12, 15)];
+		      result += op1 * op2;
+		      state->Reg[BITS (12, 15)] = result;
+		      state->Reg[BITS (16, 19)] = result >> 32;
 		      break;
 		    }
 
@@ -4328,7 +4384,7 @@ check_PMUintr:
 		    ARMul_UndefInstr (state, instr);
 		  break;
 		}
-	      /* Drop through.  */
+	      ATTRIBUTE_FALLTHROUGH;
 
 	    case 0xc0:		/* Store , No WriteBack , Post Dec.  */
 	      ARMul_STC (state, instr, LHS);
@@ -4375,7 +4431,7 @@ check_PMUintr:
 		    ARMul_UndefInstr (state, instr);
 		  break;
 		}
-	      /* Drop through.  */
+	      ATTRIBUTE_FALLTHROUGH;
 
 	    case 0xc1:		/* Load , No WriteBack , Post Dec.  */
 	      ARMul_LDC (state, instr, LHS);
@@ -4562,7 +4618,7 @@ check_PMUintr:
 		  default:
 		    break;
 		  }
-	      /* Drop through.  */
+	      ATTRIBUTE_FALLTHROUGH;
 
 	    case 0xe0:
 	    case 0xe4:
@@ -5400,7 +5456,10 @@ Handle_Store_Double (ARMul_State * state, ARMword instr)
     addr = base;
 
   /* The address must be aligned on a 8 byte boundary.  */
-  if (addr & 0x7)
+  if (state->is_v6 && (addr & 0x3) == 0)
+    /* Word alignment is enough for v6.  */
+    ;
+  else if (addr & 0x7)
     {
 #ifdef ABORTS
       ARMul_DATAABORT (addr);
@@ -5974,7 +6033,7 @@ Multiply64 (ARMul_State * state, ARMword instr, int msigned, int scc)
       hi = (((Rs >> 16) & 0xFFFF) * ((Rm >> 16) & 0xFFFF));
 
       /* We now need to add all of these results together, taking
-	 care to propogate the carries from the additions.  */
+	 care to propagate the carries from the additions.  */
       RdLo = Add32 (lo, (mid1 << 16), &carry);
       RdHi = carry;
       RdLo = Add32 (RdLo, (mid2 << 16), &carry);

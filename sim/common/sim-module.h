@@ -1,5 +1,5 @@
 /* Module support.
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -30,7 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
    TODO: Add facilities for saving/restoring state to/from a file.  */
 
-#include "gdb/remote-sim.h"
+#include "sim/sim.h"
 
 /* Various function types.  */
 
@@ -39,7 +39,7 @@ typedef SIM_RC (MODULE_INIT_FN) (SIM_DESC);
 typedef SIM_RC (MODULE_RESUME_FN) (SIM_DESC);
 typedef SIM_RC (MODULE_SUSPEND_FN) (SIM_DESC);
 typedef void   (MODULE_UNINSTALL_FN) (SIM_DESC);
-typedef void   (MODULE_INFO_FN) (SIM_DESC, int);
+typedef void   (MODULE_INFO_FN) (SIM_DESC, bool);
 
 
 /* Lists of installed handlers.  */
@@ -73,6 +73,7 @@ typedef struct module_info_list {
 /* Functions to register module with various handler lists */
 
 SIM_RC sim_module_install (SIM_DESC);
+SIM_RC sim_module_install_list (SIM_DESC, MODULE_INSTALL_FN * const[], size_t);
 void sim_module_uninstall (SIM_DESC);
 void sim_module_add_init_fn (SIM_DESC sd, MODULE_INIT_FN fn);
 void sim_module_add_resume_fn (SIM_DESC sd, MODULE_RESUME_FN fn);
@@ -97,7 +98,7 @@ SIM_RC sim_module_suspend (SIM_DESC sd);
 SIM_RC sim_module_resume (SIM_DESC sd);
 
 /* Report general information on module */
-void sim_module_info (SIM_DESC sd, int verbose);
+void sim_module_info (SIM_DESC sd, bool verbose);
 
 
 /* Module private data */

@@ -7,12 +7,12 @@ void bar (int x)
    -
    - */
 {
-    printf ("%d\n", x);
+    x++;
 
     long_line ();
 }
 
-static void
+static void __attribute__ ((used))
 unused ()
 {
     /* Not used for anything */

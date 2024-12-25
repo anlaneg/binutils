@@ -1,6 +1,6 @@
 /* Simulator for Analog Devices Blackfin processors.
 
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,15 +18,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
+#include "ansidecl.h"
 #include "opcode/bfin.h"
 #include "sim-main.h"
+#include "arch.h"
+#include "bfin-sim.h"
 #include "dv-bfin_cec.h"
 #include "dv-bfin_mmu.h"
 
@@ -35,7 +39,7 @@
 #define SIGNEXTEND(v, n) \
   (((bs32)(v) << (HOST_LONG_WORD_SIZE - (n))) >> (HOST_LONG_WORD_SIZE - (n)))
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 illegal_instruction (SIM_CPU *cpu)
 {
   TRACE_INSN (cpu, "ILLEGAL INSTRUCTION");
@@ -43,7 +47,7 @@ illegal_instruction (SIM_CPU *cpu)
     cec_exception (cpu, VEC_UNDEF_I);
 }
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 illegal_instruction_combination (SIM_CPU *cpu)
 {
   TRACE_INSN (cpu, "ILLEGAL INSTRUCTION COMBINATION");
@@ -51,7 +55,7 @@ illegal_instruction_combination (SIM_CPU *cpu)
     cec_exception (cpu, VEC_ILGAL_I);
 }
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 illegal_instruction_or_combination (SIM_CPU *cpu)
 {
   if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
@@ -60,7 +64,7 @@ illegal_instruction_or_combination (SIM_CPU *cpu)
     illegal_instruction (cpu);
 }
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 unhandled_instruction (SIM_CPU *cpu, const char *insn)
 {
   SIM_DESC sd = CPU_STATE (cpu);
@@ -198,16 +202,18 @@ fmtconst_str (const_forms_t cf, bs32 x, bu32 pc)
 
   if (constant_formats[cf].reloc)
     {
+#if 0
       bu32 ea = (((constant_formats[cf].pcrel ? SIGNEXTEND (x, constant_formats[cf].nbits)
 		      : x) + constant_formats[cf].offset) << constant_formats[cf].scale);
       if (constant_formats[cf].pcrel)
 	ea += pc;
-     /*if (outf->symbol_at_address_func (ea, outf) || !constant_formats[cf].exact)
+      if (outf->symbol_at_address_func (ea, outf) || !constant_formats[cf].exact)
        {
 	  outf->print_address_func (ea, outf);
 	  return "";
        }
-     else*/
+      else
+#endif
        {
 	  sprintf (buf, "%#x", x);
 	  return buf;
@@ -498,6 +504,16 @@ get_store_name (SIM_CPU *cpu, bu32 *p)
     return greg_names[4 * 8 + 2];
   else if (p == &AWREG (1))
     return greg_names[4 * 8 + 3];
+  else if (p == &ASTATREG (ac0))
+    return "ASTAT[ac0]";
+  else if (p == &ASTATREG (ac0_copy))
+    return "ASTAT[ac0_copy]";
+  else if (p == &ASTATREG (ac1))
+    return "ASTAT[ac1]";
+  else if (p == &ASTATREG (an))
+    return "ASTAT[an]";
+  else if (p == &ASTATREG (aq))
+    return "ASTAT[aq]";
   else if (p == &ASTATREG (av0))
     return "ASTAT[av0]";
   else if (p == &ASTATREG (av0s))
@@ -506,22 +522,14 @@ get_store_name (SIM_CPU *cpu, bu32 *p)
     return "ASTAT[av1]";
   else if (p == &ASTATREG (av1s))
     return "ASTAT[av1s]";
+  else if (p == &ASTATREG (az))
+    return "ASTAT[az]";
   else if (p == &ASTATREG (v))
     return "ASTAT[v]";
-  else if (p == &ASTATREG (vs))
-    return "ASTAT[vs]";
   else if (p == &ASTATREG (v_copy))
     return "ASTAT[v_copy]";
-  else if (p == &ASTATREG (az))
-    return "ASTAT[az]";
-  else if (p == &ASTATREG (an))
-    return "ASTAT[an]";
-  else if (p == &ASTATREG (az))
-    return "ASTAT[az]";
-  else if (p == &ASTATREG (ac0))
-    return "ASTAT[ac0]";
-  else if (p == &ASTATREG (ac0_copy))
-    return "ASTAT[ac0_copy]";
+  else if (p == &ASTATREG (vs))
+    return "ASTAT[vs]";
   else
     {
       /* Worry about this when we start to STORE() it.  */
@@ -778,7 +786,7 @@ lshift (SIM_CPU *cpu, bu64 val, int cnt, int size, bool saturate, bool overflow)
      However, it's a little more complex than looking at sign bits, we need
      to see if we are shifting the sign information away...  */
   if (((val << cnt) >> size) == 0
-      || (((val << cnt) >> size) == ~(~0 << cnt)
+      || (((val << cnt) >> size) == ~((bu32)~0 << cnt)
 	  && ((new_val >> (size - 1)) & 0x1)))
     v_i = 0;
   else
@@ -1588,7 +1596,8 @@ decode_macfunc (SIM_CPU *cpu, int which, int op, int h0, int h1, int src0,
 
   if (op != 3)
     {
-      bu8 sgn0 = (acc >> 31) & 1;
+      /* TODO: Figure out how the 32-bit sign is used.  */
+      ATTRIBUTE_UNUSED bu8 sgn0 = (acc >> 31) & 1;
       bu8 sgn40 = (acc >> 39) & 1;
       bu40 nosat_acc;
 
@@ -5871,7 +5880,7 @@ decode_dsp32shiftimm_0 (SIM_CPU *cpu, bu16 iw0, bu16 iw1)
 	      bu16 inshift = in << shift;
 
 	      if (((inshift & ~0xFFFF)
-		   && ((inshift & ~0xFFFF) >> 16) != ~(~0 << shift))
+		   && ((inshift & ~0xFFFF) >> 16) != ~((bu32)~0 << shift))
 		  || (inshift & 0x8000) != (in & 0x8000))
 		{
 		  if (in & 0x8000)

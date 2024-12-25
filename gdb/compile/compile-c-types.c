@@ -1,6 +1,6 @@
 /* Convert types from GDB to GCC
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,7 +18,6 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 
-#include "defs.h"
 #include "gdbtypes.h"
 #include "compile-internal.h"
 #include "compile-c.h"
@@ -29,7 +28,7 @@
 static gcc_type
 convert_pointer (compile_c_instance *context, struct type *type)
 {
-  gcc_type target = context->convert_type (TYPE_TARGET_TYPE (type));
+  gcc_type target = context->convert_type (type->target_type ());
 
   return context->plugin ().build_pointer_type (target);
 }
@@ -40,28 +39,28 @@ static gcc_type
 convert_array (compile_c_instance *context, struct type *type)
 {
   gcc_type element_type;
-  struct type *range = TYPE_INDEX_TYPE (type);
+  struct type *range = type->index_type ();
 
-  element_type = context->convert_type (TYPE_TARGET_TYPE (type));
+  element_type = context->convert_type (type->target_type ());
 
-  if (TYPE_LOW_BOUND_KIND (range) != PROP_CONST)
+  if (!range->bounds ()->low.is_constant ())
     return context->plugin ().error (_("array type with non-constant"
 				       " lower bound is not supported"));
-  if (TYPE_LOW_BOUND (range) != 0)
+  if (range->bounds ()->low.const_val () != 0)
     return context->plugin ().error (_("cannot convert array type with "
 				       "non-zero lower bound to C"));
 
-  if (TYPE_HIGH_BOUND_KIND (range) == PROP_LOCEXPR
-      || TYPE_HIGH_BOUND_KIND (range) == PROP_LOCLIST)
+  if (range->bounds ()->high.kind () == PROP_LOCEXPR
+      || range->bounds ()->high.kind () == PROP_LOCLIST)
     {
       gcc_type result;
 
-      if (TYPE_VECTOR (type))
+      if (type->is_vector ())
 	return context->plugin ().error (_("variably-sized vector type"
 					   " is not supported"));
 
       std::string upper_bound
-	= c_get_range_decl_name (&TYPE_RANGE_DATA (range)->high);
+	= c_get_range_decl_name (&range->bounds ()->high);
       result = context->plugin ().build_vla_array_type (element_type,
 							upper_bound.c_str ());
       return result;
@@ -70,7 +69,7 @@ convert_array (compile_c_instance *context, struct type *type)
     {
       LONGEST low_bound, high_bound, count;
 
-      if (get_array_bounds (type, &low_bound, &high_bound) == 0)
+      if (!get_array_bounds (type, &low_bound, &high_bound))
 	count = -1;
       else
 	{
@@ -78,7 +77,7 @@ convert_array (compile_c_instance *context, struct type *type)
 	  count = high_bound + 1;
 	}
 
-      if (TYPE_VECTOR (type))
+      if (type->is_vector ())
 	return context->plugin ().build_vector_type (element_type, count);
       return context->plugin ().build_array_type (element_type, count);
     }
@@ -94,31 +93,35 @@ convert_struct_or_union (compile_c_instance *context, struct type *type)
 
   /* First we create the resulting type and enter it into our hash
      table.  This lets recursive types work.  */
-  if (TYPE_CODE (type) == TYPE_CODE_STRUCT)
+  if (type->code () == TYPE_CODE_STRUCT)
     result = context->plugin ().build_record_type ();
   else
     {
-      gdb_assert (TYPE_CODE (type) == TYPE_CODE_UNION);
+      gdb_assert (type->code () == TYPE_CODE_UNION);
       result = context->plugin ().build_union_type ();
     }
   context->insert_type (type, result);
 
-  for (i = 0; i < TYPE_NFIELDS (type); ++i)
+  for (i = 0; i < type->num_fields (); ++i)
     {
       gcc_type field_type;
-      unsigned long bitsize = TYPE_FIELD_BITSIZE (type, i);
+      unsigned long bitsize = type->field (i).bitsize ();
 
-      field_type = context->convert_type (TYPE_FIELD_TYPE (type, i));
+      field_type = context->convert_type (type->field (i).type ());
       if (bitsize == 0)
-	bitsize = 8 * TYPE_LENGTH (TYPE_FIELD_TYPE (type, i));
+	bitsize = 8 * type->field (i).type ()->length ();
       context->plugin ().build_add_field (result,
-					  TYPE_FIELD_NAME (type, i),
+					  type->field (i).name (),
 					  field_type,
 					  bitsize,
-					  TYPE_FIELD_BITPOS (type, i));
+					  type->field (i).loc_bitpos ());
     }
 
-  context->plugin ().finish_record_or_union (result, TYPE_LENGTH (type));
+  if (context->plugin ().version () >= GCC_C_FE_VERSION_2)
+    context->plugin ().finish_record_with_alignment (result, type->length (),
+						     type_align (type));
+  else
+    context->plugin ().finish_record_or_union (result, type->length ());
   return result;
 }
 
@@ -130,14 +133,14 @@ convert_enum (compile_c_instance *context, struct type *type)
   gcc_type int_type, result;
   int i;
 
-  int_type = context->plugin ().int_type_v0 (TYPE_UNSIGNED (type),
-					     TYPE_LENGTH (type));
+  int_type = context->plugin ().int_type_v0 (type->is_unsigned (),
+					     type->length ());
 
   result = context->plugin ().build_enum_type (int_type);
-  for (i = 0; i < TYPE_NFIELDS (type); ++i)
+  for (i = 0; i < type->num_fields (); ++i)
     {
       context->plugin ().build_add_enum_constant
-	(result, TYPE_FIELD_NAME (type, i), TYPE_FIELD_ENUMVAL (type, i));
+	(result, type->field (i).name (), type->field (i).loc_enumval ());
     }
 
   context->plugin ().finish_enum_type (result);
@@ -153,9 +156,9 @@ convert_func (compile_c_instance *context, struct type *type)
   int i;
   gcc_type result, return_type;
   struct gcc_type_array array;
-  int is_varargs = TYPE_VARARGS (type) || !TYPE_PROTOTYPED (type);
+  int is_varargs = type->has_varargs () || !type->is_prototyped ();
 
-  struct type *target_type = TYPE_TARGET_TYPE (type);
+  struct type *target_type = type->target_type ();
 
   /* Functions with no debug info have no return type.  Ideally we'd
      want to fallback to the type of the cast just before the
@@ -164,10 +167,7 @@ convert_func (compile_c_instance *context, struct type *type)
      GDB's parser used to do.  */
   if (target_type == NULL)
     {
-      if (TYPE_OBJFILE_OWNED (type))
-	target_type = objfile_type (TYPE_OWNER (type).objfile)->builtin_int;
-      else
-	target_type = builtin_type (TYPE_OWNER (type).gdbarch)->builtin_int;
+      target_type = builtin_type (type->arch ())->builtin_int;
       warning (_("function has unknown return type; assuming int"));
     }
 
@@ -175,14 +175,14 @@ convert_func (compile_c_instance *context, struct type *type)
      types.  Those are impossible in C, though.  */
   return_type = context->convert_type (target_type);
 
-  array.n_elements = TYPE_NFIELDS (type);
-  array.elements = XNEWVEC (gcc_type, TYPE_NFIELDS (type));
-  for (i = 0; i < TYPE_NFIELDS (type); ++i)
-    array.elements[i] = context->convert_type (TYPE_FIELD_TYPE (type, i));
+  array.n_elements = type->num_fields ();
+  std::vector<gcc_type> elements (array.n_elements);
+  array.elements = elements.data ();
+  for (i = 0; i < type->num_fields (); ++i)
+    array.elements[i] = context->convert_type (type->field (i).type ());
 
   result = context->plugin ().build_function_type (return_type,
 						   &array, is_varargs);
-  xfree (array.elements);
 
   return result;
 }
@@ -194,18 +194,18 @@ convert_int (compile_c_instance *context, struct type *type)
 {
   if (context->plugin ().version () >= GCC_C_FE_VERSION_1)
     {
-      if (TYPE_NOSIGN (type))
+      if (type->has_no_signedness ())
 	{
-	  gdb_assert (TYPE_LENGTH (type) == 1);
+	  gdb_assert (type->length () == 1);
 	  return context->plugin ().char_type ();
 	}
-      return context->plugin ().int_type (TYPE_UNSIGNED (type),
-					  TYPE_LENGTH (type),
-					  TYPE_NAME (type));
+      return context->plugin ().int_type (type->is_unsigned (),
+					  type->length (),
+					  type->name ());
     }
   else
-    return context->plugin ().int_type_v0 (TYPE_UNSIGNED (type),
-					   TYPE_LENGTH (type));
+    return context->plugin ().int_type_v0 (type->is_unsigned (),
+					   type->length ());
 }
 
 /* Convert a floating-point type to its gcc representation.  */
@@ -214,10 +214,10 @@ static gcc_type
 convert_float (compile_c_instance *context, struct type *type)
 {
   if (context->plugin ().version () >= GCC_C_FE_VERSION_1)
-    return context->plugin ().float_type (TYPE_LENGTH (type),
-					  TYPE_NAME (type));
+    return context->plugin ().float_type (type->length (),
+					  type->name ());
   else
-    return context->plugin ().float_type_v0 (TYPE_LENGTH (type));
+    return context->plugin ().float_type_v0 (type->length ());
 }
 
 /* Convert the 'void' type to its gcc representation.  */
@@ -254,7 +254,8 @@ convert_qualified (compile_c_instance *context, struct type *type)
   if (TYPE_RESTRICT (type))
     quals |= GCC_QUALIFIER_RESTRICT;
 
-  return context->plugin ().build_qualified_type (unqual_converted, quals);
+  return context->plugin ().build_qualified_type (unqual_converted,
+						  quals.raw ());
 }
 
 /* Convert a complex type to its gcc representation.  */
@@ -262,7 +263,7 @@ convert_qualified (compile_c_instance *context, struct type *type)
 static gcc_type
 convert_complex (compile_c_instance *context, struct type *type)
 {
-  gcc_type base = context->convert_type (TYPE_TARGET_TYPE (type));
+  gcc_type base = context->convert_type (type->target_type ());
 
   return context->plugin ().build_complex_type (base);
 }
@@ -277,12 +278,12 @@ convert_type_basic (compile_c_instance *context, struct type *type)
 {
   /* If we are converting a qualified type, first convert the
      unqualified type and then apply the qualifiers.  */
-  if ((TYPE_INSTANCE_FLAGS (type) & (TYPE_INSTANCE_FLAG_CONST
-				     | TYPE_INSTANCE_FLAG_VOLATILE
-				     | TYPE_INSTANCE_FLAG_RESTRICT)) != 0)
+  if ((type->instance_flags () & (TYPE_INSTANCE_FLAG_CONST
+				  | TYPE_INSTANCE_FLAG_VOLATILE
+				  | TYPE_INSTANCE_FLAG_RESTRICT)) != 0)
     return convert_qualified (context, type);
 
-  switch (TYPE_CODE (type))
+  switch (type->code ())
     {
     case TYPE_CODE_PTR:
       return convert_pointer (context, type);
@@ -321,11 +322,7 @@ convert_type_basic (compile_c_instance *context, struct type *type)
 	   the cast-to type as the variable's type, like GDB's
 	   built-in parser does.  For now, assume "int" like GDB's
 	   built-in parser used to do, but at least warn.  */
-	struct type *fallback;
-	if (TYPE_OBJFILE_OWNED (type))
-	  fallback = objfile_type (TYPE_OWNER (type).objfile)->builtin_int;
-	else
-	  fallback = builtin_type (TYPE_OWNER (type).gdbarch)->builtin_int;
+	struct type *fallback = builtin_type (type->arch ())->builtin_int;
 	warning (_("variable has unknown type; assuming int"));
 	return convert_int (context, fallback);
       }

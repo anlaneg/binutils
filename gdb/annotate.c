@@ -1,5 +1,5 @@
 /* Annotation routines for GDB.
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,7 +16,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "annotate.h"
 #include "value.h"
 #include "target.h"
@@ -25,8 +24,14 @@
 #include "observable.h"
 #include "inferior.h"
 #include "infrun.h"
-#include "top.h"
-
+#include "source.h"
+#include "objfiles.h"
+#include "source-cache.h"
+#include "ui.h"
+
+/* See annotate.h.  */
+
+int annotation_level = 0;
 
 /* Prototypes for local functions.  */
 
@@ -49,9 +54,9 @@ static void
 print_value_flags (struct type *t)
 {
   if (can_dereference (t))
-    printf_filtered (("*"));
+    printf_unfiltered (("*"));
   else
-    printf_filtered (("-"));
+    printf_unfiltered (("-"));
 }
 
 static void
@@ -61,17 +66,10 @@ annotate_breakpoints_invalid (void)
       && (!breakpoints_invalid_emitted
 	  || current_ui->prompt_state != PROMPT_BLOCKED))
     {
-      /* If the inferior owns the terminal (e.g., we're resuming),
-	 make sure to leave with the inferior still owning it.  */
-      int was_inferior = target_terminal::is_inferior ();
-
+      target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
       printf_unfiltered (("\n\032\032breakpoints-invalid\n"));
-
-      if (was_inferior)
-	target_terminal::inferior ();
-
       breakpoints_invalid_emitted = 1;
     }
 }
@@ -80,42 +78,42 @@ void
 annotate_breakpoint (int num)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032breakpoint %d\n"), num);
+    printf_unfiltered (("\n\032\032breakpoint %d\n"), num);
 }
 
 void
 annotate_catchpoint (int num)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032catchpoint %d\n"), num);
+    printf_unfiltered (("\n\032\032catchpoint %d\n"), num);
 }
 
 void
 annotate_watchpoint (int num)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032watchpoint %d\n"), num);
+    printf_unfiltered (("\n\032\032watchpoint %d\n"), num);
 }
 
 void
 annotate_starting (void)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032starting\n"));
+    printf_unfiltered (("\n\032\032starting\n"));
 }
 
 void
 annotate_stopped (void)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032stopped\n"));
+    printf_unfiltered (("\n\032\032stopped\n"));
 }
 
 void
 annotate_exited (int exitstatus)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032exited %d\n"), exitstatus);
+    printf_unfiltered (("\n\032\032exited %d\n"), exitstatus);
 }
 
 void
@@ -125,35 +123,35 @@ annotate_signalled (void)
     deprecated_annotate_signalled_hook ();
 
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032signalled\n"));
+    printf_unfiltered (("\n\032\032signalled\n"));
 }
 
 void
 annotate_signal_name (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032signal-name\n"));
+    printf_unfiltered (("\n\032\032signal-name\n"));
 }
 
 void
 annotate_signal_name_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032signal-name-end\n"));
+    printf_unfiltered (("\n\032\032signal-name-end\n"));
 }
 
 void
 annotate_signal_string (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032signal-string\n"));
+    printf_unfiltered (("\n\032\032signal-string\n"));
 }
 
 void
 annotate_signal_string_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032signal-string-end\n"));
+    printf_unfiltered (("\n\032\032signal-string-end\n"));
 }
 
 void
@@ -163,42 +161,42 @@ annotate_signal (void)
     deprecated_annotate_signal_hook ();
 
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032signal\n"));
+    printf_unfiltered (("\n\032\032signal\n"));
 }
 
 void
 annotate_breakpoints_headers (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032breakpoints-headers\n"));
+    printf_unfiltered (("\n\032\032breakpoints-headers\n"));
 }
 
 void
 annotate_field (int num)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032field %d\n"), num);
+    printf_unfiltered (("\n\032\032field %d\n"), num);
 }
 
 void
 annotate_breakpoints_table (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032breakpoints-table\n"));
+    printf_unfiltered (("\n\032\032breakpoints-table\n"));
 }
 
 void
 annotate_record (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032record\n"));
+    printf_unfiltered (("\n\032\032record\n"));
 }
 
 void
 annotate_breakpoints_table_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032breakpoints-table-end\n"));
+    printf_unfiltered (("\n\032\032breakpoints-table-end\n"));
 }
 
 void
@@ -208,17 +206,10 @@ annotate_frames_invalid (void)
       && (!frames_invalid_emitted
 	  || current_ui->prompt_state != PROMPT_BLOCKED))
     {
-      /* If the inferior owns the terminal (e.g., we're resuming),
-	 make sure to leave with the inferior still owning it.  */
-      int was_inferior = target_terminal::is_inferior ();
-
+      target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
       printf_unfiltered (("\n\032\032frames-invalid\n"));
-
-      if (was_inferior)
-	target_terminal::inferior ();
-
       frames_invalid_emitted = 1;
     }
 }
@@ -241,14 +232,29 @@ annotate_thread_changed (void)
     }
 }
 
+/* Emit notification on thread exit.  */
+
+static void
+annotate_thread_exited (thread_info *t,
+			std::optional<ULONGEST> exit_code,
+			bool /* silent */)
+{
+  if (annotation_level > 1)
+    {
+      printf_unfiltered (("\n\032\032thread-exited,"
+			  "id=\"%d\",group-id=\"i%d\"\n"),
+			 t->global_num, t->inf->num);
+    }
+}
+
 void
 annotate_field_begin (struct type *type)
 {
   if (annotation_level == 2)
     {
-      printf_filtered (("\n\032\032field-begin "));
+      printf_unfiltered (("\n\032\032field-begin "));
       print_value_flags (type);
-      printf_filtered (("\n"));
+      printf_unfiltered (("\n"));
     }
 }
 
@@ -256,42 +262,42 @@ void
 annotate_field_name_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032field-name-end\n"));
+    printf_unfiltered (("\n\032\032field-name-end\n"));
 }
 
 void
 annotate_field_value (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032field-value\n"));
+    printf_unfiltered (("\n\032\032field-value\n"));
 }
 
 void
 annotate_field_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032field-end\n"));
+    printf_unfiltered (("\n\032\032field-end\n"));
 }
 
 void
 annotate_quit (void)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032quit\n"));
+    printf_unfiltered (("\n\032\032quit\n"));
 }
 
 void
 annotate_error (void)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032error\n"));
+    printf_unfiltered (("\n\032\032error\n"));
 }
 
 void
 annotate_error_begin (void)
 {
   if (annotation_level > 1)
-    fprintf_filtered (gdb_stderr, "\n\032\032error-begin\n");
+    gdb_printf (gdb_stderr, "\n\032\032error-begin\n");
 }
 
 void
@@ -299,9 +305,9 @@ annotate_value_history_begin (int histindex, struct type *type)
 {
   if (annotation_level == 2)
     {
-      printf_filtered (("\n\032\032value-history-begin %d "), histindex);
+      printf_unfiltered (("\n\032\032value-history-begin %d "), histindex);
       print_value_flags (type);
-      printf_filtered (("\n"));
+      printf_unfiltered (("\n"));
     }
 }
 
@@ -310,9 +316,9 @@ annotate_value_begin (struct type *type)
 {
   if (annotation_level == 2)
     {
-      printf_filtered (("\n\032\032value-begin "));
+      printf_unfiltered (("\n\032\032value-begin "));
       print_value_flags (type);
-      printf_filtered (("\n"));
+      printf_unfiltered (("\n"));
     }
 }
 
@@ -320,84 +326,84 @@ void
 annotate_value_history_value (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032value-history-value\n"));
+    printf_unfiltered (("\n\032\032value-history-value\n"));
 }
 
 void
 annotate_value_history_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032value-history-end\n"));
+    printf_unfiltered (("\n\032\032value-history-end\n"));
 }
 
 void
 annotate_value_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032value-end\n"));
+    printf_unfiltered (("\n\032\032value-end\n"));
 }
 
 void
 annotate_display_begin (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-begin\n"));
+    printf_unfiltered (("\n\032\032display-begin\n"));
 }
 
 void
 annotate_display_number_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-number-end\n"));
+    printf_unfiltered (("\n\032\032display-number-end\n"));
 }
 
 void
 annotate_display_format (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-format\n"));
+    printf_unfiltered (("\n\032\032display-format\n"));
 }
 
 void
 annotate_display_expression (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-expression\n"));
+    printf_unfiltered (("\n\032\032display-expression\n"));
 }
 
 void
 annotate_display_expression_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-expression-end\n"));
+    printf_unfiltered (("\n\032\032display-expression-end\n"));
 }
 
 void
 annotate_display_value (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-value\n"));
+    printf_unfiltered (("\n\032\032display-value\n"));
 }
 
 void
 annotate_display_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032display-end\n"));
+    printf_unfiltered (("\n\032\032display-end\n"));
 }
 
 void
 annotate_arg_begin (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032arg-begin\n"));
+    printf_unfiltered (("\n\032\032arg-begin\n"));
 }
 
 void
 annotate_arg_name_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032arg-name-end\n"));
+    printf_unfiltered (("\n\032\032arg-name-end\n"));
 }
 
 void
@@ -405,9 +411,9 @@ annotate_arg_value (struct type *type)
 {
   if (annotation_level == 2)
     {
-      printf_filtered (("\n\032\032arg-value "));
+      printf_unfiltered (("\n\032\032arg-value "));
       print_value_flags (type);
-      printf_filtered (("\n"));
+      printf_unfiltered (("\n"));
     }
 }
 
@@ -415,119 +421,151 @@ void
 annotate_arg_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032arg-end\n"));
+    printf_unfiltered (("\n\032\032arg-end\n"));
 }
 
-void
-annotate_source (char *filename, int line, int character, int mid,
+static void
+annotate_source (const char *filename, int line, int character, int mid,
 		 struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032source "));
+    printf_unfiltered (("\n\032\032source "));
   else
-    printf_filtered (("\032\032"));
+    printf_unfiltered (("\032\032"));
 
-  printf_filtered (("%s:%d:%d:%s:%s\n"), filename, line, character,
-		   mid ? "middle" : "beg", paddress (gdbarch, pc));
+  printf_unfiltered (("%s:%d:%d:%s:%s\n"), filename, line, character,
+		     mid ? "middle" : "beg", paddress (gdbarch, pc));
 }
+
+/* See annotate.h.  */
+
+bool
+annotate_source_line (struct symtab *s, int line, int mid_statement,
+		      CORE_ADDR pc)
+{
+  if (annotation_level > 0)
+    {
+      const std::vector<off_t> *offsets;
+      if (!g_source_cache.get_line_charpos (s, &offsets))
+	return false;
+      if (line > offsets->size ())
+	return false;
+
+      annotate_source (s->fullname (), line, (int) (*offsets)[line - 1],
+		       mid_statement, s->compunit ()->objfile ()->arch (),
+		       pc);
+
+      /* Update the current symtab and line.  */
+      symtab_and_line sal;
+      sal.pspace = s->compunit ()->objfile ()->pspace ();
+      sal.symtab = s;
+      sal.line = line;
+      set_current_source_symtab_and_line (sal);
+
+      return true;
+    }
+
+  return false;
+}
+
 
 void
 annotate_frame_begin (int level, struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   if (annotation_level > 1)
-    printf_filtered (("\n\032\032frame-begin %d %s\n"),
-		     level, paddress (gdbarch, pc));
+    printf_unfiltered (("\n\032\032frame-begin %d %s\n"),
+		       level, paddress (gdbarch, pc));
 }
 
 void
 annotate_function_call (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032function-call\n"));
+    printf_unfiltered (("\n\032\032function-call\n"));
 }
 
 void
 annotate_signal_handler_caller (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032signal-handler-caller\n"));
+    printf_unfiltered (("\n\032\032signal-handler-caller\n"));
 }
 
 void
 annotate_frame_address (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-address\n"));
+    printf_unfiltered (("\n\032\032frame-address\n"));
 }
 
 void
 annotate_frame_address_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-address-end\n"));
+    printf_unfiltered (("\n\032\032frame-address-end\n"));
 }
 
 void
 annotate_frame_function_name (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-function-name\n"));
+    printf_unfiltered (("\n\032\032frame-function-name\n"));
 }
 
 void
 annotate_frame_args (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-args\n"));
+    printf_unfiltered (("\n\032\032frame-args\n"));
 }
 
 void
 annotate_frame_source_begin (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-source-begin\n"));
+    printf_unfiltered (("\n\032\032frame-source-begin\n"));
 }
 
 void
 annotate_frame_source_file (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-source-file\n"));
+    printf_unfiltered (("\n\032\032frame-source-file\n"));
 }
 
 void
 annotate_frame_source_file_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-source-file-end\n"));
+    printf_unfiltered (("\n\032\032frame-source-file-end\n"));
 }
 
 void
 annotate_frame_source_line (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-source-line\n"));
+    printf_unfiltered (("\n\032\032frame-source-line\n"));
 }
 
 void
 annotate_frame_source_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-source-end\n"));
+    printf_unfiltered (("\n\032\032frame-source-end\n"));
 }
 
 void
 annotate_frame_where (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-where\n"));
+    printf_unfiltered (("\n\032\032frame-where\n"));
 }
 
 void
 annotate_frame_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032frame-end\n"));
+    printf_unfiltered (("\n\032\032frame-end\n"));
 }
 
 void
@@ -535,9 +573,9 @@ annotate_array_section_begin (int idx, struct type *elttype)
 {
   if (annotation_level == 2)
     {
-      printf_filtered (("\n\032\032array-section-begin %d "), idx);
+      printf_unfiltered (("\n\032\032array-section-begin %d "), idx);
       print_value_flags (elttype);
-      printf_filtered (("\n"));
+      printf_unfiltered (("\n"));
     }
 }
 
@@ -545,28 +583,28 @@ void
 annotate_elt_rep (unsigned int repcount)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032elt-rep %u\n"), repcount);
+    printf_unfiltered (("\n\032\032elt-rep %u\n"), repcount);
 }
 
 void
 annotate_elt_rep_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032elt-rep-end\n"));
+    printf_unfiltered (("\n\032\032elt-rep-end\n"));
 }
 
 void
 annotate_elt (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032elt\n"));
+    printf_unfiltered (("\n\032\032elt\n"));
 }
 
 void
 annotate_array_section_end (void)
 {
   if (annotation_level == 2)
-    printf_filtered (("\n\032\032array-section-end\n"));
+    printf_unfiltered (("\n\032\032array-section-end\n"));
 }
 
 /* Called when GDB is about to display the prompt.  Used to reset
@@ -589,10 +627,12 @@ breakpoint_changed (struct breakpoint *b)
   annotate_breakpoints_invalid ();
 }
 
+void _initialize_annotate ();
 void
-_initialize_annotate (void)
+_initialize_annotate ()
 {
-  gdb::observers::breakpoint_created.attach (breakpoint_changed);
-  gdb::observers::breakpoint_deleted.attach (breakpoint_changed);
-  gdb::observers::breakpoint_modified.attach (breakpoint_changed);
+  gdb::observers::breakpoint_created.attach (breakpoint_changed, "annotate");
+  gdb::observers::breakpoint_deleted.attach (breakpoint_changed, "annotate");
+  gdb::observers::breakpoint_modified.attach (breakpoint_changed, "annotate");
+  gdb::observers::thread_exit.attach (annotate_thread_exited, "annotate");
 }

@@ -1,6 +1,6 @@
 /* Top level stuff for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
-#include "gdbcmd.h"
+#include "exceptions.h"
 #include "cli/cli-cmds.h"
 #include "cli/cli-script.h"
 #include "cli/cli-setshow.h"
@@ -34,15 +33,16 @@
 #include "expression.h"
 #include "value.h"
 #include "language.h"
-#include "terminal.h"		/* For job_control.  */
-#include "common/job-control.h"
+#include "terminal.h"
+#include "gdbsupport/job-control.h"
 #include "annotate.h"
 #include "completer.h"
 #include "top.h"
-#include "common/version.h"
+#include "ui.h"
+#include "gdbsupport/version.h"
 #include "serial.h"
 #include "main.h"
-#include "event-loop.h"
+#include "gdbsupport/event-loop.h"
 #include "gdbthread.h"
 #include "extension.h"
 #include "interps.h"
@@ -50,9 +50,12 @@
 #include "maint.h"
 #include "filenames.h"
 #include "frame.h"
-#include "common/buffer.h"
-#include "gdb_select.h"
-#include "common/scope-exit.h"
+#include "gdbsupport/gdb_select.h"
+#include "gdbsupport/scope-exit.h"
+#include "gdbarch.h"
+#include "gdbsupport/pathstuff.h"
+#include "cli/cli-style.h"
+#include "pager.h"
 
 /* readline include files.  */
 #include "readline/readline.h"
@@ -73,6 +76,7 @@
 
 #if defined(TUI)
 # include "tui/tui.h"
+# include "tui/tui-io.h"
 #endif
 
 #ifndef O_NOCTTY
@@ -85,57 +89,79 @@ extern void initialize_all_files (void);
 #define PREFIX(X) the_prompts.prompt_stack[the_prompts.top + X].prefix
 #define SUFFIX(X) the_prompts.prompt_stack[the_prompts.top + X].suffix
 
-/* Default command line prompt.  This is overriden in some configs.  */
+/* Default command line prompt.  This is overridden in some configs.  */
 
 #ifndef DEFAULT_PROMPT
 #define DEFAULT_PROMPT	"(gdb) "
 #endif
 
-/* Generate a function that exports a pointer to a field of the
-   current UI.  */
-
-#define gen_ret_current_ui_field_ptr(type, name)	\
-type *							\
-current_ui_## name ## _ptr (void)			\
-{							\
-  return &current_ui->m_ ## name;		\
+struct ui_file **
+current_ui_gdb_stdout_ptr ()
+{
+  return &current_ui->m_gdb_stdout;
 }
 
-gen_ret_current_ui_field_ptr (struct ui_file *, gdb_stdout)
-gen_ret_current_ui_field_ptr (struct ui_file *, gdb_stdin)
-gen_ret_current_ui_field_ptr (struct ui_file *, gdb_stderr)
-gen_ret_current_ui_field_ptr (struct ui_file *, gdb_stdlog)
-gen_ret_current_ui_field_ptr (struct ui_out *, current_uiout)
+struct ui_file **
+current_ui_gdb_stdin_ptr ()
+{
+  return &current_ui->m_gdb_stdin;
+}
 
-/* Initialization file name for gdb.  This is host-dependent.  */
+struct ui_file **
+current_ui_gdb_stderr_ptr ()
+{
+  return &current_ui->m_gdb_stderr;
+}
 
-const char gdbinit[] = GDBINIT;
+struct ui_file **
+current_ui_gdb_stdlog_ptr ()
+{
+  return &current_ui->m_gdb_stdlog;
+}
+
+struct ui_out **
+current_ui_current_uiout_ptr ()
+{
+  return &current_ui->m_current_uiout;
+}
 
 int inhibit_gdbinit = 0;
-
-extern char lang_frame_mismatch_warn[];		/* language.c */
 
 /* Flag for whether we want to confirm potentially dangerous
    operations.  Default is yes.  */
 
-int confirm = 1;
+bool confirm = true;
 
 static void
 show_confirm (struct ui_file *file, int from_tty,
 	      struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Whether to confirm potentially "
-			    "dangerous operations is %s.\n"),
-		    value);
+  gdb_printf (file, _("Whether to confirm potentially "
+		      "dangerous operations is %s.\n"),
+	      value);
 }
 
-/* Current working directory.  */
-
-char *current_directory;
-
 /* The last command line executed on the console.  Used for command
-   repetitions.  */
-char *saved_command_line;
+   repetitions when the user enters an empty line.  */
+
+static char *saved_command_line;
+
+/* If not NULL, the arguments that should be passed if
+   saved_command_line is repeated.  */
+
+static const char *repeat_arguments;
+
+/* The previous last command line executed on the console.  Used for command
+   repetitions when a command wants to relaunch the previously launched
+   command.  We need this as when a command is running, saved_command_line
+   already contains the line of the currently executing command.  */
+
+static char *previous_saved_command_line;
+
+/* If not NULL, the arguments that should be passed if the
+   previous_saved_command_line is repeated.  */
+
+static const char *previous_repeat_arguments;
 
 /* Nonzero if the current command is modified by "server ".  This
    affects things like recording into the command history, commands
@@ -143,33 +169,29 @@ char *saved_command_line;
    whatever) can issue its own commands and also send along commands
    from the user, and have the user not notice that the user interface
    is issuing commands too.  */
-int server_command;
+bool server_command;
 
 /* Timeout limit for response from target.  */
 
-/* The default value has been changed many times over the years.  It 
-   was originally 5 seconds.  But that was thought to be a long time 
+/* The default value has been changed many times over the years.  It
+   was originally 5 seconds.  But that was thought to be a long time
    to sit and wait, so it was changed to 2 seconds.  That was thought
-   to be plenty unless the connection was going through some terminal 
+   to be plenty unless the connection was going through some terminal
    server or multiplexer or other form of hairy serial connection.
 
-   In mid-1996, remote_timeout was moved from remote.c to top.c and 
+   In mid-1996, remote_timeout was moved from remote.c to top.c and
    it began being used in other remote-* targets.  It appears that the
    default was changed to 20 seconds at that time, perhaps because the
    Renesas E7000 ICE didn't always respond in a timely manner.
 
    But if 5 seconds is a long time to sit and wait for retransmissions,
-   20 seconds is far worse.  This demonstrates the difficulty of using 
+   20 seconds is far worse.  This demonstrates the difficulty of using
    a single variable for all protocol timeouts.
 
-   As remote.c is used much more than remote-e7000.c, it was changed 
+   As remote.c is used much more than remote-e7000.c, it was changed
    back to 2 seconds in 1999.  */
 
 int remote_timeout = 2;
-
-/* Non-zero tells remote* modules to output debugging info.  */
-
-int remote_debug = 0;
 
 /* Sbrk location on entry to main.  Used for statistics only.  */
 #ifdef HAVE_USEFUL_SBRK
@@ -188,17 +210,13 @@ int (*deprecated_ui_loop_hook) (int);
 
 /* Called from print_frame_info to list the line we stopped in.  */
 
-void (*deprecated_print_frame_info_listing_hook) (struct symtab * s, 
+void (*deprecated_print_frame_info_listing_hook) (struct symtab * s,
 						  int line,
-						  int stopline, 
+						  int stopline,
 						  int noerror);
 /* Replaces most of query.  */
 
 int (*deprecated_query_hook) (const char *, va_list);
-
-/* Replaces most of warning.  */
-
-void (*deprecated_warning_hook) (const char *, va_list);
 
 /* These three functions support getting lines of text from the user.
    They are used in sequence.  First deprecated_readline_begin_hook is
@@ -222,156 +240,48 @@ void (*deprecated_readline_end_hook) (void);
 void (*deprecated_attach_hook) (void);
 void (*deprecated_detach_hook) (void);
 
-/* Called during long calculations to allow GUI to repair window
-   damage, and to check for stop buttons, etc...  */
-
-void (*deprecated_interactive_hook) (void);
-
-/* Called when going to wait for the target.  Usually allows the GUI
-   to run while waiting for target events.  */
-
-ptid_t (*deprecated_target_wait_hook) (ptid_t ptid,
-				       struct target_waitstatus *status,
-				       int options);
-
 /* Used by UI as a wrapper around command execution.  May do various
    things like enabling/disabling buttons, etc...  */
 
-void (*deprecated_call_command_hook) (struct cmd_list_element * c, 
+void (*deprecated_call_command_hook) (struct cmd_list_element * c,
 				      const char *cmd, int from_tty);
 
 /* Called when the current thread changes.  Argument is thread id.  */
 
 void (*deprecated_context_hook) (int id);
 
-/* The highest UI number ever assigned.  */
-static int highest_ui_num;
-
 /* See top.h.  */
 
-ui::ui (FILE *instream_, FILE *outstream_, FILE *errstream_)
-  : next (nullptr),
-    num (++highest_ui_num),
-    call_readline (nullptr),
-    input_handler (nullptr),
-    command_editing (0),
-    interp_info (nullptr),
-    async (0),
-    secondary_prompt_depth (0),
-    stdin_stream (instream_),
-    instream (instream_),
-    outstream (outstream_),
-    errstream (errstream_),
-    input_fd (fileno (instream)),
-    input_interactive_p (ISATTY (instream)),
-    prompt_state (PROMPT_NEEDED),
-    m_gdb_stdout (new stdio_file (outstream)),
-    m_gdb_stdin (new stdio_file (instream)),
-    m_gdb_stderr (new stderr_file (errstream)),
-    m_gdb_stdlog (m_gdb_stderr),
-    m_current_uiout (nullptr)
+void
+unbuffer_stream (FILE *stream)
 {
-  buffer_init (&line_buffer);
+  /* Unbuffer the input stream so that in gdb_readline_no_editing_callback,
+     the calls to fgetc fetch only one char at the time from STREAM.
 
-  if (ui_list == NULL)
-    ui_list = this;
-  else
-    {
-      struct ui *last;
+     This is important because gdb_readline_no_editing_callback will read
+     from STREAM up to the first '\n' character, after this GDB returns to
+     the event loop and relies on a select on STREAM indicating that more
+     input is pending.
 
-      for (last = ui_list; last->next != NULL; last = last->next)
-	;
-      last->next = this;
-    }
-}
+     If STREAM is buffered then the fgetc calls may have moved all the
+     pending input from the kernel into a local buffer, after which the
+     select will not indicate that more input is pending, and input after
+     the first '\n' will not be processed immediately.
 
-ui::~ui ()
-{
-  struct ui *ui, *uiprev;
+     Please ensure that any changes in this area run the MI tests with the
+     FORCE_SEPARATE_MI_TTY=1 flag being passed.  */
 
-  uiprev = NULL;
-
-  for (ui = ui_list; ui != NULL; uiprev = ui, ui = ui->next)
-    if (ui == this)
-      break;
-
-  gdb_assert (ui != NULL);
-
-  if (uiprev != NULL)
-    uiprev->next = next;
-  else
-    ui_list = next;
-
-  delete m_gdb_stdin;
-  delete m_gdb_stdout;
-  delete m_gdb_stderr;
-}
-
-/* Open file named NAME for read/write, making sure not to make it the
-   controlling terminal.  */
-
-static gdb_file_up
-open_terminal_stream (const char *name)
-{
-  int fd;
-
-  fd = gdb_open_cloexec (name, O_RDWR | O_NOCTTY, 0);
-  if (fd < 0)
-    perror_with_name  (_("opening terminal failed"));
-
-  return gdb_file_up (fdopen (fd, "w+"));
-}
-
-/* Implementation of the "new-ui" command.  */
-
-static void
-new_ui_command (const char *args, int from_tty)
-{
-  gdb_file_up stream[3];
-  int i;
-  int argc;
-  const char *interpreter_name;
-  const char *tty_name;
-
-  dont_repeat ();
-
-  gdb_argv argv (args);
-  argc = argv.count ();
-
-  if (argc < 2)
-    error (_("Usage: new-ui INTERPRETER TTY"));
-
-  interpreter_name = argv[0];
-  tty_name = argv[1];
-
-  {
-    scoped_restore save_ui = make_scoped_restore (&current_ui);
-
-    /* Open specified terminal, once for each of
-       stdin/stdout/stderr.  */
-    for (i = 0; i < 3; i++)
-      stream[i] = open_terminal_stream (tty_name);
-
-    std::unique_ptr<ui> ui
-      (new struct ui (stream[0].get (), stream[1].get (), stream[2].get ()));
-
-    ui->async = 1;
-
-    current_ui = ui.get ();
-
-    set_top_level_interpreter (interpreter_name);
-
-    interp_pre_command_loop (top_level_interpreter ());
-
-    /* Make sure the files are not closed.  */
-    stream[0].release ();
-    stream[1].release ();
-    stream[2].release ();
-
-    ui.release ();
-  }
-
-  printf_unfiltered ("New UI allocated\n");
+#ifdef __MINGW32__
+  /* With MS-Windows runtime, making stdin unbuffered when it's
+     connected to the terminal causes it to misbehave.  */
+  if (!ISATTY (stream))
+    setbuf (stream, nullptr);
+#else
+  /* On GNU/Linux the issues described above can impact GDB even when
+     dealing with input from a terminal.  For now we unbuffer the input
+     stream for everyone except MS-Windows.  */
+  setbuf (stream, nullptr);
+#endif
 }
 
 /* Handler for SIGHUP.  */
@@ -400,13 +310,15 @@ quit_cover (void)
 /* NOTE 1999-04-29: This variable will be static again, once we modify
    gdb to use the event loop as the default command loop and we merge
    event-top.c into this file, top.c.  */
-/* static */ const char *source_file_name;
+/* static */ std::string source_file_name;
 
 /* Read commands from STREAM.  */
 void
 read_command_file (FILE *stream)
 {
   struct ui *ui = current_ui;
+
+  unbuffer_stream (stream);
 
   scoped_restore save_instream
     = make_scoped_restore (&ui->instream, stream);
@@ -416,17 +328,15 @@ read_command_file (FILE *stream)
 
   while (ui->instream != NULL && !feof (ui->instream))
     {
-      char *command;
-
       /* Get a command-line.  This calls the readline package.  */
-      command = command_line_input (NULL, NULL);
-      if (command == NULL)
+      std::string command_buffer;
+      const char *command
+	= command_line_input (command_buffer, nullptr, nullptr);
+      if (command == nullptr)
 	break;
       command_handler (command);
     }
 }
-
-void (*pre_init_ui_hook) (void);
 
 #ifdef __MSDOS__
 static void
@@ -445,7 +355,7 @@ prepare_execute_command ()
      it.  For the duration of the command, though, use the dcache to
      help things like backtrace.  */
   if (non_stop)
-    target_dcache_invalidate ();
+    target_dcache_invalidate (current_program_space->aspace);
 
   return scoped_value_mark ();
 }
@@ -457,7 +367,7 @@ void
 check_frame_language_change (void)
 {
   static int warned = 0;
-  struct frame_info *frame;
+  frame_info_ptr frame;
 
   /* First make sure that a new frame has been selected, in case the
      command or the hooks changed the program state.  */
@@ -466,7 +376,8 @@ check_frame_language_change (void)
     {
       if (language_mode == language_mode_auto && info_verbose)
 	{
-	  language_info (1);	/* Print what changed.  */
+	  /* Print what changed.  */
+	  language_info ();
 	}
       warned = 0;
     }
@@ -477,7 +388,7 @@ check_frame_language_change (void)
   /* FIXME: This should be cacheing the frame and only running when
      the frame changes.  */
 
-  if (has_stack_frames ())
+  if (warn_frame_lang_mismatch && has_stack_frames ())
     {
       enum language flang;
 
@@ -486,7 +397,7 @@ check_frame_language_change (void)
 	  && flang != language_unknown
 	  && flang != current_language->la_language)
 	{
-	  printf_filtered ("%s\n", lang_frame_mismatch_warn);
+	  gdb_printf ("%s\n", _(lang_frame_mismatch_warn));
 	  warned = 1;
 	}
     }
@@ -500,6 +411,13 @@ wait_sync_command_done (void)
   /* Processing events may change the current UI.  */
   scoped_restore save_ui = make_scoped_restore (&current_ui);
   struct ui *ui = current_ui;
+
+  /* We're about to wait until the target stops after having resumed
+     it so must force-commit resumptions, in case we're being called
+     in some context where a scoped_disable_commit_resumed object is
+     active.  I.e., this function is a commit-resumed sync/flush
+     point.  */
+  scoped_enable_commit_resumed enable ("sync wait");
 
   while (gdb_do_one_event () >= 0)
     if (ui->prompt_state != PROMPT_BLOCKED)
@@ -520,11 +438,6 @@ maybe_wait_sync_command_done (int was_sync)
       && current_ui->prompt_state == PROMPT_BLOCKED)
     wait_sync_command_done ();
 }
-
-/* If not NULL, the arguments that should be passed if the current
-   command is repeated.  */
-
-static const char *repeat_arguments;
 
 /* See command.h.  */
 
@@ -547,16 +460,14 @@ execute_command (const char *p, int from_tty)
   auto cleanup_if_error = make_scope_exit (bpstat_clear_actions);
   scoped_value_mark cleanup = prepare_execute_command ();
 
-  /* Force cleanup of any alloca areas if using C alloca instead of
-     a builtin alloca.  */
-  alloca (0);
-
   /* This can happen when command_line_input hits end of file.  */
   if (p == NULL)
     {
       cleanup_if_error.release ();
       return;
     }
+
+  std::string cmd_copy = p;
 
   target_log_command (p);
 
@@ -566,6 +477,8 @@ execute_command (const char *p, int from_tty)
     {
       const char *cmd = p;
       const char *arg;
+      std::string default_args;
+      std::string default_args_and_arg;
       int was_sync = current_ui->prompt_state == PROMPT_BLOCKED;
 
       line = p;
@@ -574,26 +487,37 @@ execute_command (const char *p, int from_tty)
       print_command_trace ("%s", p);
 
       /*查询cmd对应的cmd_list_element*/
-      c = lookup_cmd (&cmd, cmdlist, "", 0, 1);
+      c = lookup_cmd (&cmd, cmdlist, "", &default_args, 0, 1);
       p = cmd;
 
       scoped_restore save_repeat_args
 	= make_scoped_restore (&repeat_arguments, nullptr);
       const char *args_pointer = p;
 
-      /* Pass null arg rather than an empty one.  */
-      arg = *p ? p : 0;
+      if (!default_args.empty ())
+	{
+	  if (*p != '\0')
+	    default_args_and_arg = default_args + ' ' + p;
+	  else
+	    default_args_and_arg = default_args;
+	  arg = default_args_and_arg.c_str ();
+	}
+      else
+	{
+	  /* Pass null arg rather than an empty one.  */
+	  arg = *p == '\0' ? nullptr : p;
+	}
 
       /* FIXME: cagney/2002-02-02: The c->type test is pretty dodgy
-         while the is_complete_command(cfunc) test is just plain
-         bogus.  They should both be replaced by a test of the form
-         c->strip_trailing_white_space_p.  */
+	 while the is_complete_command(cfunc) test is just plain
+	 bogus.  They should both be replaced by a test of the form
+	 c->strip_trailing_white_space_p.  */
       /* NOTE: cagney/2002-02-02: The function.cfunc in the below
-         can't be replaced with func.  This is because it is the
-         cfunc, and not the func, that has the value that the
-         is_complete_command hack is testing for.  */
+	 can't be replaced with func.  This is because it is the
+	 cfunc, and not the func, that has the value that the
+	 is_complete_command hack is testing for.  */
       /* Clear off trailing whitespace, except for set and complete
-         command.  */
+	 command.  */
       std::string without_whitespace;
       if (arg
 	  && c->type != set_cmd
@@ -614,18 +538,34 @@ execute_command (const char *p, int from_tty)
       execute_cmd_pre_hook (c);/*执行cmd的pre_hook（是另一个命令）*/
 
       if (c->deprecated_warn_user)
-	deprecated_cmd_warning (line);
+	deprecated_cmd_warning (line, cmdlist);
 
       /* c->user_commands would be NULL in the case of a python command.  */
       if (c->theclass == class_user && c->user_commands)
 	execute_user_command (c, arg);
+      else if (c->theclass == class_user
+	       && c->is_prefix () && !c->allow_unknown)
+	/* If this is a user defined prefix that does not allow unknown
+	   (in other words, C is a prefix command and not a command
+	   that can be followed by its args), report the list of
+	   subcommands.  */
+	{
+	  std::string prefixname = c->prefixname ();
+	  std::string prefixname_no_space
+	    = prefixname.substr (0, prefixname.length () - 1);
+	  gdb_printf
+	    ("\"%s\" must be followed by the name of a subcommand.\n",
+	     prefixname_no_space.c_str ());
+	  help_list (*c->subcommands, prefixname.c_str (), all_commands,
+		     gdb_stdout);
+	}
       else if (c->type == set_cmd)
     	  /*set类命令*/
 	do_set_command (arg, from_tty, c);
       else if (c->type == show_cmd)
     	  /*显示类命令*/
 	do_show_command (arg, from_tty, c);
-      else if (!cmd_func_p (c))
+      else if (c->is_command_class_help ())
 	error (_("That is not a command, just a help topic."));
       else if (deprecated_call_command_hook)
 	deprecated_call_command_hook (c, arg, from_tty);
@@ -634,8 +574,14 @@ execute_command (const char *p, int from_tty)
 
       maybe_wait_sync_command_done (was_sync);
 
-      /* If this command has been post-hooked, run the hook last.  */
-      execute_cmd_post_hook (c);
+      /* If this command has been post-hooked, run the hook last.
+	 We need to lookup the command again since during its execution,
+	 a command may redefine itself.  In this case, C pointer
+	 becomes invalid so we need to look it up again.  */
+      const char *cmd2 = cmd_copy.c_str ();
+      c = lookup_cmd (&cmd2, cmdlist, "", nullptr, 1, 1);
+      if (c != nullptr)
+	execute_cmd_post_hook (c);
 
       if (repeat_arguments != NULL && cmd_start == saved_command_line)
 	{
@@ -655,12 +601,11 @@ execute_command (const char *p, int from_tty)
   cleanup_if_error.release ();
 }
 
-/* Run execute_command for P and FROM_TTY.  Capture its output into the
-   returned string, do not display it to the screen.  BATCH_FLAG will be
-   temporarily set to true.  */
+/* Run FN.  Send its output to FILE, do not display it to the screen.
+   The global BATCH_FLAG will be temporarily set to true.  */
 
-std::string
-execute_command_to_string (const char *p, int from_tty)
+static void
+execute_fn_to_ui_file (struct ui_file *file, std::function<void(void)> fn)
 {
   /* GDB_STDOUT should be better already restored during these
      restoration callbacks.  */
@@ -668,36 +613,69 @@ execute_command_to_string (const char *p, int from_tty)
 
   scoped_restore save_async = make_scoped_restore (&current_ui->async, 0);
 
-  string_file str_file;
+  ui_out_redirect_pop redirect_popper (current_uiout, file);
 
-  {
-    current_uiout->redirect (&str_file);
-    ui_out_redirect_pop redirect_popper (current_uiout);
+  scoped_restore save_stdout
+    = make_scoped_restore (&gdb_stdout, file);
+  scoped_restore save_stderr
+    = make_scoped_restore (&gdb_stderr, file);
+  scoped_restore save_stdlog
+    = make_scoped_restore (&gdb_stdlog, file);
+  scoped_restore save_stdtarg
+    = make_scoped_restore (&gdb_stdtarg, file);
 
-    scoped_restore save_stdout
-      = make_scoped_restore (&gdb_stdout, &str_file);
-    scoped_restore save_stderr
-      = make_scoped_restore (&gdb_stderr, &str_file);
-    scoped_restore save_stdlog
-      = make_scoped_restore (&gdb_stdlog, &str_file);
-    scoped_restore save_stdtarg
-      = make_scoped_restore (&gdb_stdtarg, &str_file);
-    scoped_restore save_stdtargerr
-      = make_scoped_restore (&gdb_stdtargerr, &str_file);
-
-    execute_command (p, from_tty);
-  }
-
-  return std::move (str_file.string ());
+  fn ();
 }
 
+/* See top.h.  */
+
+void
+execute_fn_to_string (std::string &res, std::function<void(void)> fn,
+		      bool term_out)
+{
+  string_file str_file (term_out);
+
+  SCOPE_EXIT { res = str_file.release (); };
+
+  execute_fn_to_ui_file (&str_file, fn);
+}
+
+/* See top.h.  */
+
+void
+execute_command_to_ui_file (struct ui_file *file,
+			    const char *p, int from_tty)
+{
+  execute_fn_to_ui_file (file, [=]() { execute_command (p, from_tty); });
+}
+
+/* See top.h.  */
+
+void
+execute_command_to_string (std::string &res, const char *p, int from_tty,
+			   bool term_out)
+{
+  execute_fn_to_string (res, [=]() { execute_command (p, from_tty); },
+			term_out);
+}
+
+/* See top.h.  */
+
+void
+execute_command_to_string (const char *p, int from_tty,
+			   bool term_out)
+{
+  std::string dummy;
+  execute_fn_to_string (dummy, [=]() { execute_command (p, from_tty); },
+			term_out);
+}
 
 /* When nonzero, cause dont_repeat to do nothing.  This should only be
    set via prevent_dont_repeat.  */
 
 static int suppress_dont_repeat = 0;
 
-/* Commands call this if they do not want to be repeated by null lines.  */
+/* See command.h  */
 
 void
 dont_repeat (void)
@@ -711,16 +689,57 @@ dont_repeat (void)
      thing read from stdin in line and don't want to delete it.  Null
      lines won't repeat here in any case.  */
   if (ui->instream == ui->stdin_stream)
-    *saved_command_line = 0;
+    {
+      *saved_command_line = 0;
+      repeat_arguments = NULL;
+    }
 }
 
-/* Prevent dont_repeat from working, and return a cleanup that
-   restores the previous state.  */
+/* See command.h  */
+
+const char *
+repeat_previous ()
+{
+  /* Do not repeat this command, as this command is a repeating command.  */
+  dont_repeat ();
+
+  /* We cannot free saved_command_line, as this line is being executed,
+     so swap it with previous_saved_command_line.  */
+  std::swap (previous_saved_command_line, saved_command_line);
+  std::swap (previous_repeat_arguments, repeat_arguments);
+
+  const char *prev = skip_spaces (get_saved_command_line ());
+  if (*prev == '\0')
+    error (_("No previous command to relaunch"));
+  return prev;
+}
+
+/* See command.h.  */
 
 scoped_restore_tmpl<int>
 prevent_dont_repeat (void)
 {
   return make_scoped_restore (&suppress_dont_repeat, 1);
+}
+
+/* See command.h.  */
+
+char *
+get_saved_command_line ()
+{
+  return saved_command_line;
+}
+
+/* See command.h.  */
+
+void
+save_command_line (const char *cmd)
+{
+  xfree (previous_saved_command_line);
+  previous_saved_command_line = saved_command_line;
+  previous_repeat_arguments = repeat_arguments;
+  saved_command_line = xstrdup (cmd);
+  repeat_arguments = NULL;
 }
 
 
@@ -732,24 +751,22 @@ prevent_dont_repeat (void)
 
    A NULL return means end of file.  */
 
-static char *
+static gdb::unique_xmalloc_ptr<char>
 gdb_readline_no_editing (const char *prompt)
 {
-  struct buffer line_buffer;
+  std::string line_buffer;
   struct ui *ui = current_ui;
   /* Read from stdin if we are executing a user defined command.  This
      is the right thing for prompt_for_continue, at least.  */
   FILE *stream = ui->instream != NULL ? ui->instream : stdin;
   int fd = fileno (stream);
 
-  buffer_init (&line_buffer);
-
   if (prompt != NULL)
     {
       /* Don't use a _filtered function here.  It causes the assumed
-         character position to be off, since the newline we read from
-         the user is not accounted for.  */
-      fputs_unfiltered (prompt, gdb_stdout);
+	 character position to be off, since the newline we read from
+	 the user is not accounted for.  */
+      printf_unfiltered ("%s", prompt);
       gdb_flush (gdb_stdout);
     }
 
@@ -778,48 +795,58 @@ gdb_readline_no_editing (const char *prompt)
 
       if (c == EOF)
 	{
-	  if (line_buffer.used_size > 0)
+	  if (!line_buffer.empty ())
 	    /* The last line does not end with a newline.  Return it, and
 	       if we are called again fgetc will still return EOF and
 	       we'll return NULL then.  */
 	    break;
-	  xfree (buffer_finish (&line_buffer));
 	  return NULL;
 	}
 
       if (c == '\n')
 	{
-	  if (line_buffer.used_size > 0
-	      && line_buffer.buffer[line_buffer.used_size - 1] == '\r')
-	    line_buffer.used_size--;
+	  if (!line_buffer.empty () && line_buffer.back () == '\r')
+	    line_buffer.pop_back ();
 	  break;
 	}
 
-      buffer_grow_char (&line_buffer, c);
+      line_buffer += c;
     }
 
-  buffer_grow_char (&line_buffer, '\0');
-  return buffer_finish (&line_buffer);
+  return make_unique_xstrdup (line_buffer.c_str ());
 }
 
 /* Variables which control command line editing and history
    substitution.  These variables are given default values at the end
    of this file.  */
-static int command_editing_p;
+static bool command_editing_p;
 
 /* NOTE 1999-04-29: This variable will be static again, once we modify
    gdb to use the event loop as the default command loop and we merge
    event-top.c into this file, top.c.  */
 
-/* static */ int history_expansion_p;
+/* static */ bool history_expansion_p;
 
-static int write_history_p;
+/* Should we write out the command history on exit?  In order to write out
+   the history both this flag must be true, and the history_filename
+   variable must be set to something sensible.  */
+static bool write_history_p;
+
+/* The name of the file in which GDB history will be written.  If this is
+   set to NULL, of the empty string then history will not be written.  */
+static std::string history_filename;
+
+/* Implement 'show history save'.  */
 static void
 show_write_history_p (struct ui_file *file, int from_tty,
 		      struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Saving of the history record on exit is %s.\n"),
-		    value);
+  if (!write_history_p || !history_filename.empty ())
+    gdb_printf (file, _("Saving of the history record on exit is %s.\n"),
+		value);
+  else
+    gdb_printf (file, _("Saving of the history is disabled due to "
+			"the value of 'history filename'.\n"));
 }
 
 /* The variable associated with the "set/show history size"
@@ -830,8 +857,8 @@ static void
 show_history_size (struct ui_file *file, int from_tty,
 		   struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("The size of the command history is %s.\n"),
-		    value);
+  gdb_printf (file, _("The size of the command history is %s.\n"),
+	      value);
 }
 
 /* Variable associated with the "history remove-duplicates" option.
@@ -842,20 +869,24 @@ static void
 show_history_remove_duplicates (struct ui_file *file, int from_tty,
 				struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file,
-		    _("The number of history entries to look back at for "
-		      "duplicates is %s.\n"),
-		    value);
+  gdb_printf (file,
+	      _("The number of history entries to look back at for "
+		"duplicates is %s.\n"),
+	      value);
 }
 
-static char *history_filename;
+/* Implement 'show history filename'.  */
 static void
 show_history_filename (struct ui_file *file, int from_tty,
 		       struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("The filename in which to record "
-			    "the command history is \"%s\".\n"),
-		    value);
+  if (!history_filename.empty ())
+    gdb_printf (file, _("The filename in which to record "
+			"the command history is \"%ps\".\n"),
+		styled_string (file_name_style.style (), value));
+  else
+    gdb_printf (file, _("There is no filename currently set for "
+			"recording the command history in.\n"));
 }
 
 /* This is like readline(), but it has some gdb-specific behavior.
@@ -913,6 +944,11 @@ gdb_readline_wrapper_line (gdb::unique_xmalloc_ptr<char> &&line)
   saved_after_char_processing_hook = after_char_processing_hook;
   after_char_processing_hook = NULL;
 
+#if defined(TUI)
+  if (tui_active)
+    tui_inject_newline_into_command_window ();
+#endif
+
   /* Prevent parts of the prompt from being redisplayed if annotations
      are enabled, and readline's state getting out of sync.  We'll
      reinstall the callback handler, which puts the terminal in raw
@@ -939,7 +975,7 @@ public:
     current_ui->secondary_prompt_depth++;
 
     if (m_target_is_async_orig)
-      target_async (0);
+      target_async (false);
   }
 
   ~gdb_readline_wrapper_cleanup ()
@@ -968,7 +1004,7 @@ public:
     saved_after_char_processing_hook = NULL;
 
     if (m_target_is_async_orig)
-      target_async (1);
+      target_async (true);
   }
 
   DISABLE_COPY_AND_ASSIGN (gdb_readline_wrapper_cleanup);
@@ -1021,11 +1057,14 @@ static int operate_saved_history = -1;
 static void
 gdb_rl_operate_and_get_next_completion (void)
 {
-  int delta = where_history () - operate_saved_history;
+  if (operate_saved_history != -1)
+    {
+      int delta = where_history () - operate_saved_history;
 
-  /* The `key' argument to rl_get_previous_history is ignored.  */
-  rl_get_previous_history (delta, 0);
-  operate_saved_history = -1;
+      /* The `key' argument to rl_get_previous_history is ignored.  */
+      rl_get_previous_history (delta, 0);
+      operate_saved_history = -1;
+    }
 
   /* readline doesn't automatically update the display for us.  */
   rl_redisplay ();
@@ -1050,9 +1089,10 @@ gdb_rl_operate_and_get_next (int count, int key)
   /* Find the current line, and find the next line to use.  */
   where = where_history();
 
-  if ((history_is_stifled () && (history_length >= history_max_entries))
-      || (where >= history_length - 1))
+  if (history_is_stifled () && history_length >= history_max_entries)
     operate_saved_history = where;
+  else if (where >= history_length - 1)
+    operate_saved_history = -1;
   else
     operate_saved_history = where + 1;
 
@@ -1116,14 +1156,17 @@ gdb_safe_append_history (void)
   int ret, saved_errno;
 
   std::string local_history_filename
-    = string_printf ("%s-gdb%ld~", history_filename, (long) getpid ());
+    = string_printf ("%s-gdb%ld~", history_filename.c_str (), (long) getpid ());
 
-  ret = rename (history_filename, local_history_filename.c_str ());
+  ret = rename (history_filename.c_str (), local_history_filename.c_str ());
   saved_errno = errno;
   if (ret < 0 && saved_errno != ENOENT)
     {
-      warning (_("Could not rename %s to %s: %s"),
-	       history_filename, local_history_filename.c_str (),
+      warning (_("Could not rename %ps to %ps: %s"),
+	       styled_string (file_name_style.style (),
+			      history_filename.c_str ()),
+	       styled_string (file_name_style.style (),
+			      local_history_filename.c_str ()),
 	       safe_strerror (saved_errno));
     }
   else
@@ -1149,32 +1192,32 @@ gdb_safe_append_history (void)
 				   history_max_entries);
 	}
 
-      ret = rename (local_history_filename.c_str (), history_filename);
+      ret = rename (local_history_filename.c_str (), history_filename.c_str ());
       saved_errno = errno;
       if (ret < 0 && saved_errno != EEXIST)
-        warning (_("Could not rename %s to %s: %s"),
-		 local_history_filename.c_str (), history_filename,
+	warning (_("Could not rename %s to %s: %s"),
+		 local_history_filename.c_str (), history_filename.c_str (),
 		 safe_strerror (saved_errno));
     }
 }
 
-/* Read one line from the command input stream `instream' into a local
-   static buffer.  The buffer is made bigger as necessary.  Returns
-   the address of the start of the line.
+/* Read one line from the command input stream `instream'.
 
-   NULL is returned for end of file.
+   CMD_LINE_BUFFER is a buffer that the function may use to store the result, if
+   it needs to be dynamically-allocated.  Otherwise, it is unused.string
+
+   Return nullptr for end of file.
 
    This routine either uses fancy command line editing or simple input
    as the user has requested.  */
 
-char *
-command_line_input (const char *prompt_arg, const char *annotation_suffix)
+const char *
+command_line_input (std::string &cmd_line_buffer, const char *prompt_arg,
+		    const char *annotation_suffix)
 {
-  static struct buffer cmd_line_buffer;
-  static int cmd_line_buffer_initialized;
   struct ui *ui = current_ui;
   const char *prompt = prompt_arg;
-  char *cmd;
+  const char *cmd;
   int from_tty = ui->instream == ui->stdin_stream;
 
   /* The annotation suffix must be non-NULL.  */
@@ -1199,15 +1242,6 @@ command_line_input (const char *prompt_arg, const char *annotation_suffix)
       prompt = local_prompt;
     }
 
-  if (!cmd_line_buffer_initialized)
-    {
-      buffer_init (&cmd_line_buffer);
-      cmd_line_buffer_initialized = 1;
-    }
-
-  /* Starting a new command line.  */
-  cmd_line_buffer.used_size = 0;
-
 #ifdef SIGTSTP
   if (job_control)
     signal (SIGTSTP, handle_sigtstp);
@@ -1218,41 +1252,36 @@ command_line_input (const char *prompt_arg, const char *annotation_suffix)
       gdb::unique_xmalloc_ptr<char> rl;
 
       /* Make sure that all output has been output.  Some machines may
-         let you get away with leaving out some of the gdb_flush, but
-         not all.  */
-      wrap_here ("");
+	 let you get away with leaving out some of the gdb_flush, but
+	 not all.  */
       gdb_flush (gdb_stdout);
       gdb_flush (gdb_stderr);
 
-      if (source_file_name != NULL)
+      if (!source_file_name.empty ())
 	++source_line_number;
 
       if (from_tty && annotation_level > 1)
-	{
-	  puts_unfiltered ("\n\032\032pre-");
-	  puts_unfiltered (annotation_suffix);
-	  puts_unfiltered ("\n");
-	}
+	printf_unfiltered ("\n\032\032pre-%s\n", annotation_suffix);
 
       /* Don't use fancy stuff if not talking to stdin.  */
       if (deprecated_readline_hook
 	  && from_tty
-	  && input_interactive_p (current_ui))
+	  && current_ui->input_interactive_p ())
 	{
 	  rl.reset ((*deprecated_readline_hook) (prompt));
 	}
       else if (command_editing_p
 	       && from_tty
-	       && input_interactive_p (current_ui))
+	       && current_ui->input_interactive_p ())
 	{
 	  rl.reset (gdb_readline_wrapper (prompt));
 	}
       else
 	{
-	  rl.reset (gdb_readline_no_editing (prompt));
+	  rl = gdb_readline_no_editing (prompt);
 	}
 
-      cmd = handle_line_of_input (&cmd_line_buffer, rl.get (),
+      cmd = handle_line_of_input (cmd_line_buffer, rl.get (),
 				  0, annotation_suffix);
       if (cmd == (char *) EOF)
 	{
@@ -1284,208 +1313,324 @@ print_gdb_version (struct ui_file *stream, bool interactive)
      program to parse, and is just canonical program name and version
      number, which starts after last space.  */
 
-  ui_file_style style;
-  if (interactive)
-    {
-      ui_file_style nstyle = { ui_file_style::MAGENTA, ui_file_style::NONE,
-			       ui_file_style::BOLD };
-      style = nstyle;
-    }
-  fprintf_styled (stream, style, "GNU gdb %s%s\n", PKGVERSION, version);
+  std::string v_str = string_printf ("GNU gdb %s%s", PKGVERSION, version);
+  gdb_printf (stream, "%ps\n",
+	      styled_string (version_style.style (), v_str.c_str ()));
 
   /* Second line is a copyright notice.  */
 
-  fprintf_filtered (stream,
-		    "Copyright (C) 2019 Free Software Foundation, Inc.\n");
+  gdb_printf (stream,
+	      "Copyright (C) 2024 Free Software Foundation, Inc.\n");
 
   /* Following the copyright is a brief statement that the program is
      free software, that users are free to copy and change it on
      certain conditions, that it is covered by the GNU GPL, and that
      there is no warranty.  */
 
-  fprintf_filtered (stream, "\
-License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\
+  gdb_printf (stream, "\
+License GPLv3+: GNU GPL version 3 or later <%ps>\
 \nThis is free software: you are free to change and redistribute it.\n\
-There is NO WARRANTY, to the extent permitted by law.");
+There is NO WARRANTY, to the extent permitted by law.",
+		    styled_string (file_name_style.style (),
+				   "http://gnu.org/licenses/gpl.html"));
 
   if (!interactive)
     return;
 
-  fprintf_filtered (stream, ("\nType \"show copying\" and "
-			     "\"show warranty\" for details.\n"));
+  gdb_printf (stream, ("\nType \"%ps\" and \"%ps\" for details.\n"),
+	      styled_string (command_style.style (), "show copying"),
+	      styled_string (command_style.style (), "show warranty"));
 
   /* After the required info we print the configuration information.  */
 
-  fprintf_filtered (stream, "This GDB was configured as \"");
+  gdb_printf (stream, "This GDB was configured as \"");
   if (strcmp (host_name, target_name) != 0)
     {
-      fprintf_filtered (stream, "--host=%s --target=%s",
-			host_name, target_name);
+      gdb_printf (stream, "--host=%s --target=%s",
+		  host_name, target_name);
     }
   else
     {
-      fprintf_filtered (stream, "%s", host_name);
+      gdb_printf (stream, "%s", host_name);
     }
-  fprintf_filtered (stream, "\".\n");
+  gdb_printf (stream, "\".\n");
 
-  fprintf_filtered (stream, _("Type \"show configuration\" "
-			      "for configuration details.\n"));
+  gdb_printf (stream, _("Type \"%ps\" for configuration details.\n"),
+	      styled_string (command_style.style (), "show configuration"));
 
   if (REPORT_BUGS_TO[0])
     {
-      fprintf_filtered (stream,
-			_("For bug reporting instructions, please see:\n"));
-      fprintf_filtered (stream, "%s.\n", REPORT_BUGS_TO);
+      gdb_printf (stream,
+		  _("For bug reporting instructions, please see:\n"));
+      gdb_printf (stream, "%ps.\n",
+		  styled_string (file_name_style.style (),
+				 REPORT_BUGS_TO));
     }
-  fprintf_filtered (stream,
-		    _("Find the GDB manual and other documentation \
-resources online at:\n    <http://www.gnu.org/software/gdb/documentation/>."));
-  fprintf_filtered (stream, "\n\n");
-  fprintf_filtered (stream, _("For help, type \"help\".\n"));
-  fprintf_filtered (stream, _("Type \"apropos word\" to search for \
-commands related to \"word\"."));
+  gdb_printf (stream,
+	      _("Find the GDB manual and other documentation \
+resources online at:\n    <%ps>."),
+	      styled_string (file_name_style.style (),
+			     "http://www.gnu.org/software/gdb/documentation/"));
+  gdb_printf (stream, "\n\n");
+  gdb_printf (stream, _("For help, type \"%ps\".\n"),
+	      styled_string (command_style.style (), "help"));
+  gdb_printf (stream,
+	      _("Type \"%ps\" to search for commands related to \"word\"."),
+	      styled_string (command_style.style (), "apropos word"));
 }
 
 /* Print the details of GDB build-time configuration.  */
 void
 print_gdb_configuration (struct ui_file *stream)
 {
-  fprintf_filtered (stream, _("\
+  gdb_printf (stream, _("\
 This GDB was configured as follows:\n\
    configure --host=%s --target=%s\n\
 "), host_name, target_name);
-  fprintf_filtered (stream, _("\
-             --with-auto-load-dir=%s\n\
-             --with-auto-load-safe-path=%s\n\
+
+#ifdef ENABLE_TARGETS
+  gdb_printf (stream, _("\
+	     --enable-targets=%s\n"), ENABLE_TARGETS);
+#endif
+
+  gdb_printf (stream, _("\
+	     --with-auto-load-dir=%s\n\
+	     --with-auto-load-safe-path=%s\n\
 "), AUTO_LOAD_DIR, AUTO_LOAD_SAFE_PATH);
+
 #if HAVE_LIBEXPAT
-  fprintf_filtered (stream, _("\
-             --with-expat\n\
+  gdb_printf (stream, _("\
+	     --with-expat\n\
 "));
 #else
-  fprintf_filtered (stream, _("\
-             --without-expat\n\
+  gdb_printf (stream, _("\
+	     --without-expat\n\
 "));
 #endif
+
   if (GDB_DATADIR[0])
-    fprintf_filtered (stream, _("\
-             --with-gdb-datadir=%s%s\n\
+    gdb_printf (stream, _("\
+	     --with-gdb-datadir=%s%s\n\
 "), GDB_DATADIR, GDB_DATADIR_RELOCATABLE ? " (relocatable)" : "");
+
 #ifdef ICONV_BIN
-  fprintf_filtered (stream, _("\
-             --with-iconv-bin=%s%s\n\
+  gdb_printf (stream, _("\
+	     --with-iconv-bin=%s%s\n\
 "), ICONV_BIN, ICONV_BIN_RELOCATABLE ? " (relocatable)" : "");
 #endif
+
   if (JIT_READER_DIR[0])
-    fprintf_filtered (stream, _("\
-             --with-jit-reader-dir=%s%s\n\
+    gdb_printf (stream, _("\
+	     --with-jit-reader-dir=%s%s\n\
 "), JIT_READER_DIR, JIT_READER_DIR_RELOCATABLE ? " (relocatable)" : "");
+
 #if HAVE_LIBUNWIND_IA64_H
-  fprintf_filtered (stream, _("\
-             --with-libunwind-ia64\n\
+  gdb_printf (stream, _("\
+	     --with-libunwind-ia64\n\
 "));
 #else
-  fprintf_filtered (stream, _("\
-             --without-libunwind-ia64\n\
+  gdb_printf (stream, _("\
+	     --without-libunwind-ia64\n\
 "));
 #endif
+
 #if HAVE_LIBLZMA
-  fprintf_filtered (stream, _("\
-             --with-lzma\n\
+  gdb_printf (stream, _("\
+	     --with-lzma\n\
 "));
 #else
-  fprintf_filtered (stream, _("\
-             --without-lzma\n\
+  gdb_printf (stream, _("\
+	     --without-lzma\n\
 "));
 #endif
+
 #if HAVE_LIBBABELTRACE
-    fprintf_filtered (stream, _("\
-             --with-babeltrace\n\
+  gdb_printf (stream, _("\
+	     --with-babeltrace\n\
 "));
 #else
-    fprintf_filtered (stream, _("\
-             --without-babeltrace\n\
+  gdb_printf (stream, _("\
+	     --without-babeltrace\n\
 "));
 #endif
+
 #if HAVE_LIBIPT
-    fprintf_filtered (stream, _("\
-             --with-intel-pt\n\
+  gdb_printf (stream, _("\
+	     --with-intel-pt\n\
 "));
 #else
-    fprintf_filtered (stream, _("\
-             --without-intel-pt\n\
+  gdb_printf (stream, _("\
+	     --without-intel-pt\n\
 "));
 #endif
-#if HAVE_LIBMCHECK
-    fprintf_filtered (stream, _("\
-             --enable-libmcheck\n\
+
+#if HAVE_LIBXXHASH
+  gdb_printf (stream, _("\
+	     --with-xxhash\n\
 "));
 #else
-    fprintf_filtered (stream, _("\
-             --disable-libmcheck\n\
-"));
-#endif
-#if HAVE_LIBMPFR
-    fprintf_filtered (stream, _("\
-             --with-mpfr\n\
-"));
-#else
-    fprintf_filtered (stream, _("\
-             --without-mpfr\n\
+  gdb_printf (stream, _("\
+	     --without-xxhash\n\
 "));
 #endif
 #ifdef WITH_PYTHON_PATH
-  fprintf_filtered (stream, _("\
-             --with-python=%s%s\n\
+  gdb_printf (stream, _("\
+	     --with-python=%s%s\n\
 "), WITH_PYTHON_PATH, PYTHON_PATH_RELOCATABLE ? " (relocatable)" : "");
 #else
-  fprintf_filtered (stream, _("\
-             --without-python\n\
+  gdb_printf (stream, _("\
+	     --without-python\n\
 "));
 #endif
-#if HAVE_GUILE
-  fprintf_filtered (stream, _("\
-             --with-guile\n\
+#ifdef WITH_PYTHON_LIBDIR
+  gdb_printf (stream, _("\
+	     --with-python-libdir=%s%s\n\
+"), WITH_PYTHON_LIBDIR, PYTHON_LIBDIR_RELOCATABLE ? " (relocatable)" : "");
+#else
+  gdb_printf (stream, _("\
+	     --without-python-libdir\n\
+"));
+#endif
+
+#if HAVE_LIBDEBUGINFOD
+  gdb_printf (stream, _("\
+	     --with-debuginfod\n\
 "));
 #else
-  fprintf_filtered (stream, _("\
-             --without-guile\n\
+  gdb_printf (stream, _("\
+	     --without-debuginfod\n\
 "));
 #endif
+
+#if HAVE_LIBCURSES
+  gdb_printf (stream, _("\
+	     --with-curses\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --without-curses\n\
+"));
+#endif
+
+#if HAVE_GUILE
+  gdb_printf (stream, _("\
+	     --with-guile\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --without-guile\n\
+"));
+#endif
+
+#if HAVE_AMD_DBGAPI
+  gdb_printf (stream, _("\
+	     --with-amd-dbgapi\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --without-amd-dbgapi\n\
+"));
+#endif
+
+#if HAVE_SOURCE_HIGHLIGHT
+  gdb_printf (stream, _("\
+	     --enable-source-highlight\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --disable-source-highlight\n\
+"));
+#endif
+
+#if CXX_STD_THREAD
+  gdb_printf (stream, _("\
+	     --enable-threading\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --disable-threading\n\
+"));
+#endif
+
+#ifdef TUI
+  gdb_printf (stream, _("\
+	     --enable-tui\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --disable-tui\n\
+"));
+#endif
+
+#ifdef HAVE_READLINE_READLINE_H
+  gdb_printf (stream, _("\
+	     --with-system-readline\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --without-system-readline\n\
+"));
+#endif
+
 #ifdef RELOC_SRCDIR
-  fprintf_filtered (stream, _("\
-             --with-relocated-sources=%s\n\
+  gdb_printf (stream, _("\
+	     --with-relocated-sources=%s\n\
 "), RELOC_SRCDIR);
 #endif
+
   if (DEBUGDIR[0])
-    fprintf_filtered (stream, _("\
-             --with-separate-debug-dir=%s%s\n\
+    gdb_printf (stream, _("\
+	     --with-separate-debug-dir=%s%s\n\
 "), DEBUGDIR, DEBUGDIR_RELOCATABLE ? " (relocatable)" : "");
+
+#ifdef ADDITIONAL_DEBUG_DIRS
+  gdb_printf (stream, _ ("\
+	     --with-additional-debug-dirs=%s\n\
+"), ADDITIONAL_DEBUG_DIRS);
+#endif
+
   if (TARGET_SYSTEM_ROOT[0])
-    fprintf_filtered (stream, _("\
-             --with-sysroot=%s%s\n\
+    gdb_printf (stream, _("\
+	     --with-sysroot=%s%s\n\
 "), TARGET_SYSTEM_ROOT, TARGET_SYSTEM_ROOT_RELOCATABLE ? " (relocatable)" : "");
+
   if (SYSTEM_GDBINIT[0])
-    fprintf_filtered (stream, _("\
-             --with-system-gdbinit=%s%s\n\
+    gdb_printf (stream, _("\
+	     --with-system-gdbinit=%s%s\n\
 "), SYSTEM_GDBINIT, SYSTEM_GDBINIT_RELOCATABLE ? " (relocatable)" : "");
-    /* We assume "relocatable" will be printed at least once, thus we always
-       print this text.  It's a reasonably safe assumption for now.  */
-    fprintf_filtered (stream, _("\n\
+
+  if (SYSTEM_GDBINIT_DIR[0])
+    gdb_printf (stream, _("\
+	     --with-system-gdbinit-dir=%s%s\n\
+"), SYSTEM_GDBINIT_DIR, SYSTEM_GDBINIT_DIR_RELOCATABLE ? " (relocatable)" : "");
+
+  /* We assume "relocatable" will be printed at least once, thus we always
+     print this text.  It's a reasonably safe assumption for now.  */
+  gdb_printf (stream, _("\n\
 (\"Relocatable\" means the directory can be moved with the GDB installation\n\
 tree, and GDB will still find it.)\n\
 "));
+
+  gdb_printf (stream, "\n");
+  gdb_printf (stream, _("GNU Readline library version: %s\t%s\n"),
+	      rl_library_version,
+#ifdef HAVE_READLINE_READLINE_H
+	      "(system)"
+#else
+	      "(internal)"
+#endif
+	      );
 }
 
 
 /* The current top level prompt, settable with "set prompt", and/or
    with the python `gdb.prompt_hook' hook.  */
-static char *top_prompt;
+static std::string top_prompt;
 
 /* Access method for the GDB prompt string.  */
 
-char *
-get_prompt (void)
+const std::string &
+get_prompt ()
 {
   return top_prompt;
 }
@@ -1495,28 +1640,18 @@ get_prompt (void)
 void
 set_prompt (const char *s)
 {
-  char *p = xstrdup (s);
-
-  xfree (top_prompt);
-  top_prompt = p;
+  top_prompt = s;
 }
 
 
-struct qt_args
+/* Kills or detaches the given inferior, depending on how we originally
+   gained control of it.  */
+
+static void
+kill_or_detach (inferior *inf, int from_tty)
 {
-  int from_tty;
-};
-
-/* Callback for iterate_over_inferiors.  Kills or detaches the given
-   inferior, depending on how we originally gained control of it.  */
-
-static int
-kill_or_detach (struct inferior *inf, void *args)
-{
-  struct qt_args *qt = (struct qt_args *) args;
-
   if (inf->pid == 0)
-    return 0;
+    return;
 
   thread_info *thread = any_thread_of_inferior (inf);
   if (thread != NULL)
@@ -1524,40 +1659,33 @@ kill_or_detach (struct inferior *inf, void *args)
       switch_to_thread (thread);
 
       /* Leave core files alone.  */
-      if (target_has_execution)
+      if (target_has_execution ())
 	{
 	  if (inf->attach_flag)
-	    target_detach (inf, qt->from_tty);
+	    target_detach (inf, from_tty);
 	  else
 	    target_kill ();
 	}
     }
-
-  return 0;
 }
 
-/* Callback for iterate_over_inferiors.  Prints info about what GDB
-   will do to each inferior on a "quit".  ARG points to a struct
-   ui_out where output is to be collected.  */
+/* Prints info about what GDB will do to inferior INF on a "quit".  OUT is
+   where to collect the output.  */
 
-static int
-print_inferior_quit_action (struct inferior *inf, void *arg)
+static void
+print_inferior_quit_action (inferior *inf, ui_file *out)
 {
-  struct ui_file *stb = (struct ui_file *) arg;
-
   if (inf->pid == 0)
-    return 0;
+    return;
 
   if (inf->attach_flag)
-    fprintf_filtered (stb,
-		      _("\tInferior %d [%s] will be detached.\n"), inf->num,
-		      target_pid_to_str (ptid_t (inf->pid)));
+    gdb_printf (out,
+		_("\tInferior %d [%s] will be detached.\n"), inf->num,
+		target_pid_to_str (ptid_t (inf->pid)).c_str ());
   else
-    fprintf_filtered (stb,
-		      _("\tInferior %d [%s] will be killed.\n"), inf->num,
-		      target_pid_to_str (ptid_t (inf->pid)));
-
-  return 0;
+    gdb_printf (out,
+		_("\tInferior %d [%s] will be killed.\n"), inf->num,
+		target_pid_to_str (ptid_t (inf->pid)).c_str ());
 }
 
 /* If necessary, make the user confirm that we should quit.  Return
@@ -1574,7 +1702,10 @@ quit_confirm (void)
   string_file stb;
 
   stb.puts (_("A debugging session is active.\n\n"));
-  iterate_over_inferiors (print_inferior_quit_action, &stb);
+
+  for (inferior *inf : all_inferiors ())
+    print_inferior_quit_action (inf, &stb);
+
   stb.puts (_("\nQuit anyway? "));
 
   return query ("%s", stb.c_str ());
@@ -1607,58 +1738,66 @@ void
 quit_force (int *exit_arg, int from_tty)
 {
   int exit_code = 0;
-  struct qt_args qt;
 
-  undo_terminal_modifications_before_exit ();
+  /* Clear the quit flag and sync_quit_force_run so that a
+     gdb_exception_forced_quit isn't inadvertently triggered by a QUIT
+     check while running the various cleanup/exit code below.  Note
+     that the call to 'check_quit_flag' clears the quit flag as a side
+     effect.  */
+  check_quit_flag ();
+  sync_quit_force_run = false;
 
-  /* An optional expression may be used to cause gdb to terminate with the 
+  /* An optional expression may be used to cause gdb to terminate with the
      value of that expression.  */
   if (exit_arg)
     exit_code = *exit_arg;
   else if (return_child_result)
     exit_code = return_child_result_value;
 
-  qt.from_tty = from_tty;
+  gdb::observers::gdb_exiting.notify (exit_code);
+
+  undo_terminal_modifications_before_exit ();
 
   /* We want to handle any quit errors and exit regardless.  */
 
   /* Get out of tfind mode, and kill or detach all inferiors.  */
-  TRY
+  try
     {
       disconnect_tracing ();
-      iterate_over_inferiors (kill_or_detach, &qt);
+      for (inferior *inf : all_inferiors ())
+	kill_or_detach (inf, from_tty);
     }
-  CATCH (ex, RETURN_MASK_ALL)
+  catch (const gdb_exception &ex)
     {
       exception_print (gdb_stderr, ex);
     }
-  END_CATCH
 
   /* Give all pushed targets a chance to do minimal cleanup, and pop
      them all out.  */
-  TRY
+  for (inferior *inf : all_inferiors ())
     {
-      pop_all_targets ();
+      try
+	{
+	  inf->pop_all_targets ();
+	}
+      catch (const gdb_exception &ex)
+	{
+	  exception_print (gdb_stderr, ex);
+	}
     }
-  CATCH (ex, RETURN_MASK_ALL)
-    {
-      exception_print (gdb_stderr, ex);
-    }
-  END_CATCH
 
   /* Save the history information if it is appropriate to do so.  */
-  TRY
+  try
     {
-      if (write_history_p && history_filename)
+      if (write_history_p && !history_filename.empty ())
 	{
-	  struct ui *ui;
 	  int save = 0;
 
 	  /* History is currently shared between all UIs.  If there's
 	     any UI with a terminal, save history.  */
-	  ALL_UIS (ui)
+	  for (ui *ui : all_uis ())
 	    {
-	      if (input_interactive_p (ui))
+	      if (ui->input_interactive_p ())
 		{
 		  save = 1;
 		  break;
@@ -1669,58 +1808,45 @@ quit_force (int *exit_arg, int from_tty)
 	    gdb_safe_append_history ();
 	}
     }
-  CATCH (ex, RETURN_MASK_ALL)
+  catch (const gdb_exception &ex)
     {
       exception_print (gdb_stderr, ex);
     }
-  END_CATCH
 
   /* Do any final cleanups before exiting.  */
-  TRY
+  try
     {
-      do_final_cleanups (all_cleanups ());
+      do_final_cleanups ();
     }
-  CATCH (ex, RETURN_MASK_ALL)
+  catch (const gdb_exception &ex)
     {
       exception_print (gdb_stderr, ex);
     }
-  END_CATCH
+
+  ext_lang_shutdown ();
 
   exit (exit_code);
 }
 
-/* The value of the "interactive-mode" setting.  */
-static enum auto_boolean interactive_mode = AUTO_BOOLEAN_AUTO;
+/* See top.h.  */
+
+auto_boolean interactive_mode = AUTO_BOOLEAN_AUTO;
 
 /* Implement the "show interactive-mode" option.  */
 
 static void
 show_interactive_mode (struct ui_file *file, int from_tty,
-                       struct cmd_list_element *c,
-                       const char *value)
+		       struct cmd_list_element *c,
+		       const char *value)
 {
   if (interactive_mode == AUTO_BOOLEAN_AUTO)
-    fprintf_filtered (file, "Debugger's interactive mode "
-		            "is %s (currently %s).\n",
-                      value, input_interactive_p (current_ui) ? "on" : "off");
+    gdb_printf (file, "Debugger's interactive mode "
+		"is %s (currently %s).\n",
+		value, current_ui->input_interactive_p () ? "on" : "off");
   else
-    fprintf_filtered (file, "Debugger's interactive mode is %s.\n", value);
+    gdb_printf (file, "Debugger's interactive mode is %s.\n", value);
 }
 
-/* Returns whether GDB is running on an interactive terminal.  */
-
-int
-input_interactive_p (struct ui *ui)
-{
-  if (batch_flag)
-    return 0;
-
-  if (interactive_mode != AUTO_BOOLEAN_AUTO)
-    return interactive_mode == AUTO_BOOLEAN_TRUE;
-
-  return ui->input_interactive_p;
-}
-
 static void
 dont_repeat_command (const char *ignored, int from_tty)
 {
@@ -1776,8 +1902,8 @@ show_commands (const char *args, int from_tty)
        offset < num + Hist_print && offset < history_length;
        offset++)
     {
-      printf_filtered ("%5d  %s\n", history_base + offset,
-		       (history_get (history_base + offset))->line);
+      gdb_printf ("%5d  %s\n", history_base + offset,
+		  (history_get (history_base + offset))->line);
     }
 
   /* The next command we want to display is the next one that we haven't
@@ -1814,21 +1940,7 @@ set_history_size_command (const char *args,
   set_readline_history_size (history_size_setshow_var);
 }
 
-void
-set_history (const char *args, int from_tty)
-{
-  printf_unfiltered (_("\"set history\" must be followed "
-		       "by the name of a history subcommand.\n"));
-  help_list (sethistlist, "set history ", all_commands, gdb_stdout);
-}
-
-void
-show_history (const char *args, int from_tty)
-{
-  cmd_show_list (showhistlist, from_tty, "");
-}
-
-int info_verbose = 0;		/* Default verbose msgs off.  */
+bool info_verbose = false;	/* Default verbose msgs off.  */
 
 /* Called by do_set_command.  An elaborate joke.  */
 void
@@ -1837,7 +1949,7 @@ set_verbose (const char *args, int from_tty, struct cmd_list_element *c)
   const char *cmdname = "verbose";
   struct cmd_list_element *showcmd;
 
-  showcmd = lookup_cmd_1 (&cmdname, showlist, NULL, 1);
+  showcmd = lookup_cmd_1 (&cmdname, showlist, NULL, NULL, 1);
   gdb_assert (showcmd != NULL && showcmd != CMD_LIST_AMBIGUOUS);
 
   if (c->doc && c->doc_allocated)
@@ -1908,31 +2020,15 @@ init_history (void)
 
   set_readline_history_size (history_size_setshow_var);
 
-  tmpenv = getenv ("GDBHISTFILE");
-  if (tmpenv)
-    history_filename = xstrdup (tmpenv);
-  else if (!history_filename)
-    {
-      /* We include the current directory so that if the user changes
-         directories the file written will be the same as the one
-         that was read.  */
-#ifdef __MSDOS__
-      /* No leading dots in file names are allowed on MSDOS.  */
-      history_filename = concat (current_directory, "/_gdb_history",
-				 (char *)NULL);
-#else
-      history_filename = concat (current_directory, "/.gdb_history",
-				 (char *)NULL);
-#endif
-    }
-  read_history (history_filename);
+  if (!history_filename.empty ())
+    read_history (history_filename.c_str ());
 }
 
 static void
 show_prompt (struct ui_file *file, int from_tty,
 	     struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Gdb's prompt is \"%s\".\n"), value);
+  gdb_printf (file, _("Gdb's prompt is \"%s\".\n"), value);
 }
 
 /* "set editing" command.  */
@@ -1950,36 +2046,46 @@ static void
 show_editing (struct ui_file *file, int from_tty,
 	      struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Editing of command lines as "
-			    "they are typed is %s.\n"),
-		    current_ui->command_editing ? _("on") : _("off"));
+  gdb_printf (file, _("Editing of command lines as "
+		      "they are typed is %s.\n"),
+	      current_ui->command_editing ? _("on") : _("off"));
 }
 
 static void
 show_annotation_level (struct ui_file *file, int from_tty,
 		       struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Annotation_level is %s.\n"), value);
+  gdb_printf (file, _("Annotation_level is %s.\n"), value);
 }
 
 static void
 show_exec_done_display_p (struct ui_file *file, int from_tty,
 			  struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Notification of completion for "
-			    "asynchronous execution commands is %s.\n"),
-		    value);
+  gdb_printf (file, _("Notification of completion for "
+		      "asynchronous execution commands is %s.\n"),
+	      value);
 }
 
-/* New values of the "data-directory" parameter are staged here.  */
-static char *staged_gdb_datadir;
+/* New values of the "data-directory" parameter are staged here.
+   Extension languages, for example Python's gdb.parameter API, will read
+   the value directory from this variable, so we must ensure that this
+   always contains the correct value.  */
+static std::string staged_gdb_datadir;
 
 /* "set" command for the gdb_datadir configuration variable.  */
 
 static void
 set_gdb_datadir (const char *args, int from_tty, struct cmd_list_element *c)
 {
-  set_gdb_data_directory (staged_gdb_datadir);
+  set_gdb_data_directory (staged_gdb_datadir.c_str ());
+
+  /* SET_GDB_DATA_DIRECTORY will resolve relative paths in
+     STAGED_GDB_DATADIR, so we now copy the value from GDB_DATADIR
+     back into STAGED_GDB_DATADIR so the extension languages can read the
+     correct value.  */
+  staged_gdb_datadir = gdb_datadir;
+
   gdb::observers::gdb_datadir_changed.notify ();
 }
 
@@ -1989,9 +2095,12 @@ static void
 show_gdb_datadir (struct ui_file *file, int from_tty,
 		  struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("GDB's data directory is \"%s\".\n"),
-		    gdb_datadir);
+  gdb_printf (file, _("GDB's data directory is \"%ps\".\n"),
+	      styled_string (file_name_style.style (),
+			     gdb_datadir.c_str ()));
 }
+
+/* Implement 'set history filename'.  */
 
 static void
 set_history_filename (const char *args,
@@ -2000,16 +2109,36 @@ set_history_filename (const char *args,
   /* We include the current directory so that if the user changes
      directories the file written will be the same as the one
      that was read.  */
-  if (!IS_ABSOLUTE_PATH (history_filename))
-    history_filename = reconcat (history_filename, current_directory, "/", 
-				 history_filename, (char *) NULL);
+  if (!history_filename.empty ()
+      && !IS_ABSOLUTE_PATH (history_filename.c_str ()))
+    history_filename = gdb_abspath (history_filename);
+}
+
+/* Whether we're in quiet startup mode.  */
+
+static bool startup_quiet;
+
+/* See top.h.  */
+
+bool
+check_quiet_mode ()
+{
+  return startup_quiet;
+}
+
+/* Show whether GDB should start up in quiet mode.  */
+
+static void
+show_startup_quiet (struct ui_file *file, int from_tty,
+	      struct cmd_list_element *c, const char *value)
+{
+  gdb_printf (file, _("Whether to start up quietly is %s.\n"),
+	      value);
 }
 
 static void
 init_main (void)
 {
-  struct cmd_list_element *c;
-
   /* Initialize the prompt to a simple "(gdb) " prompt or to whatever
      the DEFAULT_PROMPT is.  */
   set_prompt (DEFAULT_PROMPT);
@@ -2020,13 +2149,10 @@ init_main (void)
   write_history_p = 0;
 
   /* Setup important stuff for command line editing.  */
-  rl_completion_word_break_hook = gdb_completion_word_break_characters;
-  rl_attempted_completion_function = gdb_rl_attempted_completion_function;
-  set_rl_completer_word_break_characters (default_word_break_characters ());
-  rl_completer_quote_characters = get_gdb_completer_quote_characters ();
   rl_completion_display_matches_hook = cli_display_match_list;
   rl_readline_name = "gdb";
   rl_terminal_name = getenv ("TERM");
+  rl_deprep_term_function = gdb_rl_deprep_term_function;
 
   /* The name for this defun comes from Bash, where it originated.
      15 is Control-o, the same binding this function has in Bash.  */
@@ -2034,8 +2160,8 @@ init_main (void)
 
   add_setshow_string_cmd ("prompt", class_support,
 			  &top_prompt,
-			  _("Set gdb's prompt"),
-			  _("Show gdb's prompt"),
+			  _("Set gdb's prompt."),
+			  _("Show gdb's prompt."),
 			  NULL, NULL,
 			  show_prompt,
 			  &setlist, &showlist);
@@ -2067,9 +2193,9 @@ Without an argument, saving is enabled."),
 
   add_setshow_zuinteger_unlimited_cmd ("size", no_class,
 				       &history_size_setshow_var, _("\
-Set the size of the command history,"), _("\
-Show the size of the command history,"), _("\
-ie. the number of previous commands to keep a record of.\n\
+Set the size of the command history."), _("\
+Show the size of the command history."), _("\
+This is the number of previous commands to keep a record of.\n\
 If set to \"unlimited\", the number of commands kept in the history\n\
 list is unlimited.  This defaults to the value of the environment\n\
 variable \"GDBHISTSIZE\", or to 256 if this variable is not set."),
@@ -2092,9 +2218,9 @@ By default this option is set to 0."),
 			   show_history_remove_duplicates,
 			   &sethistlist, &showhistlist);
 
-  add_setshow_filename_cmd ("filename", no_class, &history_filename, _("\
-Set the filename in which to record the command history"), _("\
-Show the filename in which to record the command history"), _("\
+  add_setshow_optional_filename_cmd ("filename", no_class, &history_filename, _("\
+Set the filename in which to record the command history."), _("\
+Show the filename in which to record the command history."), _("\
 (the list of previous commands of which a record is kept)."),
 			    set_history_filename,
 			    show_history_filename,
@@ -2126,16 +2252,18 @@ Use \"on\" to enable the notification, and \"off\" to disable it."),
 			   &setlist, &showlist);
 
   add_setshow_filename_cmd ("data-directory", class_maintenance,
-                           &staged_gdb_datadir, _("Set GDB's data directory."),
-                           _("Show GDB's data directory."),
-                           _("\
+			   &staged_gdb_datadir, _("Set GDB's data directory."),
+			   _("Show GDB's data directory."),
+			   _("\
 When set, GDB uses the specified path to search for data files."),
-                           set_gdb_datadir, show_gdb_datadir,
-                           &setlist,
-                           &showlist);
+			   set_gdb_datadir, show_gdb_datadir,
+			   &setlist,
+			    &showlist);
+  /* Prime the initial value for data-directory.  */
+  staged_gdb_datadir = gdb_datadir;
 
   add_setshow_auto_boolean_cmd ("interactive-mode", class_support,
-                                &interactive_mode, _("\
+				&interactive_mode, _("\
 Set whether GDB's standard input is a terminal."), _("\
 Show whether GDB's standard input is a terminal."), _("\
 If on, GDB assumes that standard input is a terminal.  In practice, it\n\
@@ -2144,22 +2272,36 @@ commands entered at the command prompt.  If off, GDB assumes that standard\n\
 input is not a terminal, and uses the default answer to all queries.\n\
 If auto (the default), determine which mode to use based on the standard\n\
 input settings."),
-                        NULL,
-                        show_interactive_mode,
-                        &setlist, &showlist);
+			NULL,
+			show_interactive_mode,
+			&setlist, &showlist);
 
-  c = add_cmd ("new-ui", class_support, new_ui_command, _("\
-Create a new UI.  It takes two arguments:\n\
-The first argument is the name of the interpreter to run.\n\
-The second argument is the terminal the UI runs on.\n"), &cmdlist);
-  set_cmd_completer (c, interpreter_completer);
+  add_setshow_boolean_cmd ("startup-quietly", class_support,
+			       &startup_quiet, _("\
+Set whether GDB should start up quietly."), _("\
+Show whether GDB should start up quietly."), _("\
+This setting will not affect the current session.  Instead this command\n\
+should be added to the .gdbearlyinit file in the users home directory to\n\
+affect future GDB sessions."),
+			       NULL,
+			       show_startup_quiet,
+			       &setlist, &showlist);
+
+  struct internalvar *major_version_var = create_internalvar ("_gdb_major");
+  struct internalvar *minor_version_var = create_internalvar ("_gdb_minor");
+  int vmajor = 0, vminor = 0, vrevision = 0;
+  sscanf (version, "%d.%d.%d", &vmajor, &vminor, &vrevision);
+  set_internalvar_integer (major_version_var, vmajor);
+  set_internalvar_integer (minor_version_var, vminor + (vrevision > 0));
 }
 
+/* See top.h.  */
+
 void
-gdb_init (char *argv0)
+gdb_init ()
 {
-  if (pre_init_ui_hook)
-    pre_init_ui_hook ();
+  saved_command_line = xstrdup ("");
+  previous_saved_command_line = xstrdup ("");
 
   /* Run the init function of each source file.  */
 
@@ -2168,10 +2310,6 @@ gdb_init (char *argv0)
      what may, since the OS doesn't do that for us.  */
   make_final_cleanup (do_chdir_cleanup, xstrdup (current_directory));
 #endif
-
-  init_cmd_lists ();	    /* This needs to be done first.  */
-  initialize_targets ();    /* Setup target_terminal macros for utils.c.  */
-  initialize_utils ();	    /* Make errors and warnings possible.  */
 
   init_page_info ();
 
@@ -2186,7 +2324,6 @@ gdb_init (char *argv0)
   initialize_progspace ();
   initialize_inferiors ();
   initialize_current_architecture ();
-  init_cli_cmds();
   init_main ();			/* But that omits this file!  Do it now.  */
 
   initialize_stdin_serial ();
@@ -2195,7 +2332,7 @@ gdb_init (char *argv0)
      to alter it.  */
   set_initial_gdb_ttystate ();
 
-  async_init_signals ();
+  gdb_init_signals ();
 
   /* We need a default language for parsing expressions, so simple
      things like "set width 0" won't fail if no language is explicitly
@@ -2203,10 +2340,28 @@ gdb_init (char *argv0)
      during startup.  */
   set_language (language_c);
   expected_language = current_language;	/* Don't warn about the change.  */
+}
 
-  /* Python initialization, for example, can require various commands to be
-     installed.  For example "info pretty-printer" needs the "info"
-     prefix to be installed.  Keep things simple and just do final
-     script initialization here.  */
-  finish_ext_lang_initialization ();
+void _initialize_top ();
+void
+_initialize_top ()
+{
+  /* Determine a default value for the history filename.  */
+  const char *tmpenv = getenv ("GDBHISTFILE");
+  if (tmpenv != nullptr)
+    history_filename = tmpenv;
+  else
+    {
+      /* We include the current directory so that if the user changes
+	 directories the file written will be the same as the one
+	 that was read.  */
+#ifdef __MSDOS__
+      /* No leading dots in file names are allowed on MSDOS.  */
+      const char *fname = "_gdb_history";
+#else
+      const char *fname = ".gdb_history";
+#endif
+
+      history_filename = gdb_abspath (fname);
+    }
 }

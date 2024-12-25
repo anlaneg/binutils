@@ -1,6 +1,6 @@
 /* Target-dependent code for Analog Devices Blackfin processor, for GDB.
 
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
 
    Contributed by Analog Devices, Inc.
 
@@ -19,8 +19,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "arch-utils.h"
+#include "extract-store-integer.h"
 #include "regcache.h"
 #include "tramp-frame.h"
 #include "trad-frame.h"
@@ -95,7 +95,7 @@ static const int bfin_linux_sigcontext_reg_offset[BFIN_NUM_REGS] =
 
 static void
 bfin_linux_sigframe_init (const struct tramp_frame *self,
-			  struct frame_info *this_frame,
+			  const frame_info_ptr &this_frame,
 			  struct trad_frame_cache *this_cache,
 			  CORE_ADDR func)
 {
@@ -150,7 +150,7 @@ bfin_linux_get_syscall_number (struct gdbarch *gdbarch,
 static void
 bfin_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* Set the sigtramp frame sniffer.  */
   tramp_frame_prepend_unwinder (gdbarch, &bfin_linux_sigframe);
@@ -158,12 +158,13 @@ bfin_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   /* Functions for 'catch syscall'.  */
   set_xml_syscall_file_name (gdbarch, "syscalls/bfin-linux.xml");
   set_gdbarch_get_syscall_number (gdbarch,
-                                  bfin_linux_get_syscall_number);
+				  bfin_linux_get_syscall_number);
 }
 
+void _initialize_bfin_linux_tdep ();
 void
-_initialize_bfin_linux_tdep (void)
+_initialize_bfin_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_bfin, 0, GDB_OSABI_LINUX,
-                          bfin_linux_init_abi);
+			  bfin_linux_init_abi);
 }

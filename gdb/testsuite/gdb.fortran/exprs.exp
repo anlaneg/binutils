@@ -1,4 +1,4 @@
-# Copyright (C) 1994-2019 Free Software Foundation, Inc.
+# Copyright (C) 1994-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 load_lib "fortran.exp"
 
-if { [skip_fortran_tests] } { continue }
+require allow_fortran_tests
 
 proc test_integer_literals_accepted {} {
     global gdb_prompt
@@ -141,7 +141,7 @@ proc test_convenience_variables {} {
     gdb_test "print (\$foo = 32) + 4"	" = 36" \
 	"Use convenience variable assignment in arithmetic expression"
 
-    gdb_test "print \$bar"		" = VOID" \
+    gdb_test "print \$bar"		" = void" \
 	"Print contents of uninitialized convenience variable"
 }
 
@@ -241,15 +241,11 @@ proc test_arithmetic_expressions {} {
 
 }
 
-# Start with a fresh gdb.
-
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
+clean_restart
 
 gdb_test "set print sevenbit-strings" ""
 
-if [set_lang_fortran] then {
+if {[set_lang_fortran]} {
     test_value_history
     test_convenience_variables
     test_integer_literals_accepted

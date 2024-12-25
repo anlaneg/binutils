@@ -1,8 +1,8 @@
-#as: -EL -I$srcdir/$subdir
+#as: -EL -I$srcdir/$subdir --generate-missing-build-notes=no
 #objdump: --syms --special-syms -d
 #name: ARM Mapping Symbols for .arm/.thumb
 # This test is only valid on EABI based ports.
-#target: *-*-*eabi* *-*-symbianelf *-*-linux-* *-*-elf *-*-nacl*
+#target: *-*-*eabi* *-*-linux-* *-*-elf *-*-nacl*
 #source: mapdir.s
 
 
@@ -27,9 +27,9 @@ SYMBOL TABLE:
 Disassembly of section .code:
 
 00000000 <.code>:
-   0:	e1a00000 	nop			; \(mov r0, r0\)
+   0:	e1a00000 	nop			@ \(mov r0, r0\)
 
 Disassembly of section .tcode:
 
 00000000 <.tcode>:
-   0:	46c0      	nop			; \(mov r8, r8\)
+   0:	46c0      	nop			@ \(mov r8, r8\)

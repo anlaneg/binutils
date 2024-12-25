@@ -1,5 +1,5 @@
 /* List lines of source files for GDB, the GNU debugger.
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,12 +16,16 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef SOURCE_H
-#define SOURCE_H
+#ifndef GDB_SOURCE_H
+#define GDB_SOURCE_H
 
-#include "common/scoped_fd.h"
+#include "gdbsupport/pathstuff.h"
+#include "gdbsupport/scoped_fd.h"
 
+struct program_space;
 struct symtab;
+struct symtab_and_line;
+struct objfile;
 
 /* See openp function definition for their description.  */
 
@@ -35,17 +39,19 @@ enum openp_flag
 DEF_ENUM_FLAGS_TYPE(openp_flag, openp_flags);
 
 extern int openp (const char *, openp_flags, const char *, int,
-		  gdb::unique_xmalloc_ptr<char> *);
+		  gdb::unique_xmalloc_ptr<char> *,
+		  const char *cwd = current_directory);
 
 extern int source_full_path_of (const char *, gdb::unique_xmalloc_ptr<char> *);
 
-extern void mod_path (const char *, char **);
+extern void mod_path (const char *, std::string &);
 
 extern void add_path (const char *, char **, int);
+extern void add_path (const char *, std::string &, int);
 
 extern void directory_switch (const char *, int);
 
-extern char *source_path;
+extern std::string source_path;
 
 extern void init_source_path (void);
 
@@ -66,14 +72,22 @@ extern void init_source_path (void);
      The caller is responsible for freeing FULLNAME.
 
    On Failure
-     An invalid file descriptor is returned (the return value is negative).
+     An invalid file descriptor is returned.  The value of this file
+     descriptor is a negative errno indicating the reason for the failure.
      FULLNAME is set to NULL.  */
 extern scoped_fd find_and_open_source (const char *filename,
 				       const char *dirname,
 				       gdb::unique_xmalloc_ptr<char> *fullname);
 
+/* A wrapper for find_and_open_source that returns the full name.  If
+   the full name cannot be found, a full name is constructed based on
+   the parameters, passing them through rewrite_source_path.  */
+
+extern gdb::unique_xmalloc_ptr<char> find_source_or_rewrite
+     (const char *filename, const char *dirname);
+
 /* Open a source file given a symtab S.  Returns a file descriptor or
-   negative number for error.  */
+   negative errno indicating the reason for the failure.  */
 extern scoped_fd open_source_file (struct symtab *s);
 
 extern gdb::unique_xmalloc_ptr<char> rewrite_source_path (const char *path);
@@ -83,12 +97,6 @@ extern const char *symtab_to_fullname (struct symtab *s);
 /* Returns filename without the compile directory part, basename or absolute
    filename.  It depends on 'set filename-display' value.  */
 extern const char *symtab_to_filename_for_display (struct symtab *symtab);
-
-/* Create and initialize the table S->line_charpos that records the
-   positions of the lines in the source file, which is assumed to be
-   open on descriptor DESC.  All set S->nlines to the number of such
-   lines.  */
-extern void find_source_lines (struct symtab *s, int desc);
 
 /* Return the first line listed by print_source_lines.  Used by
    command interpreters to request listing from a previous point.  If
@@ -104,7 +112,8 @@ extern int get_lines_to_list (void);
 
 /* Return the current source file for listing and next line to list.
    NOTE: The returned sal pc and end fields are not valid.  */
-extern struct symtab_and_line get_current_source_symtab_and_line (void);
+extern symtab_and_line get_current_source_symtab_and_line
+  (program_space *pspace);
 
 /* If the current source file for listing is not set, try and get a default.
    Usually called before get_current_source_symtab_and_line() is called.
@@ -123,21 +132,11 @@ extern symtab_and_line set_current_source_symtab_and_line
   (const symtab_and_line &sal);
 
 /* Reset any information stored about a default file and line to print.  */
-extern void clear_current_source_symtab_and_line (void);
+extern void clear_current_source_symtab_and_line (program_space *pspace);
+extern void clear_current_source_symtab_and_line (objfile *objfile);
 
 /* Add a source path substitution rule.  */
-extern void add_substitute_path_rule (char *, char *);
-
-/* Print text describing the full name of the source file S
-   and the line number LINE and its corresponding character position.
-   The text starts with two Ctrl-z so that the Emacs-GDB interface
-   can easily find it.
-
-   MID_STATEMENT is nonzero if the PC is not at the beginning of that line.
-
-   Return 1 if successful, 0 if could not find the file.  */
-extern int identify_source_line (struct symtab *s, int line,
-				 int mid_statement, CORE_ADDR pc);
+extern void add_substitute_path_rule (const char *, const char *);
 
 /* Flags passed as 4th argument to print_source_lines.  */
 enum print_source_lines_flag
@@ -200,27 +199,28 @@ private:
   int m_stopline;
 };
 
+/* Get the number of the last line in the given symtab.  */
+extern int last_symtab_line (struct symtab *s);
+
+/* Check if the line LINE can be found in the symtab S, so that it can be
+   printed.  */
+extern bool can_print_line (struct symtab *s, int line);
+
 /* Variation of previous print_source_lines that takes a range instead of a
    start and end line number.  */
 extern void print_source_lines (struct symtab *s, source_lines_range r,
 				print_source_lines_flags flags);
-
-/* Forget line positions and file names for the symtabs in a
-   particular objfile.  */
-extern void forget_cached_source_info_for_objfile (struct objfile *);
 
 /* Forget what we learned about line positions in source files, and
    which directories contain them; must check again now since files
    may be found in a different directory now.  */
 extern void forget_cached_source_info (void);
 
-/* Set the source file default for the "list" command to be S.
+/* Find a source file default for the "list" command.  This should
+   only be called when the user actually tries to use the default,
+   since we produce an error if we can't find a reasonable default.
+   Also, since this can cause symbols to be read, doing it before we
+   need to would make things slower than necessary.  */
+extern void select_source_symtab ();
 
-   If S is NULL, and we don't have a default, find one.  This
-   should only be called when the user actually tries to use the
-   default, since we produce an error if we can't find a reasonable
-   default.  Also, since this can cause symbols to be read, doing it
-   before we need to would make things slower than necessary.  */
-extern void select_source_symtab (struct symtab *s);
-
-#endif
+#endif /* GDB_SOURCE_H */

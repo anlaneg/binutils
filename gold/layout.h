@@ -1,6 +1,6 @@
 // layout.h -- lay out output file sections for gold  -*- C++ -*-
 
-// Copyright (C) 2006-2019 Free Software Foundation, Inc.
+// Copyright (C) 2006-2024 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -399,8 +399,13 @@ enum Output_section_order
   // linker can pick it up quickly.
   ORDER_INTERP,
 
-  // Loadable read-only note sections come next so that the PT_NOTE
-  // segment is on the first page of the executable.
+  // The .note.gnu.property section comes next so that the PT_NOTE
+  // segment is on the first page of the executable and it won't be
+  // placed between other note sections with different alignments.
+  ORDER_PROPERTY_NOTE,
+
+  // Loadable read-only note sections come after the .note.gnu.property
+  // section.
   ORDER_RO_NOTE,
 
   // Put read-only sections used by the dynamic linker early in the
@@ -593,6 +598,14 @@ class Layout
   set_unique_segment_for_sections_specified()
   { this->unique_segment_for_sections_specified_ = true; }
 
+  bool
+  is_lto_slim_object () const
+  { return this->lto_slim_object_; }
+
+  void
+  set_lto_slim_object ()
+  { this->lto_slim_object_ = true; }
+
   // For incremental updates, allocate a block of memory from the
   // free list.  Find a block starting at or after MINOFF.
   off_t
@@ -666,12 +679,10 @@ class Layout
 		       size_t cie_length, const unsigned char* fde_data,
 		       size_t fde_length);
 
-  // Remove .eh_frame information for a PLT.  FDEs using the CIE must
-  // be removed in reverse order to the order they were added.
+  // Remove all post-map .eh_frame information for a PLT.
   void
   remove_eh_frame_for_plt(Output_data* plt, const unsigned char* cie_data,
-			  size_t cie_length, const unsigned char* fde_data,
-			  size_t fde_length);
+			  size_t cie_length);
 
   // Scan a .debug_info or .debug_types section, and add summary
   // information to the .gdb_index section.
@@ -939,7 +950,8 @@ class Layout
   add_target_dynamic_tags(bool use_rel, const Output_data* plt_got,
 			  const Output_data* plt_rel,
 			  const Output_data_reloc_generic* dyn_rel,
-			  bool add_debug, bool dynrel_includes_plt);
+			  bool add_debug, bool dynrel_includes_plt,
+			  bool custom_relcount);
 
   // Add a target-specific dynamic tag with constant value.
   void
@@ -1095,6 +1107,10 @@ class Layout
   // Create a build ID note if needed.
   void
   create_build_id();
+
+  // Create a package metadata note if needed.
+  void
+  create_package_metadata();
 
   // Link .stab and .stabstr sections.
   void
@@ -1442,6 +1458,8 @@ class Layout
   Gdb_index* gdb_index_data_;
   // The space for the build ID checksum if there is one.
   Output_section_data* build_id_note_;
+  // The space for the package metadata JSON if there is one.
+  Output_section_data* package_metadata_note_;
   // The output section containing dwarf abbreviations
   Output_reduced_debug_abbrev_section* debug_abbrev_;
   // The output section containing the dwarf debug info tree
@@ -1482,6 +1500,8 @@ class Layout
   Incremental_inputs* incremental_inputs_;
   // Whether we record output section data created in script
   bool record_output_section_data_from_script_;
+  // Set if this is a slim LTO object not loaded with a compiler plugin
+  bool lto_slim_object_;
   // List of output data that needs to be removed at relaxation clean up.
   Output_section_data_list script_output_section_data_list_;
   // Structure to save segment states before entering the relaxation loop.

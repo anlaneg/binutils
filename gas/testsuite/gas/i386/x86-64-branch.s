@@ -19,16 +19,21 @@
 	.byte 0x66
 	jb	foo
 
+	retw
+	retw	$8
+
+	jz,pt label
+	jz,pn label
+label:
+
 	.intel_syntax noprefix
 	call	rax
-	callq	rax
 	call	ax
-	callw	ax
-	callw	[rax]
+	call	word ptr [rax]
 	jmp	rax
-	jmpq	rax
 	jmp	ax
-	jmpw	ax
-	jmpw	[rax]
+	jmp	word ptr [rax]
 	call	0x100040
 	jmp	0x100040
+	retw
+	retw	8

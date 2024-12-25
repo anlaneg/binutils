@@ -1,5 +1,5 @@
 /* a.out object file format
-   Copyright (C) 1989-2019 Free Software Foundation, Inc.
+   Copyright (C) 1989-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -113,22 +113,40 @@ obj_aout_frob_symbol (symbolS *sym, int *punt ATTRIBUTE_UNUSED)
 	    S_GET_NAME (sym));
 }
 
+/* Relocation processing may require knowing the VMAs of the sections.
+   Writing to a section will cause the BFD back end to compute the
+   VMAs.  This function also ensures that file size is large enough
+   to cover a_text and a_data should text or data be the last section
+   in the file.  */
+
 void
 obj_aout_frob_file_before_fix (void)
 {
-  /* Relocation processing may require knowing the VMAs of the sections.
-     Since writing to a section will cause the BFD back end to compute the
-     VMAs, fake it out here....  */
-  bfd_byte b = 0;
-  bfd_boolean x = TRUE;
-  if (bfd_section_size (stdoutput, text_section) != 0)
-    x = bfd_set_section_contents (stdoutput, text_section, &b, (file_ptr) 0,
-				  (bfd_size_type) 1);
-  else if (bfd_section_size (stdoutput, data_section) != 0)
-    x = bfd_set_section_contents (stdoutput, data_section, &b, (file_ptr) 0,
-				  (bfd_size_type) 1);
+  asection *sec;
+  bfd_vma *sizep = NULL;
+  if ((sec = data_section)->size != 0)
+    sizep = &exec_hdr (stdoutput)->a_data;
+  else if ((sec = text_section)->size != 0)
+    sizep = &exec_hdr (stdoutput)->a_text;
+  if (sizep)
+    {
+      bfd_size_type size = sec->size;
+      bfd_byte b = 0;
 
-  gas_assert (x);
+      gas_assert (bfd_set_section_contents (stdoutput, sec, &b, size - 1, 1));
+
+      /* We don't know the aligned size until after VMAs and sizes are
+	 set on the bfd_set_section_contents call.  If that size is
+	 larger than the section then write again to ensure the file
+	 contents extend to cover the aligned size.  */
+      if (*sizep > size)
+	{
+	  file_ptr pos = sec->filepos + *sizep;
+
+	  gas_assert (bfd_seek (stdoutput, pos - 1, SEEK_SET) == 0
+		      && bfd_write (&b, 1, stdoutput) == 1);
+	}
+    }
 }
 
 static void
@@ -192,9 +210,9 @@ obj_aout_type (int ignore ATTRIBUTE_UNUSED)
       if (*input_line_pointer == '@')
 	{
 	  ++input_line_pointer;
-	  if (strncmp (input_line_pointer, "object", 6) == 0)
+	  if (startswith (input_line_pointer, "object"))
 	    S_SET_OTHER (sym, 1);
-	  else if (strncmp (input_line_pointer, "function", 8) == 0)
+	  else if (startswith (input_line_pointer, "function"))
 	    S_SET_OTHER (sym, 2);
 	}
     }
@@ -203,13 +221,15 @@ obj_aout_type (int ignore ATTRIBUTE_UNUSED)
   s_ignore (0);
 }
 
-/* Support for an AOUT emulation.  */
+static const pseudo_typeS aout_pseudo_table[];
 
-static void
+void
 aout_pop_insert (void)
 {
   pop_insert (aout_pseudo_table);
 }
+
+#ifdef USE_EMULATIONS /* Support for an AOUT emulation.  */
 
 static int
 obj_aout_s_get_other (symbolS *sym)
@@ -230,8 +250,7 @@ obj_aout_sec_sym_ok_for_reloc (asection *sec ATTRIBUTE_UNUSED)
 }
 
 static void
-obj_aout_process_stab (segT seg ATTRIBUTE_UNUSED,
-		       int w,
+obj_aout_process_stab (int w,
 		       const char *s,
 		       int t,
 		       int o,
@@ -279,7 +298,9 @@ const struct format_ops aout_format_ops =
   1,	/* dfl_leading_underscore.  */
   0,	/* emit_section_symbols.  */
   0,	/* begin.  */
+  0,	/* end.  */
   0,	/* app_file.  */
+  NULL, /* assign_symbol */
   obj_aout_frob_symbol,
   0,	/* frob_file.  */
   0,	/* frob_file_before_adjust.  */
@@ -296,7 +317,6 @@ const struct format_ops aout_format_ops =
   obj_aout_s_get_type,
   obj_aout_s_set_type,
   0,	/* copy_symbol_attributes.  */
-  0,	/* generate_asm_lineno.  */
   obj_aout_process_stab,
   obj_aout_separate_stab_sections,
   0,	/* init_stab_section.  */
@@ -309,7 +329,9 @@ const struct format_ops aout_format_ops =
   0	/* adjust_symtab.  */
 };
 
-const pseudo_typeS aout_pseudo_table[] =
+#endif /* USE_EMULATIONS */
+
+static const pseudo_typeS aout_pseudo_table[] =
 {
   {"line", obj_aout_line, 0},	/* Source code line number.  */
   {"ln", obj_aout_line, 0},	/* COFF line number that we use anyway.  */

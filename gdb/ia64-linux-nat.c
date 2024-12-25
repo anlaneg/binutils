@@ -1,7 +1,7 @@
 /* Functions specific to running gdb native on IA-64 running
    GNU/Linux.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,9 +18,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "inferior.h"
 #include "target.h"
+#include "gdbarch.h"
 #include "gdbcore.h"
 #include "regcache.h"
 #include "ia64-tdep.h"
@@ -28,7 +28,7 @@
 
 #include <signal.h>
 #include "nat/gdb_ptrace.h"
-#include "common/gdb_wait.h"
+#include "gdbsupport/gdb_wait.h"
 #ifdef HAVE_SYS_REG_H
 #include <sys/reg.h>
 #endif
@@ -80,6 +80,8 @@ public:
   /* Override linux_nat_target low methods.  */
   void low_new_thread (struct lwp_info *lp) override;
   bool low_status_is_event (int status) override;
+
+  void enable_watchpoints_in_psr (ptid_t ptid);
 };
 
 static ia64_linux_nat_target the_ia64_linux_nat_target;
@@ -401,7 +403,7 @@ ia64_cannot_store_register (struct gdbarch *gdbarch, int regno)
   return regno < 0
 	 || regno >= gdbarch_num_regs (gdbarch)
 	 || u_offsets[regno] == -1
-         || regno == IA64_BSPSTORE_REGNUM;
+	 || regno == IA64_BSPSTORE_REGNUM;
 }
 
 void
@@ -488,7 +490,6 @@ supply_fpregset (struct regcache *regcache, const fpregset_t *fpregsetp)
 {
   int regi;
   const char *from;
-  const gdb_byte f_zero[16] = { 0 };
   const gdb_byte f_one[16] =
     { 0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0xff, 0, 0, 0, 0, 0, 0 };
 
@@ -497,7 +498,7 @@ supply_fpregset (struct regcache *regcache, const fpregset_t *fpregsetp)
      for fr0/fr1 and always supply their expected values.  */
 
   /* fr0 is always read as zero.  */
-  regcache->raw_supply (IA64_FR0_REGNUM, f_zero);
+  regcache->raw_supply_zeroed (IA64_FR0_REGNUM);
   /* fr1 is always read as one (1.0).  */
   regcache->raw_supply (IA64_FR1_REGNUM, f_one);
 
@@ -529,17 +530,17 @@ fill_fpregset (const struct regcache *regcache,
 #define IA64_PSR_DB (1UL << 24)
 #define IA64_PSR_DD (1UL << 39)
 
-static void
-enable_watchpoints_in_psr (ptid_t ptid)
+void
+ia64_linux_nat_target::enable_watchpoints_in_psr (ptid_t ptid)
 {
-  struct regcache *regcache = get_thread_regcache (ptid);
+  struct regcache *regcache = get_thread_regcache (this, ptid);
   ULONGEST psr;
 
   regcache_cooked_read_unsigned (regcache, IA64_PSR_REGNUM, &psr);
   if (!(psr & IA64_PSR_DB))
     {
       psr |= IA64_PSR_DB;	/* Set the db bit - this enables hardware
-			           watchpoints and breakpoints.  */
+				   watchpoints and breakpoints.  */
       regcache_cooked_write_unsigned (regcache, IA64_PSR_REGNUM, psr);
     }
 }
@@ -586,7 +587,6 @@ ia64_linux_nat_target::insert_watchpoint (CORE_ADDR addr, int len,
 					  enum target_hw_bp_type type,
 					  struct expression *cond)
 {
-  struct lwp_info *lp;
   int idx;
   long dbr_addr, dbr_mask;
   int max_watchpoints = 4;
@@ -627,7 +627,8 @@ ia64_linux_nat_target::insert_watchpoint (CORE_ADDR addr, int len,
 
   debug_registers[2 * idx] = dbr_addr;
   debug_registers[2 * idx + 1] = dbr_mask;
-  ALL_LWPS (lp)
+
+  for (const lwp_info *lp : all_lwps ())
     {
       store_debug_register_pair (lp->ptid, idx, &dbr_addr, &dbr_mask);
       enable_watchpoints_in_psr (lp->ptid);
@@ -654,14 +655,12 @@ ia64_linux_nat_target::remove_watchpoint (CORE_ADDR addr, int len,
       dbr_mask = debug_registers[2 * idx + 1];
       if ((dbr_mask & (0x3UL << 62)) && addr == (CORE_ADDR) dbr_addr)
 	{
-	  struct lwp_info *lp;
-
 	  debug_registers[2 * idx] = 0;
 	  debug_registers[2 * idx + 1] = 0;
 	  dbr_addr = 0;
 	  dbr_mask = 0;
 
-	  ALL_LWPS (lp)
+	  for (const lwp_info *lp : all_lwps ())
 	    store_debug_register_pair (lp->ptid, idx, &dbr_addr, &dbr_mask);
 
 	  return 0;
@@ -692,7 +691,7 @@ ia64_linux_nat_target::stopped_data_address (CORE_ADDR *addr_p)
 {
   CORE_ADDR psr;
   siginfo_t siginfo;
-  struct regcache *regcache = get_current_regcache ();
+  regcache *regcache = get_thread_regcache (inferior_thread ());
 
   if (!linux_nat_get_siginfo (inferior_ptid, &siginfo))
     return false;
@@ -703,7 +702,7 @@ ia64_linux_nat_target::stopped_data_address (CORE_ADDR *addr_p)
 
   regcache_cooked_read_unsigned (regcache, IA64_PSR_REGNUM, &psr);
   psr |= IA64_PSR_DD;	/* Set the dd bit - this will disable the watchpoint
-                           for the next instruction.  */
+			   for the next instruction.  */
   regcache_cooked_write_unsigned (regcache, IA64_PSR_REGNUM, psr);
 
   *addr_p = (CORE_ADDR) siginfo.si_addr;
@@ -740,20 +739,14 @@ ia64_linux_fetch_register (struct regcache *regcache, int regnum)
   /* r0 cannot be fetched but is always zero.  */
   if (regnum == IA64_GR0_REGNUM)
     {
-      const gdb_byte zero[8] = { 0 };
-
-      gdb_assert (sizeof (zero) == register_size (gdbarch, regnum));
-      regcache->raw_supply (regnum, zero);
+      regcache->raw_supply_zeroed (regnum);
       return;
     }
 
   /* fr0 cannot be fetched but is always zero.  */
   if (regnum == IA64_FR0_REGNUM)
     {
-      const gdb_byte f_zero[16] = { 0 };
-
-      gdb_assert (sizeof (f_zero) == register_size (gdbarch, regnum));
-      regcache->raw_supply (regnum, f_zero);
+      regcache->raw_supply_zeroed (regnum);
       return;
     }
 
@@ -884,7 +877,7 @@ ia64_linux_nat_target::xfer_partial (enum target_object object,
 
       /* Probe for the table size once.  */
       if (gate_table_size == 0)
-        gate_table_size = syscall (__NR_getunwind, NULL, 0);
+	gate_table_size = syscall (__NR_getunwind, NULL, 0);
       if (gate_table_size < 0)
 	return TARGET_XFER_E_IO;
 
@@ -921,8 +914,9 @@ ia64_linux_nat_target::low_status_is_event (int status)
 				 || WSTOPSIG (status) == SIGILL);
 }
 
+void _initialize_ia64_linux_nat ();
 void
-_initialize_ia64_linux_nat (void)
+_initialize_ia64_linux_nat ()
 {
   /* Register the target.  */
   linux_target = &the_ia64_linux_nat_target;

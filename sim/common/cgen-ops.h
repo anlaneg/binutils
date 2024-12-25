@@ -1,5 +1,5 @@
 /* Semantics ops support for CGEN-based simulators.
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions.
 
 This file is part of the GNU Simulators.
@@ -301,6 +301,27 @@ extern SI TRUNCDISI (DI);
    significant and word number 0 is the most significant word.
    ??? May also wish an endian-dependent version.  Later.  */
 
+QI SUBWORDSIQI (SI, int);
+HI SUBWORDSIHI (SI, int);
+SI SUBWORDSFSI (SF);
+SF SUBWORDSISF (SI);
+DI SUBWORDDFDI (DF);
+DF SUBWORDDIDF (DI);
+QI SUBWORDDIQI (DI, int);
+HI SUBWORDDIHI (DI, int);
+SI SUBWORDDISI (DI, int);
+SI SUBWORDDFSI (DF, int);
+SI SUBWORDXFSI (XF, int);
+SI SUBWORDTFSI (TF, int);
+
+UQI SUBWORDSIUQI (SI, int);
+UQI SUBWORDDIUQI (DI, int);
+
+DI JOINSIDI (SI, SI);
+DF JOINSIDF (SI, SI);
+XF JOINSIXF (SI, SI, SI);
+TF JOINSITF (SI, SI, SI, SI);
+
 #ifdef SEMOPS_DEFINE_INLINE
 
 SEMOPS_INLINE SF
@@ -404,7 +425,7 @@ SUBWORDXFSI (XF in, int word)
   /* Note: typedef struct { SI parts[3]; } XF; */
   union { XF in; SI out[3]; } x;
   x.in = in;
-  if (CURRENT_TARGET_BYTE_ORDER == BFD_ENDIAN_BIG)
+  if (HOST_BYTE_ORDER == BFD_ENDIAN_BIG)
     return x.out[word];
   else
     return x.out[2 - word];
@@ -416,7 +437,7 @@ SUBWORDTFSI (TF in, int word)
   /* Note: typedef struct { SI parts[4]; } TF; */
   union { TF in; SI out[4]; } x;
   x.in = in;
-  if (CURRENT_TARGET_BYTE_ORDER == BFD_ENDIAN_BIG)
+  if (HOST_BYTE_ORDER == BFD_ENDIAN_BIG)
     return x.out[word];
   else
     return x.out[3 - word];
@@ -432,7 +453,7 @@ SEMOPS_INLINE DF
 JOINSIDF (SI x0, SI x1)
 {
   union { SI in[2]; DF out; } x;
-  if (CURRENT_TARGET_BYTE_ORDER == BFD_ENDIAN_BIG)
+  if (HOST_BYTE_ORDER == BFD_ENDIAN_BIG)
     x.in[0] = x0, x.in[1] = x1;
   else
     x.in[1] = x0, x.in[0] = x1;
@@ -443,7 +464,7 @@ SEMOPS_INLINE XF
 JOINSIXF (SI x0, SI x1, SI x2)
 {
   union { SI in[3]; XF out; } x;
-  if (CURRENT_TARGET_BYTE_ORDER == BFD_ENDIAN_BIG)
+  if (HOST_BYTE_ORDER == BFD_ENDIAN_BIG)
     x.in[0] = x0, x.in[1] = x1, x.in[2] = x2;
   else
     x.in[2] = x0, x.in[1] = x1, x.in[0] = x2;
@@ -454,39 +475,41 @@ SEMOPS_INLINE TF
 JOINSITF (SI x0, SI x1, SI x2, SI x3)
 {
   union { SI in[4]; TF out; } x;
-  if (CURRENT_TARGET_BYTE_ORDER == BFD_ENDIAN_BIG)
+  if (HOST_BYTE_ORDER == BFD_ENDIAN_BIG)
     x.in[0] = x0, x.in[1] = x1, x.in[2] = x2, x.in[3] = x3;
   else
     x.in[3] = x0, x.in[2] = x1, x.in[1] = x2, x.in[0] = x3;
   return x.out;
 }
 
-#else
-
-QI SUBWORDSIQI (SI);
-HI SUBWORDSIHI (HI);
-SI SUBWORDSFSI (SF);
-SF SUBWORDSISF (SI);
-DI SUBWORDDFDI (DF);
-DF SUBWORDDIDF (DI);
-QI SUBWORDDIQI (DI, int);
-HI SUBWORDDIHI (DI, int);
-SI SUBWORDDISI (DI, int);
-SI SUBWORDDFSI (DF, int);
-SI SUBWORDXFSI (XF, int);
-SI SUBWORDTFSI (TF, int);
-
-UQI SUBWORDSIUQI (SI);
-UQI SUBWORDDIUQI (DI);
-
-DI JOINSIDI (SI, SI);
-DF JOINSIDF (SI, SI);
-XF JOINSIXF (SI, SI, SI);
-TF JOINSITF (SI, SI, SI, SI);
-
 #endif /* SUBWORD,JOIN */
 
 /* Semantic support utilities.  */
+
+SI ADDCSI (SI, SI, BI);
+BI ADDCFSI (SI, SI, BI);
+BI ADDOFSI (SI, SI, BI);
+SI SUBCSI (SI, SI, BI);
+BI SUBCFSI (SI, SI, BI);
+BI SUBOFSI (SI, SI, BI);
+HI ADDCHI (HI, HI, BI);
+BI ADDCFHI (HI, HI, BI);
+BI ADDOFHI (HI, HI, BI);
+HI SUBCHI (HI, HI, BI);
+BI SUBCFHI (HI, HI, BI);
+BI SUBOFHI (HI, HI, BI);
+QI ADDCQI (QI, QI, BI);
+BI ADDCFQI (QI, QI, BI);
+BI ADDOFQI (QI, QI, BI);
+QI SUBCQI (QI, QI, BI);
+BI SUBCFQI (QI, QI, BI);
+BI SUBOFQI (QI, QI, BI);
+BI MUL1OFSI (USI a, USI b);
+BI MUL2OFSI (SI a, SI b);
+BI ADDCFDI (DI a, DI b, BI c);
+BI ADDOFDI (DI a, DI b, BI c);
+BI SUBCFDI (DI a, DI b, BI c);
+BI SUBOFDI (DI a, DI b, BI c);
 
 #ifdef SEMOPS_DEFINE_INLINE
 
@@ -679,33 +702,9 @@ SUBOFDI (DI a, DI b, BI c)
 	    && ((a < 0) != (tmp < 0)));
   return res;
 }
-#else
-
-SI ADDCSI (SI, SI, BI);
-UBI ADDCFSI (SI, SI, BI);
-UBI ADDOFSI (SI, SI, BI);
-SI SUBCSI (SI, SI, BI);
-UBI SUBCFSI (SI, SI, BI);
-UBI SUBOFSI (SI, SI, BI);
-HI ADDCHI (HI, HI, BI);
-UBI ADDCFHI (HI, HI, BI);
-UBI ADDOFHI (HI, HI, BI);
-HI SUBCHI (HI, HI, BI);
-UBI SUBCFHI (HI, HI, BI);
-UBI SUBOFHI (HI, HI, BI);
-QI ADDCQI (QI, QI, BI);
-UBI ADDCFQI (QI, QI, BI);
-UBI ADDOFQI (QI, QI, BI);
-QI SUBCQI (QI, QI, BI);
-UBI SUBCFQI (QI, QI, BI);
-UBI SUBOFQI (QI, QI, BI);
-BI MUL1OFSI (SI a, SI b);
-BI MUL2OFSI (SI a, SI b);
-BI ADDCFDI (DI a, DI b, BI c);
-BI ADDOFDI (DI a, DI b, BI c);
-BI SUBCFDI (DI a, DI b, BI c);
-BI SUBOFDI (DI a, DI b, BI c);
 
 #endif
+
+extern void cgen_rtx_error (SIM_CPU *, const char *) ATTRIBUTE_NORETURN;
 
 #endif /* CGEN_SEM_OPS_H */

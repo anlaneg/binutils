@@ -1,6 +1,6 @@
 /* Self tests for scoped_mmap for GDB, the GNU debugger.
 
-   Copyright (C) 2018-2019 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,16 +17,15 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 
-#include "common/filestuff.h"
-#include "common/scoped_mmap.h"
+#include "gdbsupport/filestuff.h"
+#include "gdbsupport/scoped_mmap.h"
 #include "config.h"
 
 #if defined(HAVE_SYS_MMAN_H)
 
-#include "common/selftest.h"
-#include "common/gdb_unlinker.h"
+#include "gdbsupport/selftest.h"
+#include "gdbsupport/gdb_unlinker.h"
 
 #include <unistd.h>
 
@@ -89,11 +88,12 @@ static void
 test_normal ()
 {
   char filename[] = "scoped_mmapped_file-selftest-XXXXXX";
-  int fd = gdb_mkostemp_cloexec (filename);
-  SELF_CHECK (fd >= 0);
+  {
+    scoped_fd fd = gdb_mkostemp_cloexec (filename);
+    SELF_CHECK (fd.get () >= 0);
 
-  SELF_CHECK (write (fd, "Hello!", 7) == 7);
-  close (fd);
+    SELF_CHECK (write (fd.get (), "Hello!", 7) == 7);
+  }
 
   gdb::unlinker unlink_test_file (filename);
 
@@ -114,7 +114,7 @@ test_invalid_filename ()
 
   try {
       ::scoped_mmap m = ::mmap_file ("/this/file/should/not/exist");
-  } catch (gdb_exception &e) {
+  } catch (const gdb_exception &e) {
       threw = true;
   }
 
@@ -135,6 +135,7 @@ run_tests ()
 
 #endif /* !defined(HAVE_SYS_MMAN_H) */
 
+void _initialize_scoped_mmap_selftests ();
 void
 _initialize_scoped_mmap_selftests ()
 {

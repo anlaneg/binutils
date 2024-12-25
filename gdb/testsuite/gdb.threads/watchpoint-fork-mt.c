@@ -1,6 +1,6 @@
 /* Test case for forgotten hw-watchpoints after fork()-off of a process.
 
-   Copyright 2012-2019 Free Software Foundation, Inc.
+   Copyright 2012-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -27,7 +27,6 @@
 #include <pthread.h>
 
 #include <asm/unistd.h>
-#include <unistd.h>
 #define gettid() syscall (__NR_gettid)
 
 /* Non-atomic `var++' should not hurt as we synchronize the threads by the STEP
@@ -64,7 +63,7 @@ start (void *arg)
 
   while (step != 1)
     {
-      i = pthread_yield ();
+      i = sched_yield ();
       assert (i == 0);
     }
 
@@ -76,7 +75,7 @@ start (void *arg)
       if (step == 99)
 	goto step_99;
 
-      i = pthread_yield ();
+      i = sched_yield ();
       assert (i == 0);
     }
 
@@ -92,7 +91,7 @@ step_3:
       if (step == 99)
 	goto step_99;
 
-      i = pthread_yield ();
+      i = sched_yield ();
       assert (i == 0);
     }
 
@@ -114,8 +113,10 @@ main (void)
   int i;
   void *thread_result;
 
+#if DEBUG
   setbuf (stdout, NULL);
   printf ("main: %d\n", (int) gettid ());
+#endif
 
   /* General hardware breakpoints and watchpoints validity.  */
   marker ();
@@ -130,7 +131,7 @@ main (void)
   step = 1;
   while (step != 2)
     {
-      i = pthread_yield ();
+      i = sched_yield ();
       assert (i == 0);
     }
 
@@ -147,7 +148,7 @@ main (void)
 #endif
   while (step != 4)
     {
-      i = pthread_yield ();
+      i = sched_yield ();
       assert (i == 0);
     }
 

@@ -1,4 +1,7 @@
 	.text
+.ifdef __ia16__
+	.code16
+.endif
 common:
 	clgi
 	invlpga
@@ -23,6 +26,10 @@ att64:
 att32:
 	skinit	%eax
 	do_args	%eax, %ecx
+.ifndef __amd64__
+att16:
+	do_args	%ax, %ecx
+.endif
 
 .intel_syntax noprefix
 .ifdef __amd64__
@@ -32,5 +39,9 @@ intel64:
 intel32:
 	skinit	eax
 	do_args	eax, ecx
+.ifndef __amd64__
+intel16:
+	do_args	ax, ecx
+.endif
 
 	.p2align 4,0

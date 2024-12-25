@@ -1,5 +1,5 @@
 /* tc-iq2000.c -- Assembler for the Sitera IQ2000.
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -105,15 +105,13 @@ struct iq2000_hi_fixup
 /* The list of unmatched HI relocs.  */
 static struct iq2000_hi_fixup * iq2000_hi_fixup_list;
 
-/* Macro hash table, which we will add to.  */
-extern struct hash_control *macro_hash;
 
-const char *md_shortopts = "";
-struct option md_longopts[] =
+const char md_shortopts[] = "";
+const struct option md_longopts[] =
 {
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c ATTRIBUTE_UNUSED,
@@ -229,24 +227,20 @@ iq2000_add_macro (const char *  name,
 		  const char ** arguments)
 {
   macro_entry *macro;
-  sb macro_name;
-  const char *namestr;
 
   macro = XNEW (macro_entry);
+  macro->name = xstrdup (name);
   sb_new (& macro->sub);
-  sb_new (& macro_name);
-
   macro->formal_count = 0;
   macro->formals = 0;
+  macro->formal_hash = str_htab_create ();
+  macro->file = as_where (&macro->line);
 
   sb_add_string (& macro->sub, semantics);
 
   if (arguments != NULL)
     {
       formal_entry ** p = &macro->formals;
-
-      macro->formal_count = 0;
-      macro->formal_hash = hash_new ();
 
       while (*arguments != NULL)
 	{
@@ -261,7 +255,7 @@ iq2000_add_macro (const char *  name,
 	  /* chlm: Added the following to allow defaulted args.  */
 	  if (strchr (*arguments,'='))
 	    {
-	      char * tt_args = strdup (*arguments);
+	      char * tt_args = xstrdup (*arguments);
 	      char * tt_dflt = strchr (tt_args,'=');
 
 	      *tt_dflt = 0;
@@ -272,8 +266,8 @@ iq2000_add_macro (const char *  name,
 	    sb_add_string (& formal->name, *arguments);
 
 	  /* Add to macro's hash table.  */
-	  hash_jam (macro->formal_hash, sb_terminate (& formal->name), formal);
-
+	  str_hash_insert (macro->formal_hash,
+			   sb_terminate (&formal->name), formal, 1);
 	  formal->index = macro->formal_count;
 	  macro->formal_count++;
 	  *p = formal;
@@ -283,11 +277,7 @@ iq2000_add_macro (const char *  name,
 	}
     }
 
-  sb_add_string (&macro_name, name);
-  namestr = sb_terminate (&macro_name);
-  hash_jam (macro_hash, namestr, macro);
-
-  macro_defined = 1;
+  (void) add_macro (macro, true);
 }
 
 static void
@@ -430,7 +420,7 @@ md_assemble (char * str)
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
+  int align = bfd_section_alignment (segment);
   return ((size + (1 << align) - 1) & -(1 << align));
 }
 
@@ -726,10 +716,10 @@ md_operand (expressionS * exp)
 const char *
 md_atof (int type, char * litP, int * sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
-bfd_boolean
+bool
 iq2000_fix_adjustable (fixS * fixP)
 {
   bfd_reloc_code_real_type reloc_type;
@@ -746,21 +736,21 @@ iq2000_fix_adjustable (fixS * fixP)
     reloc_type = fixP->fx_r_type;
 
   if (fixP->fx_addsy == NULL)
-    return TRUE;
+    return true;
 
   /* Prevent all adjustments to global symbols.  */
   if (S_IS_EXTERNAL (fixP->fx_addsy))
-    return FALSE;
+    return false;
 
   if (S_IS_WEAK (fixP->fx_addsy))
-    return FALSE;
+    return false;
 
   /* We need the symbol name for the VTABLE entries.  */
   if (   reloc_type == BFD_RELOC_VTABLE_INHERIT
       || reloc_type == BFD_RELOC_VTABLE_ENTRY)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 static void
@@ -817,7 +807,7 @@ s_iq2000_end (int x ATTRIBUTE_UNUSED)
   else
     p = NULL;
 
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     maybe_text = 1;
   else
     maybe_text = 0;
@@ -916,7 +906,7 @@ s_iq2000_ent (int aent)
   if (ISDIGIT (*input_line_pointer) || *input_line_pointer == '-')
     get_number ();
 
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     maybe_text = 1;
   else
     maybe_text = 0;

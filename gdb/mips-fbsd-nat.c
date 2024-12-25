@@ -1,6 +1,6 @@
 /* Native-dependent code for FreeBSD/mips.
 
-   Copyright (C) 2017-2019 Free Software Foundation, Inc.
+   Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "inferior.h"
 #include "regcache.h"
 #include "target.h"
@@ -126,8 +125,9 @@ mips_fbsd_nat_target::store_registers (struct regcache *regcache, int regnum)
     }
 }
 
+void _initialize_mips_fbsd_nat ();
 void
-_initialize_mips_fbsd_nat (void)
+_initialize_mips_fbsd_nat ()
 {
   add_inf_child_target (&the_mips_fbsd_nat_target);
 }

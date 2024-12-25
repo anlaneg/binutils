@@ -21,15 +21,13 @@
 #ifndef _DEBUG_C_
 #define _DEBUG_C_
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "basics.h"
 
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-#ifdef HAVE_STRING_H
 #include <string.h>
-#endif
 
 int ppc_trace[nr_trace_options];
 
@@ -41,7 +39,7 @@ typedef struct _trace_option_descriptor {
 
 static trace_option_descriptor trace_description[] = {
   { trace_gdb, "gdb", "calls made by gdb to the sim_calls.c file" },
-  { trace_os_emul, "os-emul", "VEA mode sytem calls - like strace" },
+  { trace_os_emul, "os-emul", "VEA mode system calls - like strace" },
   { trace_events, "events", "event queue handling" },
   /* decode/issue */
   { trace_semantics, "semantics", "Instruction execution (issue)" },
@@ -142,7 +140,7 @@ trace_usage(int verbose)
     printf_filtered("\n");
   }
   if (verbose > 1) {
-    const char *format = "\t%-18s%s\n";
+    static const char format[] = "\t%-18s%s\n";
     int i;
     printf_filtered(format, "all", "enable all the trace options");
     for (i = 0; trace_description[i].option < nr_trace_options; i++)

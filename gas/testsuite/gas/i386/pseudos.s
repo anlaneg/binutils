@@ -6,9 +6,9 @@ _start:
 	{vex3} {load} vmovaps %xmm7,%xmm2
 	{vex3} {store} vmovaps %xmm7,%xmm2
 	vmovaps %xmm7,%xmm2
-	{vex2} vmovaps %xmm7,%xmm2
-	{vex2} {load} vmovaps %xmm7,%xmm2
-	{vex2} {store} vmovaps %xmm7,%xmm2
+	{vex} vmovaps %xmm7,%xmm2
+	{vex} {load} vmovaps %xmm7,%xmm2
+	{vex} {store} vmovaps %xmm7,%xmm2
 	{vex3} vmovaps (%eax),%xmm2
 	vmovaps (%eax),%xmm2
 	{vex2} vmovaps (%eax),%xmm2
@@ -16,6 +16,12 @@ _start:
 	{disp32} vmovaps (%eax),%xmm2
 	{evex} {disp8} vmovaps (%eax),%xmm2
 	{evex} {disp32} vmovaps (%eax),%xmm2
+
+	{vex} {disp8} vmovaps 128(%eax),%xmm2
+	{vex} {disp32} vmovaps 128(%eax),%xmm2
+	{evex} {disp8} vmovaps 128(%eax),%xmm2
+	{evex} {disp16} vmovaps 128(%bx),%xmm2
+	{evex} {disp32} vmovaps 128(%eax),%xmm2
 
 	mov %ecx, %eax
 	{load} mov %ecx, %eax
@@ -117,6 +123,34 @@ _start:
 	{load} xor (%edi), %eax
 	{store} xor %eax, (%edi)
 	{store} xor (%edi), %eax
+
+	.irp m, mov, adc, add, and, cmp, or, sbb, sub, test, xor
+	\m	$0x12, %al
+	\m	$0x345, %eax
+	{load} \m $0x12, %al		# bogus for MOV
+	{load} \m $0x345, %eax		# bogus for MOV
+	{store} \m $0x12, %al
+	{store} \m $0x345, %eax
+	.endr
+
+	.irp m, inc, dec, push, pop, bswap
+	\m	%ecx
+	{load} \m %ecx			# bogus for POP
+	{store} \m %ecx			# bogus for PUSH
+	.endr
+
+	xchg	%ecx, %esi
+	xchg	%esi, %ecx
+	{load} xchg %ecx, %esi
+	{store} xchg %ecx, %esi
+
+	xchg	%eax, %esi
+	{load} xchg %eax, %esi
+	{store} xchg %eax, %esi
+
+	xchg	%ecx, %eax
+	{load} xchg %ecx, %eax
+	{store} xchg %ecx, %eax
 
 	fadd %st, %st
 	{load} fadd %st, %st
@@ -293,6 +327,26 @@ _start:
 	{disp8} movaps 128(%eax),%xmm2
 	{disp32} movaps 128(%eax),%xmm2
 
+	movb (%ebp),%al
+	{disp8} movb (%ebp),%al
+	{disp32} movb (%ebp),%al
+
+	movb (%si),%al
+	{disp8} movb (%si),%al
+	{disp16} movb (%si),%al
+
+	movb (%di),%al
+	{disp8} movb (%di),%al
+	{disp16} movb (%di),%al
+
+	movb (%bx),%al
+	{disp8} movb (%bx),%al
+	{disp16} movb (%bx),%al
+
+	movb (%bp),%al
+	{disp8} movb (%bp),%al
+	{disp16} movb (%bp),%al
+
 	.intel_syntax noprefix
 	{vex3} vmovaps xmm2,xmm7
 	{vex3} {load} vmovaps xmm2,xmm7
@@ -308,6 +362,13 @@ _start:
 	{disp32} vmovaps xmm2,XMMWORD PTR [eax]
 	{evex} {disp8} vmovaps xmm2,XMMWORD PTR [eax]
 	{evex} {disp32} vmovaps xmm2,XMMWORD PTR [eax]
+
+	{vex} {disp8} vmovaps xmm2,XMMWORD PTR [eax+128]
+	{vex} {disp32} vmovaps xmm2,XMMWORD PTR [eax+128]
+	{evex} {disp8} vmovaps xmm2,XMMWORD PTR [eax+128]
+	{evex} {disp16} vmovaps xmm2,XMMWORD PTR [bx+128]
+	{evex} {disp32} vmovaps xmm2,XMMWORD PTR [eax+128]
+
 	mov eax,ecx
 	{load} mov eax,ecx
 	{store} mov eax,ecx
@@ -322,3 +383,28 @@ _start:
 	movaps xmm2,XMMWORD PTR [eax+128]
 	{disp8} movaps xmm2,XMMWORD PTR [eax+128]
 	{disp32} movaps xmm2,XMMWORD PTR [eax+128]
+
+	mov al, BYTE PTR [ebp]
+	{disp8} mov al, BYTE PTR [ebp]
+	{disp32} mov al, BYTE PTR [ebp]
+
+	mov al, BYTE PTR [si]
+	{disp8} mov al, BYTE PTR [si]
+	{disp16} mov al, BYTE PTR [si]
+
+	mov al, BYTE PTR [di]
+	{disp8} mov al, BYTE PTR [di]
+	{disp16} mov al, BYTE PTR [di]
+
+	mov al, BYTE PTR [bx]
+	{disp8} mov al, BYTE PTR [bx]
+	{disp16} mov al, BYTE PTR [bx]
+
+	mov al, BYTE PTR [bp]
+	{disp8} mov al, BYTE PTR [bp]
+	{disp16} mov al, BYTE PTR [bp]
+
+	{disp32} jmp .
+	.code16
+	{disp16} jmp .
+	.byte -1, -1

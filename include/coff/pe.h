@@ -1,6 +1,6 @@
 /* pe.h  -  PE COFF header information
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -49,7 +49,9 @@
 #define IMAGE_DLLCHARACTERISTICS_NO_ISOLATION           0x0200
 #define IMAGE_DLLCHARACTERISTICS_NO_SEH                 0x0400
 #define IMAGE_DLLCHARACTERISTICS_NO_BIND                0x0800
+#define IMAGE_DLLCHARACTERISTICS_APPCONTAINER           0x1000
 #define IMAGE_DLLCHARACTERISTICS_WDM_DRIVER             0x2000
+#define IMAGE_DLLCHARACTERISTICS_GUARD_CF               0x4000
 #define IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE  0x8000
 
 /* Additional flags to be set for section headers to allow the NT loader to
@@ -105,9 +107,12 @@
 #define IMAGE_SCN_ALIGN_8192BYTES	     IMAGE_SCN_ALIGN_POWER_CONST (13)
 
 /* Encode alignment power into IMAGE_SCN_ALIGN bits of s_flags.  */
-#define COFF_ENCODE_ALIGNMENT(SECTION, ALIGNMENT_POWER) \
-  ((SECTION).s_flags |= IMAGE_SCN_ALIGN_POWER_CONST ((ALIGNMENT_POWER) <= 13 \
-						     ? (ALIGNMENT_POWER) : 13))
+#define COFF_ENCODE_ALIGNMENT(ABFD, SECTION, ALIGNMENT_POWER) \
+  (((ABFD)->flags & (EXEC_P | DYNAMIC)) != 0 ? false			\
+   : ((SECTION).s_flags							\
+      |= IMAGE_SCN_ALIGN_POWER_CONST ((ALIGNMENT_POWER) < 13		\
+				      ? (ALIGNMENT_POWER) : 13),	\
+      true))
 #define COFF_DECODE_ALIGNMENT(X)             \
   IMAGE_SCN_ALIGN_POWER_NUM ((X) & IMAGE_SCN_ALIGN_POWER_BIT_MASK)
 
@@ -132,12 +137,15 @@
 #define IMAGE_FILE_MACHINE_AM33              0x01d3
 #define IMAGE_FILE_MACHINE_AMD64             0x8664
 #define IMAGE_FILE_MACHINE_ARM               0x01c0
+#define IMAGE_FILE_MACHINE_ARM64             0xaa64
+#define IMAGE_FILE_MACHINE_ARMNT             0x01c4
 #define IMAGE_FILE_MACHINE_AXP64             IMAGE_FILE_MACHINE_ALPHA64
 #define IMAGE_FILE_MACHINE_CEE               0xc0ee
 #define IMAGE_FILE_MACHINE_CEF               0x0cef
 #define IMAGE_FILE_MACHINE_EBC               0x0ebc
 #define IMAGE_FILE_MACHINE_I386              0x014c
 #define IMAGE_FILE_MACHINE_IA64              0x0200
+#define IMAGE_FILE_MACHINE_LOONGARCH64       0x6264
 #define IMAGE_FILE_MACHINE_M32R              0x9041
 #define IMAGE_FILE_MACHINE_M68K              0x0268
 #define IMAGE_FILE_MACHINE_MIPS16            0x0266
@@ -148,6 +156,8 @@
 #define IMAGE_FILE_MACHINE_R10000            0x0168
 #define IMAGE_FILE_MACHINE_R3000             0x0162
 #define IMAGE_FILE_MACHINE_R4000             0x0166
+#define IMAGE_FILE_MACHINE_RISCV32           0x5032
+#define IMAGE_FILE_MACHINE_RISCV64           0x5064
 #define IMAGE_FILE_MACHINE_SH3               0x01a2
 #define IMAGE_FILE_MACHINE_SH3DSP            0x01a3
 #define IMAGE_FILE_MACHINE_SH3E              0x01a4
@@ -156,7 +166,6 @@
 #define IMAGE_FILE_MACHINE_THUMB             0x01c2
 #define IMAGE_FILE_MACHINE_TRICORE           0x0520
 #define IMAGE_FILE_MACHINE_WCEMIPSV2         0x0169
-#define IMAGE_FILE_MACHINE_AMD64             0x8664
 
 #define IMAGE_SUBSYSTEM_UNKNOWN			 0
 #define IMAGE_SUBSYSTEM_NATIVE			 1
@@ -211,7 +220,7 @@ struct external_PEI_filehdr
   char e_oeminfo[2];		/* OEM information; e_oemid specific, 0x0.  */
   char e_res2[10][2];		/* Reserved words, all 0x0.  */
   char e_lfanew[4];		/* File address of new exe header, usually 0x80.  */
-  char dos_message[16][4];	/* Other stuff, always follow DOS header.  */
+  char dos_message[64];		/* Other stuff, always follow DOS header.  */
 
   /* Note: additional bytes may be inserted before the signature.  Use
    the e_lfanew field to find the actual location of the NT signature.  */
@@ -255,7 +264,7 @@ typedef struct
   char  MinorImageVersion[2];
   char  MajorSubsystemVersion[2];
   char  MinorSubsystemVersion[2];
-  char  Reserved1[4];
+  char  Win32Version[4];
   char  SizeOfImage[4];
   char  SizeOfHeaders[4];
   char  CheckSum[4];
@@ -294,7 +303,7 @@ typedef struct
   char  MinorImageVersion[2];
   char  MajorSubsystemVersion[2];
   char  MinorSubsystemVersion[2];
-  char  Reserved1[4];
+  char  Win32Version[4];
   char  SizeOfImage[4];
   char  SizeOfHeaders[4];
   char  CheckSum[4];
@@ -329,6 +338,7 @@ typedef struct
 #define IMPORT_NAME		1
 #define IMPORT_NAME_NOPREFIX	2
 #define IMPORT_NAME_UNDECORATE	3
+#define IMPORT_NAME_EXPORTAS	4
 
 /* Weak external characteristics.  */
 #define IMAGE_WEAK_EXTERN_SEARCH_NOLIBRARY	1
@@ -578,10 +588,10 @@ struct external_IMAGE_DEBUG_DIRECTORY
 /* Extra structures used in codeview debug record.  */
 /* This is not part of the PE specification.  */
 
-#define CVINFO_PDB70_CVSIGNATURE 0x53445352 // "RSDS"
-#define CVINFO_PDB20_CVSIGNATURE 0x3031424e // "NB10"
-#define CVINFO_CV50_CVSIGNATURE  0x3131424e // "NB11"
-#define CVINFO_CV41_CVSIGNATURE  0x3930424e // "NB09"
+#define CVINFO_PDB70_CVSIGNATURE 0x53445352 /* "RSDS" */
+#define CVINFO_PDB20_CVSIGNATURE 0x3031424e /* "NB10" */
+#define CVINFO_CV50_CVSIGNATURE  0x3131424e /* "NB11" */
+#define CVINFO_CV41_CVSIGNATURE  0x3930424e /* "NB09" */
 
 typedef struct _CV_INFO_PDB70
 {

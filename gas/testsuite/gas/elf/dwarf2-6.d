@@ -6,7 +6,7 @@
 
 Raw dump of debug contents of section .debug_line:
 
-  Offset:                      0x0
+  Offset:                      (0x)?0
   Length:                      84
   DWARF Version:               2
   Prologue Length:             36
@@ -41,7 +41,7 @@ Raw dump of debug contents of section .debug_line:
 
 
  Line Number Statements:
-  \[0x.*\]  Extended opcode 2: set Address to 0x0
+  \[0x.*\]  Extended opcode 2: set Address to (0x)?0
   \[0x.*\]  Copy
   \[0x.*\]  Copy \(view 1\)
   \[0x.*\]  Extended opcode 2: set Address to 0x1
@@ -75,4 +75,4 @@ dwarf2-6\.c  *2  *0x3  *2 +x
 dwarf2-6\.c  *3  *0x4 +x
 dwarf2-6\.c  *3  *0x4  *1 +x
 dwarf2-6\.c  *3  *0xf3 +x
-dwarf2-6\.c  *3  *0x100 +x
+dwarf2-6\.c  *-  *0x100

@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2019 Free Software Foundation, Inc.
+# Copyright (C) 2014-2024 Free Software Foundation, Inc.
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
@@ -155,7 +155,7 @@ SOFT_REGS_RELOC="
 "
 
 cat <<EOF
-/* Copyright (C) 2014-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
@@ -292,7 +292,7 @@ SECTIONS
 
   .init	${RELOCATING-0} :
   {
-    *(.init)
+    KEEP (*(SORT_NONE(.init)))
   } ${RELOCATING+=${NOP-0}}
 
   ${RELOCATING-${INSTALL_RELOC}}
@@ -303,15 +303,15 @@ SECTIONS
     /* Put startup code at beginning so that _start keeps same address.  */
     ${RELOCATING+${STARTUP_CODE}}
 
-    ${RELOCATING+*(.init)}
     *(.text)
     ${RELOCATING+*(.text.*)}
-    /* .gnu.warning sections are handled specially by elf32.em.  */
+    /* .gnu.warning sections are handled specially by elf.em.  */
     *(.gnu.warning)
     ${RELOCATING+*(.gnu.linkonce.t.*)}
     ${RELOCATING+*(.tramp)}
     ${RELOCATING+*(.tramp.*)}
 
+    ${RELOCATING+KEEP (*(SORT_NONE(.fini)))}
     ${RELOCATING+${FINISH_CODE}}
 
     ${RELOCATING+_etext = .;}
@@ -420,24 +420,18 @@ SECTIONS
   } ${RELOCATING+ > ${EEPROM_MEMORY}}
 
   ${RELOCATING+${VECTORS}}
+EOF
 
-  /* Stabs debugging sections.  */
-  .stab		 0 : { *(.stab) }
-  .stabstr	 0 : { *(.stabstr) }
-  .stab.excl	 0 : { *(.stab.excl) }
-  .stab.exclstr	 0 : { *(.stab.exclstr) }
-  .stab.index	 0 : { *(.stab.index) }
-  .stab.indexstr 0 : { *(.stab.indexstr) }
+source_sh $srcdir/scripttempl/misc-sections.sc
 
-  .comment	 0 : { *(.comment) }
-
+cat <<EOF
   /* Treatment of DWARF debug section must be at end of the linker
      script to avoid problems when there are undefined symbols. It's necessary
      to avoid that the DWARF section is relocated before such undefined
      symbols are found.  */
 EOF
 
-. $srcdir/scripttempl/DWARF.sc
+source_sh $srcdir/scripttempl/DWARF.sc
 
 cat <<EOF
 }

@@ -1,7 +1,7 @@
 #as: -march=rv32i -mabi=ilp32
 #objdump: -dr
 
-.*:     file format elf32-littleriscv
+.*:     file format elf32-(little|big)riscv
 
 
 Disassembly of section .text:
@@ -14,6 +14,6 @@ Disassembly of section .text:
   10:	00001537          	lui	a0,0x1
   14:	fff50513          	addi	a0,a0,-1 # fff <d>
   18:	80000537          	lui	a0,0x80000
-  1c:	fff50513          	addi	a0,a0,-1 # 7fffffff <h\+0x80000000>
+  1c:	fff50513          	addi	a0,a0,-1 # 7fffffff <e>
   20:	00000513          	li	a0,0
   24:	fff00513          	li	a0,-1

@@ -1,4 +1,4 @@
-# Copyright 2016-2019 Free Software Foundation, Inc.
+# Copyright 2016-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,16 +16,12 @@
 # Test a C++ reference marked with DW_OP_GNU_implicit_pointer.
 # The referenced value is a global array whose location is a DW_OP_addr.
 
-if [skip_cplus_tests] {
-    continue
-}
+require allow_cplus_tests
 
 load_lib dwarf.exp
 
 # This test can only be run on targets which support DWARF-2 and use gas.
-if ![dwarf2_support] {
-    return 0
-}
+require dwarf2_support
 
 # We'll place the output of Dwarf::assemble in implref-array.S.
 standard_testfile .c .S
@@ -51,7 +47,7 @@ set array_length [get_valueof "/u" "sizeof(array) / sizeof(array\[0\])" -1]
 # The variable must be global so that its name is an exported symbol that we
 # can reference from the DWARF using gdb_target_symbol.
 Dwarf::assemble ${asm_file} {
-    global srcdir subdir srcfile array_length
+    global array_length
 
     cu {} {
 	DW_TAG_compile_unit {
@@ -99,7 +95,7 @@ Dwarf::assemble ${asm_file} {
 	    }
 
 	    DW_TAG_subprogram {
-		{MACRO_AT_func { "main" "${srcdir}/${subdir}/${srcfile}" }}
+		{MACRO_AT_func { "main" }}
 		{DW_AT_type :${int_label}}
 		{DW_AT_external 1 DW_FORM_flag}
 	    } {

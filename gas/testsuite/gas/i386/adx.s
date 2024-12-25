@@ -1,5 +1,4 @@
 # Check ADX instructions.
-        .allow_index_reg
 	.text
 _start:
         adcx    400(%ecx), %eax
@@ -17,14 +16,17 @@ _start:
         adoxl   (%eax), %eax
 
 	.intel_syntax noprefix
+	.rept 2
 
-        adcx    eax, DWORD PTR [edx+399]
+        adcx    eax, DWORD PTR [edx+36]
         adcx    edx, ecx
-        adcx    edx, DWORD PTR [esp+esi*8-123456]
+        adcx    edx, DWORD PTR [esp+esi*8-12]
         adcx    eax, DWORD PTR [eax]
 
-        adox    eax, DWORD PTR [edx+399]
+        adox    eax, DWORD PTR [edx+36]
         adox    edx, ecx
-        adox    edx, DWORD PTR [esp+esi*8-123456]
+        adox    edx, DWORD PTR [esp+esi*8-12]
         adox    eax, DWORD PTR [eax]
 
+	.code16
+	.endr

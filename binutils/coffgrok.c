@@ -1,5 +1,5 @@
 /* coffgrok.c
-   Copyright (C) 1994-2019 Free Software Foundation, Inc.
+   Copyright (C) 1994-2024 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -65,13 +65,13 @@ static bfd *                    abfd;
 static struct coff_scope *
 empty_scope (void)
 {
-  return (struct coff_scope *) (xcalloc (sizeof (struct coff_scope), 1));
+  return (struct coff_scope *) (xcalloc (1, sizeof (struct coff_scope)));
 }
 
 static struct coff_symbol *
 empty_symbol (void)
 {
-  return (struct coff_symbol *) (xcalloc (sizeof (struct coff_symbol), 1));
+  return (struct coff_symbol *) (xcalloc (1, sizeof (struct coff_symbol)));
 }
 
 static void
@@ -145,7 +145,7 @@ do_sections_p1 (struct coff_ofile *head)
       if (strcmp (section->name, ".bss") == 0)
 	head->sections[i].data = 1;
       head->sections[i].address = section->lma;
-      head->sections[i].size = bfd_get_section_size (section);
+      head->sections[i].size = bfd_section_size (section);
       head->sections[i].number = idx;
       head->sections[i].nrelocs = section->reloc_count;
       head->sections[i].relocs =
@@ -279,7 +279,7 @@ do_where (unsigned int i)
 static struct coff_line *
 do_lines (int i, char *name ATTRIBUTE_UNUSED)
 {
-  struct coff_line *res = (struct coff_line *) xcalloc (sizeof (struct coff_line), 1);
+  struct coff_line *res = (struct coff_line *) xcalloc (1, sizeof (struct coff_line));
   asection *s;
   unsigned int l;
 
@@ -316,8 +316,8 @@ do_lines (int i, char *name ATTRIBUTE_UNUSED)
 		  /* Add two extra records, one for the prologue and one for the epilogue.  */
 		  c += 1;
 		  res->nlines = c;
-		  res->lines = (int *) (xcalloc (sizeof (int), c));
-		  res->addresses = (int *) (xcalloc (sizeof (int), c));
+		  res->lines = (int *) (xcalloc (c, sizeof (int)));
+		  res->addresses = (int *) (xcalloc (c, sizeof (int)));
 		  res->lines[0] = start_line;
 		  res->addresses[0] = rawsyms[i].u.syment.n_value - s->vma;
 		  for (c = 0;
@@ -341,7 +341,7 @@ static struct coff_type *
 do_type (unsigned int i)
 {
   struct internal_syment *sym;
-  union internal_auxent *aux;
+  combined_entry_type *aux;
   struct coff_type *res = (struct coff_type *) xmalloc (sizeof (struct coff_type));
   int type;
   int which_dt = 0;
@@ -357,7 +357,7 @@ do_type (unsigned int i)
   if (sym->n_numaux == 0 || i >= rawcount -1 || rawsyms[i + 1].is_sym)
     aux = NULL;
   else
-    aux = &rawsyms[i + 1].u.auxent;
+    aux = &rawsyms[i + 1];
 
   type = sym->n_type;
 
@@ -374,7 +374,7 @@ do_type (unsigned int i)
 	  res->type = coff_secdef_type;
 	  if (aux == NULL)
 	    fatal (_("Section definition needs a section length"));
-	  res->size = aux->x_scn.x_scnlen;
+	  res->size = aux->u.auxent.x_scn.x_scnlen;
 
 	  /* PR 17512: file: 081c955d.
 	     Fill in the asecdef structure as well.  */
@@ -424,28 +424,11 @@ do_type (unsigned int i)
       if (sym->n_numaux)
 	{
 	  if (aux == NULL)
-	    fatal (_("Aggregate definition needs auxillary information"));
+	    fatal (_("Aggregate definition needs auxiliary information"));
 
-	  if (aux->x_sym.x_tagndx.p)
+	  if (aux->fix_tag)
 	    {
-	      unsigned int idx;
-
-	      /* PR 17512: file: e72f3988.  */
-	      if (aux->x_sym.x_tagndx.l < 0 || aux->x_sym.x_tagndx.p < rawsyms)
-		{
-		  non_fatal (_("Invalid tag index %#lx encountered"), aux->x_sym.x_tagndx.l);
-		  idx = 0;
-		}
-	      else
-		idx = INDEXOF (aux->x_sym.x_tagndx.p);
-
-	      if (idx >= rawcount)
-		{
-		  if (rawcount == 0)
-		    fatal (_("Symbol index %u encountered when there are no symbols"), idx);
-		  non_fatal (_("Invalid symbol index %u encountered"), idx);
-		  idx = 0;
-		}
+	      unsigned int idx = INDEXOF (aux->u.auxent.x_sym.x_tagndx.p);
 
 	      /* Referring to a struct defined elsewhere.  */
 	      res->type = coff_structref_type;
@@ -461,7 +444,7 @@ do_type (unsigned int i)
 	      res->u.astructdef.elements = empty_scope ();
 	      res->u.astructdef.idx = 0;
 	      res->u.astructdef.isstruct = (type & 0xf) == T_STRUCT;
-	      res->size = aux->x_sym.x_misc.x_lnsz.x_size;
+	      res->size = aux->u.auxent.x_sym.x_misc.x_lnsz.x_size;
 	    }
 	}
       else
@@ -474,14 +457,11 @@ do_type (unsigned int i)
       break;
     case T_ENUM:
       if (aux == NULL)
-	fatal (_("Enum definition needs auxillary information"));
-      if (aux->x_sym.x_tagndx.p)
+	fatal (_("Enum definition needs auxiliary information"));
+      if (aux->fix_tag)
 	{
-	  unsigned int idx = INDEXOF (aux->x_sym.x_tagndx.p);
+	  unsigned int idx = INDEXOF (aux->u.auxent.x_sym.x_tagndx.p);
 
-	  /* PR 17512: file: 1ef037c7.  */
-	  if (idx >= rawcount)
-	    fatal (_("Invalid enum symbol index %u encountered"), idx);
 	  /* Referring to a enum defined elsewhere.  */
 	  res->type = coff_enumref_type;
 	  res->u.aenumref.ref = tindex[idx];
@@ -497,7 +477,7 @@ do_type (unsigned int i)
 	  last_enum = res;
 	  res->type = coff_enumdef_type;
 	  res->u.aenumdef.elements = empty_scope ();
-	  res->size = aux->x_sym.x_misc.x_lnsz.x_size;
+	  res->size = aux->u.auxent.x_sym.x_misc.x_lnsz.x_size;
 	}
       break;
     case T_MOE:
@@ -517,9 +497,9 @@ do_type (unsigned int i)
 	    int els;
 
 	    if (aux == NULL)
-	      fatal (_("Array definition needs auxillary information"));
+	      fatal (_("Array definition needs auxiliary information"));
 	    els = (dimind < DIMNUM
-		   ? aux->x_sym.x_fcnary.x_ary.x_dimen[dimind]
+		   ? aux->u.auxent.x_sym.x_fcnary.x_ary.x_dimen[dimind]
 		   : 0);
 
 	    ++dimind;
@@ -720,7 +700,7 @@ static struct coff_ofile *
 doit (void)
 {
   unsigned int i;
-  bfd_boolean infile = FALSE;
+  bool infile = false;
   struct coff_ofile *head =
     (struct coff_ofile *) xmalloc (sizeof (struct coff_ofile));
 
@@ -745,7 +725,7 @@ doit (void)
 	    struct coff_sfile *n =
 	      (struct coff_sfile *) xmalloc (sizeof (struct coff_sfile));
 
-	    n->section = (struct coff_isection *) xcalloc (sizeof (struct coff_isection), abfd->section_count + 1);
+	    n->section = (struct coff_isection *) xcalloc (abfd->section_count + 1, sizeof (struct coff_isection));
 	    cur_sfile = n;
 	    n->name = N(sym);
 	    n->next = 0;
@@ -753,7 +733,7 @@ doit (void)
 	    if (infile)
 	      pop_scope ();
 	    else
-	      infile = TRUE;
+	      infile = true;
 
 	    push_scope (1);
 	    file_scope = n->scope = top_scope;
@@ -890,15 +870,16 @@ coff_grok (bfd *inabfd)
   storage = bfd_get_symtab_upper_bound (abfd);
 
   if (storage < 0)
-    bfd_fatal (abfd->filename);
+    bfd_fatal (bfd_get_filename (abfd));
 
   syms = (asymbol **) xmalloc (storage);
   symcount = bfd_canonicalize_symtab (abfd, syms);
   if (symcount < 0)
-    bfd_fatal (abfd->filename);
+    bfd_fatal (bfd_get_filename (abfd));
   rawsyms = obj_raw_syments (abfd);
   rawcount = obj_raw_syment_count (abfd);
-  tindex = (struct coff_symbol **) (xcalloc (sizeof (struct coff_symbol *), rawcount));
+  tindex = (struct coff_symbol **) (xcalloc (rawcount,
+					     sizeof (struct coff_symbol *)));
 
   p = doit ();
   return p;

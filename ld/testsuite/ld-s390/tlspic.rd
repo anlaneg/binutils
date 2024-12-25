@@ -21,7 +21,6 @@ Section Headers:
  +\[[ 0-9]+\] .tbss +NOBITS .* 0+20 00 WAT +0 +0 +1
  +\[[ 0-9]+\] .dynamic +DYNAMIC .*
  +\[[ 0-9]+\] .got +PROGBITS .*
- +\[[ 0-9]+\] .got.plt +PROGBITS .*
  +\[[ 0-9]+\] .symtab .*
  +\[[ 0-9]+\] .strtab .*
  +\[[ 0-9]+\] .shstrtab .*
@@ -42,7 +41,7 @@ Program Headers:
  Section to Segment mapping:
  +Segment Sections...
  +00 +.hash .dynsym .dynstr .rela.dyn .rela.plt .plt .text 
- +01 +.tdata .dynamic .got .got.plt 
+ +01 +.tdata .dynamic .got 
  +02 +.dynamic 
  +03 +.tdata .tbss 
 
@@ -70,8 +69,7 @@ Relocation section '.rela.plt' at offset 0x[0-9a-f]+ contains 1 entry:
 Symbol table '\.dynsym' contains [0-9]+ entries:
  +Num: +Value +Size +Type +Bind +Vis +Ndx +Name
 .* NOTYPE +LOCAL +DEFAULT +UND 
-.* SECTION +LOCAL +DEFAULT +7 
-.* SECTION +LOCAL +DEFAULT +8 
+.* SECTION +LOCAL +DEFAULT +7.*
 .* TLS +GLOBAL +DEFAULT +8 sg8
 .* TLS +GLOBAL +DEFAULT +8 sg3
 .* TLS +GLOBAL +DEFAULT +8 sg4
@@ -86,18 +84,17 @@ Symbol table '\.dynsym' contains [0-9]+ entries:
 Symbol table '\.symtab' contains [0-9]+ entries:
  +Num: +Value +Size +Type +Bind +Vis +Ndx +Name
 .* NOTYPE +LOCAL +DEFAULT +UND 
-.* SECTION +LOCAL +DEFAULT +1 
-.* SECTION +LOCAL +DEFAULT +2 
-.* SECTION +LOCAL +DEFAULT +3 
-.* SECTION +LOCAL +DEFAULT +4 
-.* SECTION +LOCAL +DEFAULT +5 
-.* SECTION +LOCAL +DEFAULT +6 
-.* SECTION +LOCAL +DEFAULT +7 
-.* SECTION +LOCAL +DEFAULT +8 
-.* SECTION +LOCAL +DEFAULT +9 
-.* SECTION +LOCAL +DEFAULT +10 
-.* SECTION +LOCAL +DEFAULT +11 
-.* SECTION +LOCAL +DEFAULT +12 
+.* SECTION +LOCAL +DEFAULT +1.*
+.* SECTION +LOCAL +DEFAULT +2.*
+.* SECTION +LOCAL +DEFAULT +3.*
+.* SECTION +LOCAL +DEFAULT +4.*
+.* SECTION +LOCAL +DEFAULT +5.*
+.* SECTION +LOCAL +DEFAULT +6.*
+.* SECTION +LOCAL +DEFAULT +7.*
+.* SECTION +LOCAL +DEFAULT +8.*
+.* SECTION +LOCAL +DEFAULT +9.*
+.* SECTION +LOCAL +DEFAULT +10.*
+.* SECTION +LOCAL +DEFAULT +11.*
 .* FILE +LOCAL +DEFAULT +ABS .*
 .* TLS +LOCAL +DEFAULT +8 sl1
 .* TLS +LOCAL +DEFAULT +8 sl2

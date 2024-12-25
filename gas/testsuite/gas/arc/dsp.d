@@ -59,8 +59,6 @@ Disassembly of section .text:
 0x[0-9a-f]+ 282f 00a8           	vabs2h	r0,r2
 0x[0-9a-f]+ 282f 00a9           	vabss2h	r0,r2
 0x[0-9a-f]+ 2a24 0100           	vadd4b	r0,r2,r4
-0x[0-9a-f]+ 2a14 8100           	vadds2h	r0,r2,r4
-0x[0-9a-f]+ 2a16 8100           	vaddsubs2h	r0,r2,r4
 0x[0-9a-f]+ 2a0d 0100           	valgn2h	r0,r2,r4
 0x[0-9a-f]+ 2a21 0100           	vasl2h	r0,r2,r4
 0x[0-9a-f]+ 2a21 8100           	vasls2h	r0,r2,r4
@@ -70,13 +68,13 @@ Disassembly of section .text:
 0x[0-9a-f]+ 282f 00a4           	vext2bhl	r0,r2
 0x[0-9a-f]+ 282f 00a5           	vext2bhm	r0,r2
 0x[0-9a-f]+ 2a23 0100           	vlsr2h	r0,r2,r4
-0x[0-9a-f]+ 2a1e 0100           	vmac2h	r0,r2,r4
+0x[0-9a-f]+ 2a1e 0100           	vmac2h	r0r1,r2,r4
 0x[0-9a-f]+ 2a1e 8100           	vmac2hf	r0,r2,r4
 0x[0-9a-f]+ 2a1f 8100           	vmac2hfr	r0,r2,r4
 0x[0-9a-f]+ 2a1f 0100           	vmac2hu	r0,r2,r4
 0x[0-9a-f]+ 2a24 8100           	vmax2h	r0,r2,r4
 0x[0-9a-f]+ 2a25 8100           	vmin2h	r0,r2,r4
-0x[0-9a-f]+ 2a1c 0100           	vmpy2h	r0,r2,r4
+0x[0-9a-f]+ 2a1c 0100           	vmpy2h	r0r1,r2,r4
 0x[0-9a-f]+ 2a1c 8100           	vmpy2hf	r0,r2,r4
 0x[0-9a-f]+ 2a1d 8100           	vmpy2hfr	r0,r2,r4
 0x[0-9a-f]+ 2a1d 0100           	vmpy2hu	r0,r2,r4
@@ -92,5 +90,3 @@ Disassembly of section .text:
 0x[0-9a-f]+ 282f 00a6           	vsext2bhl	r0,r2
 0x[0-9a-f]+ 282f 00a7           	vsext2bhm	r0,r2
 0x[0-9a-f]+ 2a25 0100           	vsub4b	r0,r2,r4
-0x[0-9a-f]+ 2a17 8100           	vsubadds2h	r0,r2,r4
-0x[0-9a-f]+ 2a15 8100           	vsubs2h	r0,r2,r4

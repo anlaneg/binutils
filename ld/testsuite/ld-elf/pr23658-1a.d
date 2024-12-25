@@ -3,16 +3,13 @@
 #source: pr23658-1c.s
 #source: pr23658-1d.s
 #source: start.s
-#ld: --build-id
+#ld: --build-id --no-rosegment
 #readelf: -l --wide
 # Since generic linker targets don't place SHT_NOTE sections as orphan,
 # SHT_NOTE sections aren't grouped nor sorted.
-#xfail: d30v-* dlx-* fr30-* frv-*-elf ft32-* iq2000-*
-#xfail: m68hc12-* mn10200-* moxie-* mt-* msp430-* pj-* xgate-*
-# The following targets don't support --build-id.
-#xfail: cr16-* crx-* visium-* xc16x-*
+#xfail: [uses_genelf]
 # The following targets place .note.gnu.build-id in unusual places.
-#xfail: pru-*
+#xfail: d10v-* pru-*
 
 #...
  +[0-9]+ +\.note\.4 \.note\.1 +

@@ -1,6 +1,6 @@
 /* Target-dependent, architecture-independent code for DICOS, for GDB.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,17 +17,17 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "osabi.h"
 #include "solib.h"
 #include "solib-target.h"
 #include "inferior.h"
 #include "dicos-tdep.h"
+#include "gdbarch.h"
 
 void
 dicos_init_abi (struct gdbarch *gdbarch)
 {
-  set_solib_ops (gdbarch, &solib_target_so_ops);
+  set_gdbarch_so_ops (gdbarch, &solib_target_so_ops);
 
   /* Every process, although has its own address space, sees the same
      list of shared libraries.  There's no "main executable" in DICOS,
@@ -69,7 +69,7 @@ dicos_load_module_p (bfd *abfd, int header_size)
   if (!section)
     return 0;
 
-  if (bfd_section_size (abfd, section) != header_size)
+  if (bfd_section_size (section) != header_size)
     return 0;
 
   /* Dicos LMs always have a "Dicos_loadModuleInfo" symbol

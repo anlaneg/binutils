@@ -13,7 +13,7 @@ test -z "${BIG_OUTPUT_FORMAT}" && BIG_OUTPUT_FORMAT=${OUTPUT_FORMAT}
 test -z "${LITTLE_OUTPUT_FORMAT}" && LITTLE_OUTPUT_FORMAT=${OUTPUT_FORMAT}
 # If we request a big endian toolchain, give a big endian linker
 test -z "$GOT" && GOT=".got          ${RELOCATING-0} : {${RELOCATING+ *(.got.plt)} *(.got) } ${RELOCATING+ > ${DATA_MEMORY}}"
-test "${ARC_ENDIAN}" == "big" && OUTPUT_FORMAT=${BIG_OUTPUT_FORMAT}
+test "${ARC_ENDIAN}" = "big" && OUTPUT_FORMAT=${BIG_OUTPUT_FORMAT}
 if [ -z "$MACHINE" ]; then OUTPUT_ARCH=${ARCH}; else OUTPUT_ARCH=${ARCH}:${MACHINE}; fi
 test -z "${ELFSIZE}" && ELFSIZE=32
 test -z "${ALIGNMENT}" && ALIGNMENT="${ELFSIZE} / 8"
@@ -53,6 +53,16 @@ DTOR=".dtors        ${CONSTRUCTING-0} :
     KEEP (*(.dtors))
     ${CONSTRUCTING+${DTOR_END}}
   } ${RELOCATING+ > ${DATA_MEMORY}}"
+
+IVT="
+ /* If the 'ivtbase_addr' symbol is defined, it indicates  the base address of
+    the interrupt vectors.  See description of INT_VECTOR_BASE register.  */
+
+ .ivt DEFINED (ivtbase_addr) ? ivtbase_addr : ORIGIN(${STARTUP_MEMORY}) :
+ {
+   ${RELOCATING+ PROVIDE (__ivtbase_addr = .); }
+   KEEP (*(.ivt));
+ } ${RELOCATING+ > ${STARTUP_MEMORY}}"
 
 if test -z "${NO_SMALL_DATA}"; then
   SBSS=".sbss         ${RELOCATING-0} :
@@ -94,26 +104,26 @@ fi
 #
 case $GENERIC_BOARD in
   yes|1|YES)
+	test -z "$MEMORY_FILE" && MEMORY_FILE="memory.x"
 	MEMORY_DEF="
 /* Get memory banks definition from some user configuration file.
    This file must be located in some linker directory (search path
    with -L<dir>). See fixed memory banks emulation script.  */
-INCLUDE memory.x;
+INCLUDE ${MEMORY_FILE};
 "
 	;;
   *)
-MEMORY_DEF="
-/* Fixed definition of the available memory banks.
-   See generic emulation script for a user defined configuration.  */
+	MEMORY_DEF="
+__TEXT_REGION_ORIGIN__ = DEFINED(__TEXT_REGION_ORIGIN__) ? __TEXT_REGION_ORIGIN__ : 0x00;
+__TEXT_REGION_LENGTH__ = DEFINED(__TEXT_REGION_LENGTH__) ? __TEXT_REGION_LENGTH__ : ${ICCM_SIZE};
+__DATA_REGION_ORIGIN__ = DEFINED(__DATA_REGION_ORIGIN__) ? __DATA_REGION_ORIGIN__ : ${RAM_START_ADDR};
+__DATA_REGION_LENGTH__ = DEFINED(__DATA_REGION_LENGTH__) ? __DATA_REGION_LENGTH__ : ${RAM_SIZE};
+
 MEMORY
 {
-    ICCM : ORIGIN = 0x00000000, LENGTH = ${ICCM_SIZE}
-    DCCM : ORIGIN = ${RAM_START_ADDR}, LENGTH = ${RAM_SIZE}
+    ICCM : ORIGIN = __TEXT_REGION_ORIGIN__, LENGTH = __TEXT_REGION_LENGTH__
+    DCCM : ORIGIN = __DATA_REGION_ORIGIN__, LENGTH = __DATA_REGION_LENGTH__
 }
-
-/* Setup the stack on the top of the data memory bank.  */
-PROVIDE (__stack_top = (${RAM_START_ADDR} + ${RAM_SIZE} - 1) & -4);
-PROVIDE (__end_heap = ${RAM_START_ADDR} + ${RAM_SIZE} - 1);
 "
 	;;
 esac
@@ -129,15 +139,7 @@ ${RELOCATING+${MEMORY_DEF}}
 
 SECTIONS
 {
-  .ivt 0x00 :
-  {
-   KEEP (*(.ivt));
-  } ${RELOCATING+ > ${STARTUP_MEMORY}}
-
-  .startup 0x100:
-  {
-    KEEP (*crt0.o(.text.__startup))
-  } ${RELOCATING+ > ${STARTUP_MEMORY}}
+  ${RELOCATING+${IVT}}
 
   /* Read-only sections, merged into text segment: */
   ${TEXT_DYNAMIC+${DYNAMIC}}
@@ -175,37 +177,23 @@ SECTIONS
   .rel.bss      ${RELOCATING-0} : { *(.rel.bss${RELOCATING+ .rel.bss.* .rel.gnu.linkonce.b.*}) }
   .rela.bss     ${RELOCATING-0} : { *(.rela.bss${RELOCATING+ .rela.bss.* .rela.gnu.linkonce.b.*}) }
 
-  .jcr : { KEEP (*(.jcr)) } ${RELOCATING+> ${TEXT_MEMORY}}
-  .eh_frame : { KEEP (*(.eh_frame)) } ${RELOCATING+> ${TEXT_MEMORY}}
-  .gcc_except_table : { *(.gcc_except_table${RELOCATING+ .gcc_except_table.*}) } ${RELOCATING+> ${TEXT_MEMORY}}
-  .plt : { *(.plt) } ${RELOCATING+> ${TEXT_MEMORY}}
-  .jlitab :
-  {
-    ${RELOCATING+${JLI_START_TABLE}}
-    ${RELOCATING+jlitab*.o:(.jlitab*)}
-    *(.jlitab${RELOCATING+*})
-  } ${RELOCATING+> ${TEXT_MEMORY}}
-
-  .rodata ${RELOCATING-0} :
-  {
-    *(.rodata) ${RELOCATING+*(.rodata.*)} ${RELOCATING+*(.gnu.linkonce.r.*)}
-  } ${RELOCATING+> ${TEXT_MEMORY}}
-
-  .rodata1      ${RELOCATING-0} : { *(.rodata1) } ${RELOCATING+> ${TEXT_MEMORY}}
-
-  .init         ${RELOCATING-0} :
-  {
-    ${RELOCATING+${INIT_START}}
-    KEEP (*(.init))
-    ${RELOCATING+${INIT_END}}
-  } ${RELOCATING+ > ${TEXT_MEMORY}}  =${NOP-0}
-
   .text         ${RELOCATING-0} :
   {
     ${RELOCATING+${TEXT_START_SYMBOLS}}
 
+    ${RELOCATING+ . = ALIGN(4);}
+    ${RELOCATING+${INIT_START}}
+    KEEP (*(SORT_NONE(.init)))
+    ${RELOCATING+${INIT_END}}
+
+    /* Start here after reset.  */
+    ${RELOCATING+ . = ALIGN(4);}
+    KEEP (*crt0.o(.text.__startup))
+
+    /* Remaining code.  */
+    ${RELOCATING+ . = ALIGN(4);}
     *(.text .stub${RELOCATING+ .text.* .gnu.linkonce.t.*})
-    /* .gnu.warning sections are handled specially by elf32.em.  */
+    /* .gnu.warning sections are handled specially by elf.em.  */
     *(.gnu.warning)
 
     ${RELOCATING+${OTHER_TEXT_SECTIONS}}
@@ -215,13 +203,46 @@ SECTIONS
   .fini         ${RELOCATING-0} :
   {
     ${RELOCATING+${FINI_START}}
-    KEEP (*(.fini))
+    KEEP (*(SORT_NONE(.fini)))
     ${RELOCATING+${FINI_END}}
 
     ${RELOCATING+PROVIDE (__etext = .);}
     ${RELOCATING+PROVIDE (_etext = .);}
     ${RELOCATING+PROVIDE (etext = .);}
   } ${RELOCATING+ > ${TEXT_MEMORY}} =${NOP-0}
+
+  .jcr ${RELOCATING-0} :
+  {
+    KEEP (*(.jcr))
+  } ${RELOCATING+> ${TEXT_MEMORY}}
+
+  .eh_frame ${RELOCATING-0} :
+  {
+    KEEP (*(.eh_frame))
+  } ${RELOCATING+> ${TEXT_MEMORY}}
+
+  .gcc_except_table ${RELOCATING-0} :
+  {
+    *(.gcc_except_table) *(.gcc_except_table.*)
+  } ${RELOCATING+> ${TEXT_MEMORY}}
+
+  .plt ${RELOCATING-0} :
+  {
+    *(.plt)
+  } ${RELOCATING+> ${TEXT_MEMORY}}
+
+  .jlitab ${RELOCATING-0} :
+  {
+    ${RELOCATING+${JLI_START_TABLE}}
+     jlitab*.o:(.jlitab*) *(.jlitab*)
+  } ${RELOCATING+> ${TEXT_MEMORY}}
+
+  .rodata ${RELOCATING-0} :
+  {
+    *(.rodata) ${RELOCATING+*(.rodata.*)} ${RELOCATING+*(.gnu.linkonce.r.*)}
+  } ${RELOCATING+> ${TEXT_MEMORY}}
+
+  .rodata1      ${RELOCATING-0} : { *(.rodata1) } ${RELOCATING+> ${TEXT_MEMORY}}
 
   ${RELOCATING+${OTHER_READONLY_SECTIONS}}
 
@@ -266,55 +287,22 @@ SECTIONS
   /* Global data not cleared after reset.  */
   .noinit ${RELOCATING-0}:
   {
-    *(.noinit*)
+    *(.noinit${RELOCATING+ .noinit.* .gnu.linkonce.n.*})
     ${RELOCATING+. = ALIGN(${ALIGNMENT});}
     ${RELOCATING+ PROVIDE (__start_heap = .) ; }
   } ${RELOCATING+ > ${DATA_MEMORY}}
 
+  ${RELOCATING+ PROVIDE (__stack_top = (ORIGIN (${DATA_MEMORY}) + LENGTH (${DATA_MEMORY}) - 1) & -4);}
+  ${RELOCATING+ PROVIDE (__end_heap = ORIGIN (${DATA_MEMORY}) + LENGTH (${DATA_MEMORY}) - 1);}
 
-  /* Stabs debugging sections.  */
-  .stab          0 : { *(.stab) }
-  .stabstr       0 : { *(.stabstr) }
-  .stab.excl     0 : { *(.stab.excl) }
-  .stab.exclstr  0 : { *(.stab.exclstr) }
-  .stab.index    0 : { *(.stab.index) }
-  .stab.indexstr 0 : { *(.stab.indexstr) }
+  .note.gnu.build-id : { *(.note.gnu.build-id) }
+EOF
 
-  .comment       0 : { *(.comment) }
+source_sh $srcdir/scripttempl/misc-sections.sc
+source_sh $srcdir/scripttempl/DWARF.sc
 
-  /* DWARF debug sections.
-     Symbols in the DWARF debugging sections are relative to the beginning
-     of the section so we begin them at 0.  */
-
-  /* DWARF 1 */
-  .debug          0 : { *(.debug) }
-  .line           0 : { *(.line) }
-
-  /* GNU DWARF 1 extensions */
-  .debug_srcinfo  0 : { *(.debug_srcinfo) }
-  .debug_sfnames  0 : { *(.debug_sfnames) }
-
-  /* DWARF 1.1 and DWARF 2 */
-  .debug_aranges  0 : { *(.debug_aranges) }
-  .debug_pubnames 0 : { *(.debug_pubnames) }
-
-  /* DWARF 2 */
-  .debug_info     0 : { *(.debug_info${RELOCATING+ .gnu.linkonce.wi.*}) }
-  .debug_abbrev   0 : { *(.debug_abbrev) }
-  .debug_line     0 : { *(.debug_line) }
-  .debug_frame    0 : { *(.debug_frame) }
-  .debug_str      0 : { *(.debug_str) }
-  .debug_loc      0 : { *(.debug_loc) }
-  .debug_macinfo  0 : { *(.debug_macinfo) }
-
-  /* DWARF 3 */
-  .debug_pubtypes 0 : { *(.debug_pubtypes) }
-  .debug_ranges   0 : { *(.debug_ranges) }
-
-  /* DWARF Extension.  */
-  .debug_macro    0 : { *(.debug_macro) }
-
+cat <<EOF
   /* ARC Extension Sections */
-  .arcextmap	  0 : { *(.gnu.linkonce.arcextmap.*) }
+  .arcextmap	  0 : { *(.arcextmap.*) }
 }
 EOF

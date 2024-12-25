@@ -1,6 +1,6 @@
 /* Native-dependent code for AMD64.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "gdbarch.h"
 #include "regcache.h"
 
@@ -30,11 +29,11 @@
    the register number as used by GDB and the register set used by the
    host to represent the general-purpose registers; one for 32-bit
    code and one for 64-bit code.  The mappings are specified by the
-   follwing variables and consist of an array of offsets within the
+   following variables and consist of an array of offsets within the
    register set indexed by register number, and the number of
    registers supported by the mapping.  We don't need mappings for the
    floating-point and SSE registers, since the difference between
-   64-bit and 32-bit variants are negligable.  The difference in the
+   64-bit and 32-bit variants are negligible.  The difference in the
    number of SSE registers is already handled by the target code.  */
 
 /* General-purpose register mapping for native 32-bit code.  */
@@ -67,13 +66,6 @@ amd64_native_gregset_reg_offset (struct gdbarch *gdbarch, int regnum)
 
   if (regnum >= num_regs)
     return -1;
-
-  /* Kernels that predate Linux 2.6.25 don't provide access to
-     these segment registers in user_regs_struct.   */
-#ifndef HAVE_STRUCT_USER_REGS_STRUCT_FS_BASE
-  if (regnum == AMD64_FSBASE_REGNUM || regnum == AMD64_GSBASE_REGNUM)
-    return -1;
-#endif
 
   return reg_offset[regnum];
 }
@@ -136,7 +128,7 @@ amd64_collect_native_gregset (const struct regcache *regcache,
       num_regs = amd64_native_gregset32_num_regs;
 
       /* Make sure %eax, %ebx, %ecx, %edx, %esi, %edi, %ebp, %esp and
-         %eip get zero-extended to 64 bits.  */
+	 %eip get zero-extended to 64 bits.  */
       for (i = 0; i <= I386_EIP_REGNUM; i++)
 	{
 	  if (regnum == -1 || regnum == i)

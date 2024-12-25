@@ -1,9 +1,8 @@
 #source: ifunc-16-x86.s
 #as: --64
-#ld: -shared -melf_x86_64
+#ld: -z nomark-plt -shared -melf_x86_64
 #readelf: -r --wide
 #target: x86_64-*-*
-#notarget: x86_64-*-nacl*
 
 Relocation section '.rela.plt' at .*
 [ ]+Offset[ ]+Info[ ]+Type[ ]+.*

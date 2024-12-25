@@ -1,6 +1,6 @@
 /* Target-dependent code for FT32.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
 #include "symtab.h"
 #include "gdbtypes.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbcore.h"
 #include "value.h"
 #include "inferior.h"
@@ -40,7 +40,7 @@
 #include "opcode/ft32.h"
 
 #include "ft32-tdep.h"
-#include "gdb/sim-ft32.h"
+#include "sim/sim-ft32.h"
 #include <algorithm>
 
 #define RAM_BIAS  0x800000  /* Bias added to RAM addresses.  */
@@ -96,10 +96,7 @@ static const char *const ft32_register_names[] =
 static const char *
 ft32_register_name (struct gdbarch *gdbarch, int reg_nr)
 {
-  if (reg_nr < 0)
-    return NULL;
-  if (reg_nr >= FT32_NUM_REGS)
-    return NULL;
+  static_assert (ARRAY_SIZE (ft32_register_names) == FT32_NUM_REGS);
   return ft32_register_names[reg_nr];
 }
 
@@ -109,7 +106,10 @@ static struct type *
 ft32_register_type (struct gdbarch *gdbarch, int reg_nr)
 {
   if (reg_nr == FT32_PC_REGNUM)
-    return gdbarch_tdep (gdbarch)->pc_type;
+    {
+      ft32_gdbarch_tdep *tdep = gdbarch_tdep<ft32_gdbarch_tdep> (gdbarch);
+      return tdep->pc_type;
+    }
   else if (reg_nr == FT32_SP_REGNUM || reg_nr == FT32_FP_REGNUM)
     return builtin_type (gdbarch)->builtin_data_ptr;
   else
@@ -126,7 +126,7 @@ ft32_store_return_value (struct type *type, struct regcache *regcache,
   struct gdbarch *gdbarch = regcache->arch ();
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR regval;
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
 
   /* Things always get returned in RET1_REGNUM, RET2_REGNUM.  */
   regval = extract_unsigned_integer (valbuf, len > 4 ? 4 : len, byte_order);
@@ -144,7 +144,7 @@ ft32_store_return_value (struct type *type, struct regcache *regcache,
 
 static ULONGEST
 ft32_fetch_instruction (CORE_ADDR a, int *isize,
-		        enum bfd_endian byte_order)
+			enum bfd_endian byte_order)
 {
   unsigned int sc[2];
   ULONGEST inst;
@@ -174,8 +174,8 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
   ULONGEST inst;
   int isize = 0;
   int regnum, pushreg;
-  struct bound_minimal_symbol msymbol;
   const int first_saved_reg = 13;	/* The first saved register.  */
+
   /* PROLOGS are addresses of the subroutine prologs, PROLOGS[n]
      is the address of __prolog_$rN.
      __prolog_$rN pushes registers from 13 through n inclusive.
@@ -195,9 +195,10 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
 
       snprintf (prolog_symbol, sizeof (prolog_symbol), "__prolog_$r%02d",
 		regnum);
-      msymbol = lookup_minimal_symbol (prolog_symbol, NULL, NULL);
+      bound_minimal_symbol msymbol
+	= lookup_minimal_symbol (current_program_space, prolog_symbol);
       if (msymbol.minsym)
-	prologs[regnum] = BMSYMBOL_VALUE_ADDRESS (msymbol);
+	prologs[regnum] = msymbol.value_address ();
       else
 	prologs[regnum] = 0;
     }
@@ -297,9 +298,10 @@ ft32_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 	  plg_end = ft32_analyze_prologue (func_addr,
 					   func_end, &cache, gdbarch);
 	  /* Found a function.  */
-	  sym = lookup_symbol (func_name, NULL, VAR_DOMAIN, NULL).symbol;
+	  sym = lookup_symbol (func_name, nullptr, SEARCH_FUNCTION_DOMAIN,
+			       nullptr).symbol;
 	  /* Don't use line number debug info for assembly source files.  */
-	  if ((sym != NULL) && SYMBOL_LANGUAGE (sym) != language_asm)
+	  if ((sym != NULL) && sym->language () != language_asm)
 	    {
 	      sal = find_pc_line (func_addr, 0);
 	      if (sal.end && sal.end < func_end)
@@ -328,7 +330,7 @@ ft32_pointer_to_address (struct gdbarch *gdbarch,
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR addr
-    = extract_unsigned_integer (buf, TYPE_LENGTH (type), byte_order);
+    = extract_unsigned_integer (buf, type->length (), byte_order);
 
   if (TYPE_ADDRESS_CLASS_1 (type))
     return addr;
@@ -341,7 +343,7 @@ ft32_pointer_to_address (struct gdbarch *gdbarch,
    This method maps DW_AT_address_class attributes to a
    type_instance_flag_value.  */
 
-static int
+static type_instance_flags
 ft32_address_class_type_flags (int byte_size, int dwarf2_addr_class)
 {
   /* The value 1 of the DW_AT_address_class attribute corresponds to the
@@ -357,7 +359,8 @@ ft32_address_class_type_flags (int byte_size, int dwarf2_addr_class)
    Convert a type_instance_flag_value to an address space qualifier.  */
 
 static const char*
-ft32_address_class_type_flags_to_name (struct gdbarch *gdbarch, int type_flags)
+ft32_address_class_type_flags_to_name (struct gdbarch *gdbarch,
+				       type_instance_flags type_flags)
 {
   if (type_flags & TYPE_INSTANCE_FLAG_ADDRESS_CLASS_1)
     return "flash";
@@ -369,26 +372,18 @@ ft32_address_class_type_flags_to_name (struct gdbarch *gdbarch, int type_flags)
 
    Convert an address space qualifier to a type_instance_flag_value.  */
 
-static int
+static bool
 ft32_address_class_name_to_type_flags (struct gdbarch *gdbarch,
 				       const char* name,
-				       int *type_flags_ptr)
+				       type_instance_flags *type_flags_ptr)
 {
   if (strcmp (name, "flash") == 0)
     {
       *type_flags_ptr = TYPE_INSTANCE_FLAG_ADDRESS_CLASS_1;
-      return 1;
+      return true;
     }
   else
-    return 0;
-}
-
-/* Implement the "unwind_sp" gdbarch method.  */
-
-static CORE_ADDR
-ft32_unwind_sp (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, FT32_SP_REGNUM);
+    return false;
 }
 
 /* Given a return value in `regbuf' with a type `valtype',
@@ -401,7 +396,7 @@ ft32_extract_return_value (struct type *type, struct regcache *regcache,
   struct gdbarch *gdbarch = regcache->arch ();
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   bfd_byte *valbuf = dst;
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
   ULONGEST tmp;
 
   /* By using store_unsigned_integer we avoid having to do
@@ -425,7 +420,7 @@ ft32_return_value (struct gdbarch *gdbarch, struct value *function,
 		   struct type *valtype, struct regcache *regcache,
 		   gdb_byte *readbuf, const gdb_byte *writebuf)
 {
-  if (TYPE_LENGTH (valtype) > 8)
+  if (valtype->length () > 8)
     return RETURN_VALUE_STRUCT_CONVENTION;
   else
     {
@@ -456,7 +451,7 @@ ft32_alloc_frame_cache (void)
 /* Populate a ft32_frame_cache object for this_frame.  */
 
 static struct ft32_frame_cache *
-ft32_frame_cache (struct frame_info *this_frame, void **this_cache)
+ft32_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct ft32_frame_cache *cache;
   CORE_ADDR current_pc;
@@ -492,19 +487,11 @@ ft32_frame_cache (struct frame_info *this_frame, void **this_cache)
   return cache;
 }
 
-/* Implement the "unwind_pc" gdbarch method.  */
-
-static CORE_ADDR
-ft32_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, FT32_PC_REGNUM);
-}
-
 /* Given a GDB frame, determine the address of the calling function's
    frame.  This will be used to create a new GDB frame struct.  */
 
 static void
-ft32_frame_this_id (struct frame_info *this_frame,
+ft32_frame_this_id (const frame_info_ptr &this_frame,
 		    void **this_prologue_cache, struct frame_id *this_id)
 {
   struct ft32_frame_cache *cache = ft32_frame_cache (this_frame,
@@ -520,7 +507,7 @@ ft32_frame_this_id (struct frame_info *this_frame,
 /* Get the value of register regnum in the previous stack frame.  */
 
 static struct value *
-ft32_frame_prev_register (struct frame_info *this_frame,
+ft32_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_prologue_cache, int regnum)
 {
   struct ft32_frame_cache *cache = ft32_frame_cache (this_frame,
@@ -540,6 +527,7 @@ ft32_frame_prev_register (struct frame_info *this_frame,
 
 static const struct frame_unwind ft32_frame_unwind =
 {
+  "ft32 prologue",
   NORMAL_FRAME,
   default_frame_unwind_stop_reason,
   ft32_frame_this_id,
@@ -551,7 +539,7 @@ static const struct frame_unwind ft32_frame_unwind =
 /* Return the base address of this_frame.  */
 
 static CORE_ADDR
-ft32_frame_base_address (struct frame_info *this_frame, void **this_cache)
+ft32_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct ft32_frame_cache *cache = ft32_frame_cache (this_frame,
 						     this_cache);
@@ -567,21 +555,11 @@ static const struct frame_base ft32_frame_base =
   ft32_frame_base_address
 };
 
-static struct frame_id
-ft32_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  CORE_ADDR sp = get_frame_register_unsigned (this_frame, FT32_SP_REGNUM);
-
-  return frame_id_build (sp, get_frame_pc (this_frame));
-}
-
 /* Allocate and initialize the ft32 gdbarch object.  */
 
 static struct gdbarch *
 ft32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
-  struct gdbarch_tdep *tdep;
   struct type *void_type;
   struct type *func_void_type;
 
@@ -591,18 +569,19 @@ ft32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     return arches->gdbarch;
 
   /* Allocate space for the new architecture.  */
-  tdep = XCNEW (struct gdbarch_tdep);
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new ft32_gdbarch_tdep));
+  ft32_gdbarch_tdep *tdep = gdbarch_tdep<ft32_gdbarch_tdep> (gdbarch);
 
   /* Create a type for PC.  We can't use builtin types here, as they may not
      be defined.  */
-  void_type = arch_type (gdbarch, TYPE_CODE_VOID, TARGET_CHAR_BIT, "void");
+  type_allocator alloc (gdbarch);
+  void_type = alloc.new_type (TYPE_CODE_VOID, TARGET_CHAR_BIT, "void");
   func_void_type = make_function_type (void_type, NULL);
-  tdep->pc_type = arch_pointer_type (gdbarch, 4 * TARGET_CHAR_BIT, NULL,
+  tdep->pc_type = init_pointer_type (alloc, 4 * TARGET_CHAR_BIT, NULL,
 				     func_void_type);
-  TYPE_INSTANCE_FLAGS (tdep->pc_type) |= TYPE_INSTANCE_FLAG_ADDRESS_CLASS_1;
-
-  set_gdbarch_unwind_sp (gdbarch, ft32_unwind_sp);
+  tdep->pc_type->set_instance_flags (tdep->pc_type->instance_flags ()
+				     | TYPE_INSTANCE_FLAG_ADDRESS_CLASS_1);
 
   set_gdbarch_num_regs (gdbarch, FT32_NUM_REGS);
   set_gdbarch_sp_regnum (gdbarch, FT32_SP_REGNUM);
@@ -621,13 +600,6 @@ ft32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_frame_align (gdbarch, ft32_frame_align);
 
   frame_base_set_default (gdbarch, &ft32_frame_base);
-
-  /* Methods for saving / extracting a dummy frame's ID.  The ID's
-     stack address must match the SP value returned by
-     PUSH_DUMMY_CALL, and saved by generic_save_dummy_frame_tos.  */
-  set_gdbarch_dummy_id (gdbarch, ft32_dummy_id);
-
-  set_gdbarch_unwind_pc (gdbarch, ft32_unwind_pc);
 
   /* Hook in ABI-specific overrides, if they have been registered.  */
   gdbarch_init_osabi (info, gdbarch);
@@ -649,8 +621,9 @@ ft32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
 /* Register this machine's init routine.  */
 
+void _initialize_ft32_tdep ();
 void
-_initialize_ft32_tdep (void)
+_initialize_ft32_tdep ()
 {
-  register_gdbarch_init (bfd_arch_ft32, ft32_gdbarch_init);
+  gdbarch_register (bfd_arch_ft32, ft32_gdbarch_init);
 }

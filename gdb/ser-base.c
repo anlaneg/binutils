@@ -1,6 +1,6 @@
 /* Generic serial interface functions.
 
-   Copyright (C) 1992-2019 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "event-top.h"
 #include "serial.h"
 #include "ser-base.h"
-#include "event-loop.h"
+#include "gdbsupport/event-loop.h"
 
-#include "gdb_select.h"
-#include "common/gdb_sys_time.h"
+#include "gdbsupport/gdb_select.h"
+#include "gdbsupport/gdb_sys_time.h"
 #ifdef USE_WIN32API
 #include <winsock2.h>
 #endif
@@ -43,17 +43,18 @@ static handler_func fd_event;
 
 /* Value of scb->async_state: */
 enum {
-  /* >= 0 (TIMER_SCHEDULED) */
-  /* The ID of the currently scheduled timer event.  This state is
-     rarely encountered.  Timer events are one-off so as soon as the
-     event is delivered the state is shanged to NOTHING_SCHEDULED.  */
-  FD_SCHEDULED = -1,
+  /* When >= 0, this contains the ID of the currently scheduled timer event.
+     This state is rarely encountered.  Timer events are one-off so as soon as
+     the event is delivered the state is changed to NOTHING_SCHEDULED.  */
+
   /* The fd_event() handler is scheduled.  It is called when ever the
      file descriptor becomes ready.  */
-  NOTHING_SCHEDULED = -2
+  FD_SCHEDULED = -1,
+
   /* Either no task is scheduled (just going into ASYNC mode) or a
      timer event has just gone off and the current state has been
      forced into nothing scheduled.  */
+  NOTHING_SCHEDULED = -2
 };
 
 /* Identify and schedule the next ASYNC task based on scb->async_state
@@ -82,7 +83,7 @@ reschedule (struct serial *scb)
 	case NOTHING_SCHEDULED:
 	  if (scb->bufcnt == 0)
 	    {
-	      add_file_handler (scb->fd, fd_event, scb);
+	      add_file_handler (scb->fd, fd_event, scb, "serial");
 	      next_state = FD_SCHEDULED;
 	    }
 	  else
@@ -94,7 +95,7 @@ reschedule (struct serial *scb)
 	  if (scb->bufcnt == 0)
 	    {
 	      delete_timer (scb->async_state);
-	      add_file_handler (scb->fd, fd_event, scb);
+	      add_file_handler (scb->fd, fd_event, scb, "serial");
 	      next_state = FD_SCHEDULED;
 	    }
 	  else
@@ -107,13 +108,13 @@ reschedule (struct serial *scb)
 	    {
 	    case FD_SCHEDULED:
 	      if (scb->async_state != FD_SCHEDULED)
-		fprintf_unfiltered (gdb_stdlog, "[fd%d->fd-scheduled]\n",
-				    scb->fd);
+		gdb_printf (gdb_stdlog, "[fd%d->fd-scheduled]\n",
+			    scb->fd);
 	      break;
 	    default: /* TIMER SCHEDULED */
 	      if (scb->async_state == FD_SCHEDULED)
-		fprintf_unfiltered (gdb_stdlog, "[fd%d->timer-scheduled]\n",
-				    scb->fd);
+		gdb_printf (gdb_stdlog, "[fd%d->timer-scheduled]\n",
+			    scb->fd);
 	      break;
 	    }
 	}
@@ -147,7 +148,7 @@ run_async_handler_and_reschedule (struct serial *scb)
 /* FD_EVENT: This is scheduled when the input FIFO is empty (and there
    is no pending error).  As soon as data arrives, it is read into the
    input FIFO and the client notified.  The client should then drain
-   the FIFO using readchar().  If the FIFO isn't immediatly emptied,
+   the FIFO using readchar().  If the FIFO isn't immediately emptied,
    push_event() is used to nag the client until it is.  */
 
 static void
@@ -161,8 +162,8 @@ fd_event (int error, void *context)
   else if (scb->bufcnt == 0)
     {
       /* Prime the input FIFO.  The readchar() function is used to
-         pull characters out of the buffer.  See also
-         generic_readchar().  */
+	 pull characters out of the buffer.  See also
+	 generic_readchar().  */
       int nr;
 
       do
@@ -191,7 +192,7 @@ fd_event (int error, void *context)
 /* PUSH_EVENT: The input FIFO is non-empty (or there is a pending
    error).  Nag the client until all the data has been read.  In the
    case of errors, the client will need to close or de-async the
-   device before naging stops.  */
+   device before nagging stops.  */
 
 static void
 push_event (void *context)
@@ -221,8 +222,8 @@ ser_base_wait_for (struct serial *scb, int timeout)
       int nfds;
 
       /* NOTE: Some OS's can scramble the READFDS when the select()
-         call fails (ex the kernel with Red Hat 5.2).  Initialize all
-         arguments before each call.  */
+	 call fails (ex the kernel with Red Hat 5.2).  Initialize all
+	 arguments before each call.  */
 
       tv.tv_sec = timeout;
       tv.tv_usec = 0;
@@ -305,12 +306,12 @@ ser_base_read_error_fd (struct serial *scb, int close_fd)
 	  while ((newline = strstr (current, "\n")) != NULL)
 	    {
 	      *newline = '\0';
-	      fputs_unfiltered (current, gdb_stderr);
-	      fputs_unfiltered ("\n", gdb_stderr);
+	      gdb_puts (current, gdb_stderr);
+	      gdb_puts ("\n", gdb_stderr);
 	      current = newline + 1;
 	    }
 
-	  fputs_unfiltered (current, gdb_stderr);
+	  gdb_puts (current, gdb_stderr);
        }
     }
 }
@@ -349,11 +350,11 @@ do_ser_base_readchar (struct serial *scb, int timeout)
   while (1)
     {
       /* N.B. The UI may destroy our world (for instance by calling
-         remote_stop,) in which case we want to get out of here as
-         quickly as possible.  It is not safe to touch scb, since
-         someone else might have freed it.  The
-         deprecated_ui_loop_hook signals that we should exit by
-         returning 1.  */
+	 remote_stop,) in which case we want to get out of here as
+	 quickly as possible.  It is not safe to touch scb, since
+	 someone else might have freed it.  The
+	 deprecated_ui_loop_hook signals that we should exit by
+	 returning 1.  */
 
       if (deprecated_ui_loop_hook)
 	{
@@ -363,15 +364,15 @@ do_ser_base_readchar (struct serial *scb, int timeout)
 
       status = ser_base_wait_for (scb, delta);
       if (timeout > 0)
-        timeout -= delta;
+	timeout -= delta;
 
       /* If we got a character or an error back from wait_for, then we can 
-         break from the loop before the timeout is completed.  */
+	 break from the loop before the timeout is completed.  */
       if (status != SERIAL_TIMEOUT)
 	break;
 
       /* If we have exhausted the original timeout, then generate
-         a SERIAL_TIMEOUT, and pass it out of the loop.  */
+	 a SERIAL_TIMEOUT, and pass it out of the loop.  */
       else if (timeout == 0)
 	{
 	  status = SERIAL_TIMEOUT;
@@ -396,7 +397,7 @@ do_ser_base_readchar (struct serial *scb, int timeout)
   if (status <= 0)
     {
       if (status == 0)
-        return SERIAL_EOF;
+	return SERIAL_EOF;
       else
 	/* Got an error from read.  */
 	return SERIAL_ERROR;	
@@ -418,7 +419,7 @@ do_ser_base_readchar (struct serial *scb, int timeout)
    pre-reads the input into that FIFO.  Once that has been emptied,
    further data is obtained by polling the input FD using the device
    specific readchar() function.  Note: reschedule() is called after
-   every read.  This is because there is no guarentee that the lower
+   every read.  This is because there is no guarantee that the lower
    level fd_event() poll_event() code (which also calls reschedule())
    will be called.  */
 
@@ -470,7 +471,7 @@ ser_base_readchar (struct serial *scb, int timeout)
   return generic_readchar (scb, timeout, do_ser_base_readchar);
 }
 
-int
+void
 ser_base_write (struct serial *scb, const void *buf, size_t count)
 {
   const char *str = (const char *) buf;
@@ -486,12 +487,11 @@ ser_base_write (struct serial *scb, const void *buf, size_t count)
 	{
 	  if (errno == EINTR)
 	    continue;
-	  return 1;
+	  perror_with_name ("error while writing");
 	}
       count -= cc;
       str += cc;
     }
-  return 0;
 }
 
 int
@@ -513,10 +513,9 @@ ser_base_flush_input (struct serial *scb)
     return SERIAL_ERROR;
 }
 
-int
+void
 ser_base_send_break (struct serial *scb)
 {
-  return 0;
 }
 
 int
@@ -560,10 +559,10 @@ ser_base_print_tty_state (struct serial *scb,
   return;
 }
 
-int
+void
 ser_base_setbaudrate (struct serial *scb, int rate)
 {
-  return 0;			/* Never fails!  */
+  /* Never fails!  */
 }
 
 int
@@ -591,18 +590,18 @@ ser_base_async (struct serial *scb,
       /* Force a re-schedule.  */
       scb->async_state = NOTHING_SCHEDULED;
       if (serial_debug_p (scb))
-	fprintf_unfiltered (gdb_stdlog, "[fd%d->asynchronous]\n",
-			    scb->fd);
+	gdb_printf (gdb_stdlog, "[fd%d->asynchronous]\n",
+		    scb->fd);
       reschedule (scb);
 
       if (scb->error_fd != -1)
-	add_file_handler (scb->error_fd, handle_error_fd, scb);
+	add_file_handler (scb->error_fd, handle_error_fd, scb, "serial-error");
     }
   else
     {
       if (serial_debug_p (scb))
-	fprintf_unfiltered (gdb_stdlog, "[fd%d->synchronous]\n",
-			    scb->fd);
+	gdb_printf (gdb_stdlog, "[fd%d->synchronous]\n",
+		    scb->fd);
       /* De-schedule whatever tasks are currently scheduled.  */
       switch (scb->async_state)
 	{

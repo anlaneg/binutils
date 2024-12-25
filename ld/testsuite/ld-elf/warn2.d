@@ -1,13 +1,11 @@
 #source: start.s
 #source: symbol2ref.s
 #source: symbol2w.s
-#ld: -T group.ld
+#ld: -T group.ld --no-warn-rwx-segments
 #warning: ^[^\n]*\.[obj]+: warning: function 'Foo' used$
 #readelf: -s
-#notarget: "sparc64-*-solaris2*" "sparcv9-*-solaris2*"
-#xfail: d30v-*-* dlx-*-* fr30-*-* frv-*-elf ft32-*-*
-#xfail: iq*-*-* mn10200-*-* moxie-*-* msp*-*-* mt-*-* pj*-*-* xgate-*-*
-# if not using elf32.em, you don't get fancy section handling
+# if not using elf.em, you don't get fancy section handling
+#xfail: [uses_genelf]
 
 # Check that warnings are generated for the symbols in .gnu.warning
 # construct and that the symbol still appears as expected.

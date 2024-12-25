@@ -1,4 +1,4 @@
-# Copyright (C) 2017-2019 Free Software Foundation, Inc.
+# Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,21 +18,20 @@
 load_lib "d-support.exp"
 load_lib "dwarf.exp"
 
-if { [skip_d_tests] } { return -1 }
-
-# This test can only be run on targets which support DWARF-2 and use gas.
-if {![dwarf2_support]} {
-    return 0
-}
+require allow_d_tests dwarf2_support
 
 standard_testfile watch-loc.c watch-loc-dw.S
+
+lassign [function_range _Dmain ${srcdir}/${subdir}/${srcfile}] \
+    dmain_start dmain_length
+
 
 # Make some DWARF for the test.
 set asm_file [standard_output_file $srcfile2]
 Dwarf::assemble $asm_file {
-    global srcdir subdir srcfile
+    global dmain_start dmain_length
 
-    cu {} {
+    cu { label cu_start } {
 	compile_unit {
 	    {language @DW_LANG_D}
 	} {
@@ -56,11 +55,15 @@ Dwarf::assemble $asm_file {
 		}
 
 		subprogram {
-		    {MACRO_AT_func { "_Dmain" "${srcdir}/${subdir}/${srcfile}" }}
+		    {MACRO_AT_func { "_Dmain" }}
 		    {external 1 flag_present}
 		}
 	    }
 	}
+    }
+
+    aranges {} cu_start {
+	arange {} $dmain_start $dmain_length
     }
 }
 

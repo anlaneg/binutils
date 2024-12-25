@@ -1,6 +1,6 @@
 /* <proc_service.h> implementation.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 
 #include "gdbcore.h"
 #include "inferior.h"
@@ -42,7 +41,8 @@
 static CORE_ADDR
 ps_addr_to_core_addr (psaddr_t addr)
 {
-  if (exec_bfd && bfd_get_sign_extend_vma (exec_bfd))
+  if (current_program_space->exec_bfd ()
+      && bfd_get_sign_extend_vma (current_program_space->exec_bfd ()))
     return (intptr_t) addr;
   else
     return (uintptr_t) addr;
@@ -53,7 +53,8 @@ ps_addr_to_core_addr (psaddr_t addr)
 static psaddr_t
 core_addr_to_ps_addr (CORE_ADDR addr)
 {
-  if (exec_bfd && bfd_get_sign_extend_vma (exec_bfd))
+  if (current_program_space->exec_bfd ()
+      && bfd_get_sign_extend_vma (current_program_space->exec_bfd ()))
     return (psaddr_t) (intptr_t) addr;
   else
     return (psaddr_t) (uintptr_t) addr;
@@ -70,17 +71,15 @@ static ps_err_e
 ps_xfer_memory (const struct ps_prochandle *ph, psaddr_t addr,
 		gdb_byte *buf, size_t len, int write)
 {
-  scoped_restore save_inferior_ptid = make_scoped_restore (&inferior_ptid);
-  int ret;
+  scoped_restore_current_inferior_for_memory save_inferior (ph->thread->inf);
+
   CORE_ADDR core_addr = ps_addr_to_core_addr (addr);
 
-  inferior_ptid = ph->thread->ptid;
-
+  int ret;
   if (write)
     ret = target_write_memory (core_addr, buf, len);
   else
     ret = target_read_memory (core_addr, buf, len);
-
   return (ret == 0 ? PS_OK : PS_ERR);
 }
 
@@ -100,11 +99,12 @@ ps_pglobal_lookup (struct ps_prochandle *ph, const char *obj,
   set_current_program_space (inf->pspace);
 
   /* FIXME: kettenis/2000-09-03: What should we do with OBJ?  */
-  bound_minimal_symbol ms = lookup_minimal_symbol (name, NULL, NULL);
+  bound_minimal_symbol ms
+    = lookup_minimal_symbol (current_program_space, name);
   if (ms.minsym == NULL)
     return PS_NOSYM;
 
-  *sym_addr = core_addr_to_ps_addr (BMSYMBOL_VALUE_ADDRESS (ms));
+  *sym_addr = core_addr_to_ps_addr (ms.value_address ());
   return PS_OK;
 }
 
@@ -129,16 +129,14 @@ ps_pdwrite (struct ps_prochandle *ph, psaddr_t addr,
 /* Get a regcache for LWPID using its inferior's "main" architecture,
    which is the register set libthread_db expects to be using.  In
    multi-arch debugging scenarios, the thread's architecture may
-   differ from the inferior's "main" architecture.  E.g., in the Cell
-   combined debugger, if GDB happens to interrupt SPU code, the
-   thread's architecture is SPU, and the main architecture is
-   PowerPC.  */
+   differ from the inferior's "main" architecture.  */
 
 static struct regcache *
 get_ps_regcache (struct ps_prochandle *ph, lwpid_t lwpid)
 {
   inferior *inf = ph->thread->inf;
-  return get_thread_arch_regcache (ptid_t (inf->pid, lwpid), inf->gdbarch);
+  return get_thread_arch_regcache (inf, ptid_t (inf->pid, lwpid),
+				   inf->arch ());
 }
 
 /* Get the general registers of LWP LWPID within the target process PH
@@ -208,8 +206,9 @@ ps_getpid (struct ps_prochandle *ph)
   return ph->thread->ptid.pid ();
 }
 
+void _initialize_proc_service ();
 void
-_initialize_proc_service (void)
+_initialize_proc_service ()
 {
   /* This function solely exists to make sure this module is linked
      into the final binary.  */

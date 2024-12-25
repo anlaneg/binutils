@@ -1,5 +1,5 @@
 /* elfcomm.h -- include file of common code for ELF format file.
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 
    Originally developed by Eric Youngdale <eric@andante.jic.com>
    Modifications by Nick Clifton <nickc@redhat.com>
@@ -26,20 +26,18 @@
 
 #include "aout/ar.h"
 
-void error (const char *, ...) ATTRIBUTE_PRINTF_1;
-void warn (const char *, ...) ATTRIBUTE_PRINTF_1;
+extern void error (const char *, ...) ATTRIBUTE_PRINTF_1;
+extern void warn (const char *, ...) ATTRIBUTE_PRINTF_1;
+extern void inform (const char *, ...) ATTRIBUTE_PRINTF_1;
 
-typedef unsigned HOST_WIDEST_INT elf_vma;
+extern void (*byte_put) (unsigned char *, uint64_t, unsigned int);
+extern void byte_put_little_endian (unsigned char *, uint64_t, unsigned int);
+extern void byte_put_big_endian (unsigned char *, uint64_t, unsigned int);
 
-extern void (*byte_put) (unsigned char *, elf_vma, int);
-extern void byte_put_little_endian (unsigned char *, elf_vma, int);
-extern void byte_put_big_endian (unsigned char *, elf_vma, int);
-
-extern elf_vma (*byte_get) (const unsigned char *, int);
-extern elf_vma byte_get_signed (const unsigned char *, int);
-extern elf_vma byte_get_little_endian (const unsigned char *, int);
-extern elf_vma byte_get_big_endian (const unsigned char *, int);
-extern void byte_get_64 (const unsigned char *, elf_vma *, elf_vma *);
+extern uint64_t (*byte_get) (const unsigned char *, unsigned int);
+extern uint64_t byte_get_signed (const unsigned char *, unsigned int);
+extern uint64_t byte_get_little_endian (const unsigned char *, unsigned int);
+extern uint64_t byte_get_big_endian (const unsigned char *, unsigned int);
 
 #define BYTE_PUT(field, val)	byte_put (field, val, sizeof (field))
 #define BYTE_GET(field)		byte_get (field, sizeof (field))
@@ -47,26 +45,24 @@ extern void byte_get_64 (const unsigned char *, elf_vma *, elf_vma *);
 
 /* This is just a bit of syntatic sugar.  */
 #define streq(a,b)	  (strcmp ((a), (b)) == 0)
-#define strneq(a,b,n)	  (strncmp ((a), (b), (n)) == 0)
-#define const_strneq(a,b) (strncmp ((a), (b), sizeof (b) - 1) == 0)
 
 /* Structure to hold information about an archive file.  */
 
 struct archive_info
 {
-  char * file_name;                     /* Archive file name.  */
-  FILE * file;                          /* Open file descriptor.  */
-  elf_vma index_num;                    /* Number of symbols in table.  */
-  elf_vma * index_array;                /* The array of member offsets.  */
-  char * sym_table;                     /* The symbol table.  */
-  unsigned long sym_size;               /* Size of the symbol table.  */
-  char * longnames;                     /* The long file names table.  */
-  unsigned long longnames_size;         /* Size of the long file names table.  */
-  unsigned long nested_member_origin;   /* Origin in the nested archive of the current member.  */
-  unsigned long next_arhdr_offset;      /* Offset of the next archive header.  */
-  bfd_boolean is_thin_archive;          /* TRUE if this is a thin archive.  */
-  bfd_boolean uses_64bit_indices;       /* TRUE if the index table uses 64bit entries.  */
-  struct ar_hdr arhdr;                  /* Current archive header.  */
+  char *file_name;               /* Archive file name.  */
+  FILE *file;                    /* Open file descriptor.  */
+  uint64_t index_num;            /* Number of symbols in table.  */
+  uint64_t *index_array;         /* The array of member offsets.  */
+  char *sym_table;               /* The symbol table.  */
+  uint64_t sym_size;             /* Size of the symbol table.  */
+  char *longnames;               /* The long file names table.  */
+  uint64_t longnames_size;       /* Size of the long file names table.  */
+  uint64_t nested_member_origin; /* Origin in the nested archive of the current member.  */
+  uint64_t next_arhdr_offset;    /* Offset of the next archive header.  */
+  int is_thin_archive;           /* 1 if this is a thin archive.  */
+  int uses_64bit_indices;        /* 1 if the index table uses 64bit entries.  */
+  struct ar_hdr arhdr;           /* Current archive header.  */
 };
 
 /* Return the path name for a proxy entry in a thin archive.  */
@@ -74,7 +70,7 @@ extern char *adjust_relative_path (const char *, const char *, unsigned long);
 
 /* Read the symbol table and long-name table from an archive.  */
 extern int setup_archive (struct archive_info *, const char *, FILE *,
-			  bfd_boolean, bfd_boolean);
+			  off_t, int, int);
 
 /* Open and setup a nested archive, if not already open.  */
 extern int setup_nested_archive (struct archive_info *, const char *);

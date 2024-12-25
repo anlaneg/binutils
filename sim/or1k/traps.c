@@ -1,5 +1,5 @@
 /* OpenRISC exception, interrupts, syscall and trap support
-   Copyright (C) 2017-2019 Free Software Foundation, Inc.
+   Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
    This file is part of GDB, the GNU debugger.
 
@@ -16,10 +16,15 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define WANT_CPU_OR1K32BF
 #define WANT_CPU
 
 #include "sim-main.h"
+#include "sim-fpu.h"
+#include "sim-signal.h"
 #include "cgen-ops.h"
 
 /* Implement the sim invalid instruction function.  This will set the error
@@ -101,7 +106,7 @@ or1k32bf_fpu_error (CGEN_FPU* fpu, int status)
 	     per-instruction callbacks are not triggered which would allow
 	     us to track the PC.  This means we cannot track which
 	     instruction caused the FPU error.  */
-	  if (STATE_RUN_FAST_P (sd) == 1)
+	  if (!PROFILE_ANY_P (current_cpu) && !TRACE_ANY_P (current_cpu))
 	    sim_io_eprintf
 	      (sd, "WARNING: ignoring fpu error caught in fast mode.\n");
 	  else
@@ -119,6 +124,7 @@ void
 or1k32bf_exception (sim_cpu *current_cpu, USI pc, USI exnum)
 {
   SIM_DESC sd = CPU_STATE (current_cpu);
+  struct or1k_sim_cpu *or1k_cpu = OR1K_SIM_CPU (current_cpu);
 
   if (exnum == EXCEPT_TRAP)
     {
@@ -128,6 +134,7 @@ or1k32bf_exception (sim_cpu *current_cpu, USI pc, USI exnum)
     }
   else
     {
+      IADDR handler_pc;
 
       /* Calculate the exception program counter.  */
       switch (exnum)
@@ -137,14 +144,14 @@ or1k32bf_exception (sim_cpu *current_cpu, USI pc, USI exnum)
 
 	case EXCEPT_FPE:
 	case EXCEPT_SYSCALL:
-	  SET_H_SYS_EPCR0 (pc + 4 - (current_cpu->delay_slot ? 4 : 0));
+	  SET_H_SYS_EPCR0 (pc + 4 - (or1k_cpu->delay_slot ? 4 : 0));
 	  break;
 
 	case EXCEPT_BUSERR:
 	case EXCEPT_ALIGN:
 	case EXCEPT_ILLEGAL:
 	case EXCEPT_RANGE:
-	  SET_H_SYS_EPCR0 (pc - (current_cpu->delay_slot ? 4 : 0));
+	  SET_H_SYS_EPCR0 (pc - (or1k_cpu->delay_slot ? 4 : 0));
 	  break;
 
 	default:
@@ -157,13 +164,13 @@ or1k32bf_exception (sim_cpu *current_cpu, USI pc, USI exnum)
       SET_H_SYS_ESR0 (GET_H_SYS_SR ());
 
       /* Indicate in SR if the failed instruction is in delay slot or not.  */
-      SET_H_SYS_SR_DSX (current_cpu->delay_slot);
+      SET_H_SYS_SR_DSX (or1k_cpu->delay_slot);
 
-      current_cpu->next_delay_slot = 0;
+      or1k_cpu->next_delay_slot = 0;
 
       /* Jump program counter into handler.  */
-      IADDR handler_pc =
-	(GET_H_SYS_SR_EPH ()? 0xf0000000 : 0x00000000) + (exnum << 8);
+      handler_pc =
+	(GET_H_SYS_SR_EPH () ? 0xf0000000 : 0x00000000) + (exnum << 8);
 
       sim_engine_restart (sd, current_cpu, NULL, handler_pc);
     }
@@ -175,10 +182,12 @@ or1k32bf_exception (sim_cpu *current_cpu, USI pc, USI exnum)
 void
 or1k32bf_rfe (sim_cpu *current_cpu)
 {
+  struct or1k_sim_cpu *or1k_cpu = OR1K_SIM_CPU (current_cpu);
+
   SET_H_SYS_SR (GET_H_SYS_ESR0 ());
   SET_H_SYS_SR_FO (1);
 
-  current_cpu->next_delay_slot = 0;
+  or1k_cpu->next_delay_slot = 0;
 
   sim_engine_restart (CPU_STATE (current_cpu), current_cpu, NULL,
 		      GET_H_SYS_EPCR0 ());
@@ -191,6 +200,7 @@ USI
 or1k32bf_mfspr (sim_cpu *current_cpu, USI addr)
 {
   SIM_DESC sd = CPU_STATE (current_cpu);
+  SI val;
 
   if (!GET_H_SYS_SR_SM () && !GET_H_SYS_SR_SUMRA ())
     {
@@ -202,7 +212,7 @@ or1k32bf_mfspr (sim_cpu *current_cpu, USI addr)
   if (addr >= NUM_SPR)
     goto bad_address;
 
-  SI val = GET_H_SPR (addr);
+  val = GET_H_SPR (addr);
 
   switch (addr)
     {
@@ -240,6 +250,7 @@ void
 or1k32bf_mtspr (sim_cpu *current_cpu, USI addr, USI val)
 {
   SIM_DESC sd = CPU_STATE (current_cpu);
+  struct or1k_sim_cpu *or1k_cpu = OR1K_SIM_CPU (current_cpu);
 
   if (!GET_H_SYS_SR_SM () && !GET_H_SYS_SR_SUMRA ())
     {
@@ -269,9 +280,9 @@ or1k32bf_mtspr (sim_cpu *current_cpu, USI addr, USI val)
       break;
 
     case SPR_ADDR (SYS, NPC):
-      current_cpu->next_delay_slot = 0;
+      or1k_cpu->next_delay_slot = 0;
 
-      sim_engine_restart (CPU_STATE (current_cpu), current_cpu, NULL, val);
+      sim_engine_restart (sd, current_cpu, NULL, val);
       break;
 
     case SPR_ADDR (TICK, TTMR):

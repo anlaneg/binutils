@@ -1,9 +1,9 @@
 /* Native-dependent code for x86 (i386 and x86-64).
 
-   Low level functions to implement Oeprating System specific
+   Low level functions to implement Operating System specific
    code to manipulate x86 debug registers.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,8 +20,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef X86_NAT_H
-#define X86_NAT_H 1
+#ifndef GDB_X86_NAT_H
+#define GDB_X86_NAT_H
 
 #include "breakpoint.h"
 #include "nat/x86-dregs.h"
@@ -39,6 +39,11 @@ extern void x86_set_debug_register_length (int len);
 /* Use this function to reset the x86-nat.c debug register state.  */
 
 extern void x86_cleanup_dregs (void);
+
+/* Return the debug register state for process PID.  If no existing
+   state is found for this process, return nullptr.  */
+
+struct x86_debug_reg_state *x86_lookup_debug_reg_state (pid_t pid);
 
 /* Called whenever GDB is no longer debugging process PID.  It deletes
    data structures that keep track of debug register state.  */
@@ -109,4 +114,4 @@ struct x86_nat_target : public BaseTarget
   { return x86_stopped_by_hw_breakpoint (); }
 };
 
-#endif /* X86_NAT_H */
+#endif /* GDB_X86_NAT_H */

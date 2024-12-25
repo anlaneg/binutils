@@ -1,5 +1,5 @@
 /* ECOFF object file format.
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
    This file was put together by Ian Lance Taylor <ian@cygnus.com>.
 
@@ -25,6 +25,7 @@
 #include "coff/internal.h"
 #include "bfd/libcoff.h"
 #include "bfd/libecoff.h"
+#include "bfd/ecoff-bfd.h"
 
 /* Almost all of the ECOFF support is actually in ecoff.c in the main
    gas directory.  This file mostly just arranges to call that one at
@@ -90,15 +91,15 @@ ecoff_frob_file_before_fix (void)
 	  }
       if (i == n_names)
 	{
-	  bfd_set_section_vma (stdoutput, sec, addr);
-	  addr += bfd_section_size (stdoutput, sec);
+	  bfd_set_section_vma (sec, addr);
+	  addr += bfd_section_size (sec);
 	}
     }
   for (i = 0; i < n_names; i++)
     if (secs[i])
       {
-	bfd_set_section_vma (stdoutput, secs[i], addr);
-	addr += bfd_section_size (stdoutput, secs[i]);
+	bfd_set_section_vma (secs[i], addr);
+	addr += bfd_section_size (secs[i]);
       }
   for (i = n_names - 1; i >= 0; i--)
     if (secs[i])
@@ -150,6 +151,7 @@ ecoff_frob_file (void)
   ecoff_build_debug (hdr, &buf, debug_swap);
 
   /* Finish up the ecoff_tdata structure.  */
+  ecoff_data (stdoutput)->debug_info.alloc_syments = true;
   set = buf;
 #define SET(ptr, count, type, size) \
   if (hdr->count == 0) \
@@ -188,33 +190,9 @@ obj_ecoff_set_ext (symbolS *sym, EXTR *ext)
   know (bfd_asymbol_flavour (symbol_get_bfdsym (sym))
 	== bfd_target_ecoff_flavour);
   esym = ecoffsymbol (symbol_get_bfdsym (sym));
-  esym->local = FALSE;
+  esym->local = false;
   esym->native = xmalloc (debug_swap->external_ext_size);
   (*debug_swap->swap_ext_out) (stdoutput, ext, esym->native);
-}
-
-static int
-ecoff_sec_sym_ok_for_reloc (asection *sec ATTRIBUTE_UNUSED)
-{
-  return 1;
-}
-
-static void
-obj_ecoff_frob_symbol (symbolS *sym, int *puntp ATTRIBUTE_UNUSED)
-{
-  ecoff_frob_symbol (sym);
-}
-
-static void
-ecoff_pop_insert (void)
-{
-  pop_insert (obj_pseudo_table);
-}
-
-static int
-ecoff_separate_stab_sections (void)
-{
-  return 0;
 }
 
 /* These are the pseudo-ops we support in this file.  Only those
@@ -280,6 +258,32 @@ const pseudo_typeS obj_pseudo_table[] =
   { NULL,	s_ignore,		0 }
 };
 
+#ifdef USE_EMULATIONS
+
+static int
+ecoff_sec_sym_ok_for_reloc (asection *sec ATTRIBUTE_UNUSED)
+{
+  return 1;
+}
+
+static void
+obj_ecoff_frob_symbol (symbolS *sym, int *puntp ATTRIBUTE_UNUSED)
+{
+  ecoff_frob_symbol (sym);
+}
+
+static void
+ecoff_pop_insert (void)
+{
+  pop_insert (obj_pseudo_table);
+}
+
+static int
+ecoff_separate_stab_sections (void)
+{
+  return 0;
+}
+
 const struct format_ops ecoff_format_ops =
 {
   bfd_target_ecoff_flavour,
@@ -289,7 +293,9 @@ const struct format_ops ecoff_format_ops =
      the single-format definition (0) would be in order.  */
   1,	/* emit_section_symbols.  */
   0,	/* begin.  */
+  0,	/* end.  */
   ecoff_new_file,
+  NULL, /* assign_symbol */
   obj_ecoff_frob_symbol,
   ecoff_frob_file,
   0,	/* frob_file_before_adjust.  */
@@ -306,7 +312,6 @@ const struct format_ops ecoff_format_ops =
   0,	/* s_get_type.  */
   0,	/* s_set_type.  */
   0,	/* copy_symbol_attributes.  */
-  ecoff_generate_asm_lineno,
   ecoff_stab,
   ecoff_separate_stab_sections,
   0,	/* init_stab_section.  */
@@ -318,3 +323,5 @@ const struct format_ops ecoff_format_ops =
   ecoff_symbol_clone_hook,
   0	/* adjust_symtab.  */
 };
+
+#endif /* USE_EMULATIONS */

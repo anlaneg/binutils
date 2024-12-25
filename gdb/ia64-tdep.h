@@ -1,6 +1,6 @@
 /* Target-dependent code for the ia64.
 
-   Copyright (C) 2004-2019 Free Software Foundation, Inc.
+   Copyright (C) 2004-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef IA64_TDEP_H
-#define IA64_TDEP_H
+#ifndef GDB_IA64_TDEP_H
+#define GDB_IA64_TDEP_H
+
+#include "gdbarch.h"
 
 #ifdef HAVE_LIBUNWIND_IA64_H
 #include "libunwind-ia64.h"
@@ -154,7 +156,7 @@
 /* Predicate registers: There are 64 of these 1-bit registers.  We
    define a single register which is used to communicate these values
    to/from the target.  We will somehow contrive to make it appear
-   that IA64_PR0_REGNUM thru IA64_PR63_REGNUM hold the actual values.  */
+   that IA64_PR0_REGNUM through IA64_PR63_REGNUM hold the actual values.  */
 #define IA64_PR_REGNUM		330
 
 /* Instruction pointer: 64 bits wide.  */
@@ -199,10 +201,10 @@
 #define IA64_NAT32_REGNUM	(IA64_NAT0_REGNUM + 32)
 #define IA64_NAT127_REGNUM	(IA64_NAT0_REGNUM + 127)
 
-struct frame_info;
+class frame_info_ptr;
 struct regcache;
 
-/* A struction containing pointers to all the target-dependent operations
+/* A struct containing pointers to all the target-dependent operations
    performed to setup an inferior function call. */
 
 struct ia64_infcall_ops
@@ -219,7 +221,7 @@ struct ia64_infcall_ops
   /* Store the argument stored in BUF into the appropriate location
      given the BSP and the SLOTNUM.  */
   void (*store_argument_in_slot) (struct regcache *regcache, CORE_ADDR bsp,
-                                  int slotnum, gdb_byte *buf);
+				  int slotnum, gdb_byte *buf);
 
   /* For targets where we cannot call the function directly, store
      the address of the function we want to call at the location
@@ -227,17 +229,19 @@ struct ia64_infcall_ops
   void (*set_function_addr) (struct regcache *regcache, CORE_ADDR func_addr);
 };
 
-struct gdbarch_tdep
+struct ia64_gdbarch_tdep : gdbarch_tdep_base
 {
-  CORE_ADDR (*sigcontext_register_address) (struct gdbarch *, CORE_ADDR, int);
-  int (*pc_in_sigtramp) (CORE_ADDR);
+  CORE_ADDR (*sigcontext_register_address) (struct gdbarch *, CORE_ADDR, int)
+    = nullptr;
+  int (*pc_in_sigtramp) (CORE_ADDR) = nullptr;
 
   /* Return the total size of THIS_FRAME's register frame.
      CFM is THIS_FRAME's cfm register value.
 
      Normally, the size of the register frame is always obtained by
      extracting the lowest 7 bits ("cfm & 0x7f").  */
-  int (*size_of_register_frame) (struct frame_info *this_frame, ULONGEST cfm);
+  int (*size_of_register_frame) (const frame_info_ptr &this_frame, ULONGEST cfm)
+    = nullptr;
 
   /* Determine the function address FADDR belongs to a shared library.
      If it does, then return the associated global pointer.  If no shared
@@ -245,12 +249,12 @@ struct gdbarch_tdep
 
      This pointer may be NULL.  */
   CORE_ADDR (*find_global_pointer_from_solib) (struct gdbarch *gdbarch,
-					       CORE_ADDR faddr);
+					       CORE_ADDR faddr) = nullptr;
 
   /* ISA-specific data types.  */
-  struct type *ia64_ext_type;
+  struct type *ia64_ext_type = nullptr;
 
-  struct ia64_infcall_ops infcall_ops;
+  struct ia64_infcall_ops infcall_ops {};
 };
 
 extern void ia64_write_pc (struct regcache *, CORE_ADDR);
@@ -261,4 +265,4 @@ extern unw_accessors_t ia64_unw_rse_accessors;
 extern struct libunwind_descr ia64_libunwind_descr;
 #endif
 
-#endif /* ia64-tdep.h */
+#endif /* GDB_IA64_TDEP_H */

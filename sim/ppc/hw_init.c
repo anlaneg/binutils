@@ -182,7 +182,7 @@ static device_callbacks const hw_file_callbacks = {
    eeprom requires a complex sequence of accesses).  The
    <<real-address>> is specified as <<0x0c00>> which is the offset
    into the eeprom.  For brevity, most of the eeprom properties have
-   been omited.
+   been omitted.
 
    | /iobus/eeprom@0xfff00000/reg 0xfff00000 0x80000
    | /openprom/init/data@0xfff00c00/real-address 0x0c00
@@ -316,7 +316,7 @@ static device_callbacks const hw_data_callbacks = {
 static void
 update_for_binary_section(bfd *abfd,
 			  asection *the_section,
-			  PTR obj)
+			  void *obj)
 {
   unsigned_word section_vma;
   unsigned_word section_size;
@@ -324,39 +324,39 @@ update_for_binary_section(bfd *abfd,
   device *me = (device*)obj;
 
   /* skip the section if no memory to allocate */
-  if (! (bfd_get_section_flags(abfd, the_section) & SEC_ALLOC))
+  if (! (bfd_section_flags (the_section) & SEC_ALLOC))
     return;
 
   /* check/ignore any sections of size zero */
-  section_size = bfd_get_section_size (the_section);
+  section_size = bfd_section_size (the_section);
   if (section_size == 0)
     return;
 
   /* find where it is to go */
-  section_vma = bfd_get_section_vma(abfd, the_section);
+  section_vma = bfd_section_vma (the_section);
 
   DTRACE(binary,
 	 ("name=%-7s, vma=0x%.8lx, size=%6ld, flags=%3lx(%s%s%s%s%s )\n",
-	  bfd_get_section_name(abfd, the_section),
+	  bfd_section_name (the_section),
 	  (long)section_vma,
 	  (long)section_size,
-	  (long)bfd_get_section_flags(abfd, the_section),
-	  bfd_get_section_flags(abfd, the_section) & SEC_LOAD ? " LOAD" : "",
-	  bfd_get_section_flags(abfd, the_section) & SEC_CODE ? " CODE" : "",
-	  bfd_get_section_flags(abfd, the_section) & SEC_DATA ? " DATA" : "",
-	  bfd_get_section_flags(abfd, the_section) & SEC_ALLOC ? " ALLOC" : "",
-	  bfd_get_section_flags(abfd, the_section) & SEC_READONLY ? " READONLY" : ""
+	  (long)bfd_section_flags (the_section),
+	  bfd_section_flags (the_section) & SEC_LOAD ? " LOAD" : "",
+	  bfd_section_flags (the_section) & SEC_CODE ? " CODE" : "",
+	  bfd_section_flags (the_section) & SEC_DATA ? " DATA" : "",
+	  bfd_section_flags (the_section) & SEC_ALLOC ? " ALLOC" : "",
+	  bfd_section_flags (the_section) & SEC_READONLY ? " READONLY" : ""
 	  ));
 
   /* If there is an .interp section, it means it needs a shared library interpreter.  */
-  if (strcmp(".interp", bfd_get_section_name(abfd, the_section)) == 0)
+  if (strcmp(".interp", bfd_section_name (the_section)) == 0)
     error("Shared libraries are not yet supported.\n");
 
   /* determine the devices access */
   access = access_read;
-  if (bfd_get_section_flags(abfd, the_section) & SEC_CODE)
+  if (bfd_section_flags (the_section) & SEC_CODE)
     access |= access_exec;
-  if (!(bfd_get_section_flags(abfd, the_section) & SEC_READONLY))
+  if (!(bfd_section_flags (the_section) & SEC_READONLY))
     access |= access_write;
 
   /* if claim specified, allocate region from the memory device */
@@ -369,8 +369,8 @@ update_for_binary_section(bfd *abfd,
     mem_in[2] = section_vma;
     if (device_instance_call_method(memory, "claim", 3, mem_in, 1, mem_out) < 0)
       device_error(me, "failed to claim memory for section at 0x%lx (0x%lx",
-		   section_vma,
-		   section_size);
+		   (unsigned long)section_vma,
+		   (unsigned long)section_size);
     if (mem_out[0] != section_vma)
       device_error(me, "section address not as requested");
   }
@@ -386,7 +386,7 @@ update_for_binary_section(bfd *abfd,
 			  me);
 
   /* if a load dma in the required data */
-  if (bfd_get_section_flags(abfd, the_section) & SEC_LOAD) {
+  if (bfd_section_flags (the_section) & SEC_LOAD) {
     void *section_init = zalloc(section_size);
     if (!bfd_get_section_contents(abfd,
 				  the_section,
@@ -431,7 +431,7 @@ hw_binary_init_data_callback(device *me)
   /* and the data sections */
   bfd_map_over_sections(image,
 			update_for_binary_section,
-			(PTR)me);
+			me);
 
   bfd_close(image);
 }
@@ -517,8 +517,8 @@ write_stack_arguments(device *me,
 		      unsigned_word end_arg)
 {
   DTRACE(stack,
-	("write_stack_arguments(device=%s, arg=0x%lx, start_block=0x%lx, end_block=0x%lx, start_arg=0x%lx, end_arg=0x%lx)\n",
-	 device_name(me), (long)arg, (long)start_block, (long)end_block, (long)start_arg, (long)end_arg));
+	("write_stack_arguments(device=%s, arg=%p, start_block=0x%lx, end_block=0x%lx, start_arg=0x%lx, end_arg=0x%lx)\n",
+	 device_name(me), arg, (long)start_block, (long)end_block, (long)start_arg, (long)end_arg));
   if (arg == NULL)
     device_error(me, "Attempt to write a null array onto the stack\n");
   /* only copy in arguments, memory is already zero */
@@ -576,7 +576,7 @@ create_ppc_elf_stack_frame(device *me,
   const unsigned sizeof_argv = sizeof_arguments(argv);
   const unsigned_word start_argv = start_envp - sizeof_argv;
 
-  /* link register save address - alligned to a 16byte boundary */
+  /* link register save address - aligned to a 16byte boundary */
   const unsigned_word top_of_stack = ((start_argv
 				       - 2 * sizeof(unsigned_word))
 				      & ~0xf);
@@ -671,12 +671,12 @@ hw_stack_ioctl(device *me,
       char **envp = va_arg(ap, char **);
       const char *stack_type;
       DTRACE(stack,
-	     ("stack_ioctl_callback(me=0x%lx:%s processor=0x%lx cia=0x%lx argv=0x%lx envp=0x%lx)\n",
-	      (long)me, device_name(me),
-	      (long)processor,
+	     ("stack_ioctl_callback(me=%p:%s processor=%p cia=0x%lx argv=%p envp=%p)\n",
+	      me, device_name(me),
+	      processor,
 	      (long)cia,
-	      (long)argv,
-	      (long)envp));
+	      argv,
+	      envp));
       stack_type = device_find_string_property(me, "stack-type");
       if (strcmp(stack_type, "ppc-elf") == 0)
 	create_ppc_elf_stack_frame(me, stack_pointer, argv, envp);

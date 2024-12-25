@@ -1,6 +1,6 @@
 /* Python interface to objfiles.
 
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,15 +17,16 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "python-internal.h"
 #include "charset.h"
 #include "objfiles.h"
 #include "language.h"
 #include "build-id.h"
 #include "symtab.h"
+#include "python.h"
+#include "inferior.h"
 
-typedef struct
+struct objfile_object
 {
   PyObject_HEAD
 
@@ -50,12 +51,25 @@ typedef struct
 
   /* The debug method matcher list.  */
   PyObject *xmethods;
-} objfile_object;
+};
 
 extern PyTypeObject objfile_object_type
     CPYCHECKER_TYPE_OBJECT_FOR_TYPEDEF ("objfile_object");
 
-static const struct objfile_data *objfpy_objfile_data_key;
+/* Clear the OBJFILE pointer in an Objfile object and remove the
+   reference.  */
+struct objfpy_deleter
+{
+  void operator() (objfile_object *obj)
+  {
+    gdbpy_enter enter_py;
+    gdbpy_ref<objfile_object> object (obj);
+    object->objfile = nullptr;
+  }
+};
+
+static const registry<objfile>::key<objfile_object, objfpy_deleter>
+     objfpy_objfile_data_key;
 
 /* Require that OBJF be a valid objfile.  */
 #define OBJFPY_REQUIRE_VALID(obj)				\
@@ -101,6 +115,18 @@ objfpy_get_username (PyObject *self, void *closure)
   Py_RETURN_NONE;
 }
 
+/* Get the 'is_file' attribute.  */
+
+static PyObject *
+objfpy_get_is_file (PyObject *o, void *ignore)
+{
+  objfile_object *self = (objfile_object *) o;
+
+  if (self->objfile != nullptr)
+    return PyBool_FromLong ((self->objfile->flags & OBJF_NOT_FILENAME) == 0);
+  Py_RETURN_NONE;
+}
+
 /* If SELF is a separate debug-info file, return the "backlink" field.
    Otherwise return None.  */
 
@@ -130,22 +156,20 @@ objfpy_get_build_id (PyObject *self, void *closure)
 
   OBJFPY_REQUIRE_VALID (obj);
 
-  TRY
+  try
     {
-      build_id = build_id_bfd_get (objfile->obfd);
+      build_id = build_id_bfd_get (objfile->obfd.get ());
     }
-  CATCH (except, RETURN_MASK_ALL)
+  catch (const gdb_exception &except)
     {
-      GDB_PY_HANDLE_EXCEPTION (except);
+      return gdbpy_handle_gdb_exception (nullptr, except);
     }
-  END_CATCH
 
   if (build_id != NULL)
     {
-      gdb::unique_xmalloc_ptr<char> hex_form
-	(make_hex_string (build_id->data, build_id->size));
+      std::string hex_form = bin2hex (build_id->data, build_id->size);
 
-      return host_string_to_python_string (hex_form.get ()).release ();
+      return host_string_to_python_string (hex_form.c_str ()).release ();
     }
 
   Py_RETURN_NONE;
@@ -159,7 +183,7 @@ objfpy_get_progspace (PyObject *self, void *closure)
   objfile_object *obj = (objfile_object *) self;
 
   if (obj->objfile)
-    return pspace_to_pspace_object (obj->objfile->pspace).release ();
+    return pspace_to_pspace_object (obj->objfile->pspace ()).release ();
 
   Py_RETURN_NONE;
 }
@@ -407,7 +431,7 @@ objfpy_is_valid (PyObject *self, PyObject *args)
   Py_RETURN_TRUE;
 }
 
-/* Implementation of gdb.Objfile.add_separate_debug_file (self) -> Boolean.  */
+/* Implementation of gdb.Objfile.add_separate_debug_file (self, string). */
 
 static PyObject *
 objfpy_add_separate_debug_file (PyObject *self, PyObject *args, PyObject *kw)
@@ -421,17 +445,86 @@ objfpy_add_separate_debug_file (PyObject *self, PyObject *args, PyObject *kw)
   if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s", keywords, &file_name))
     return NULL;
 
-  TRY
+  try
     {
       gdb_bfd_ref_ptr abfd (symfile_bfd_open (file_name));
 
-      symbol_file_add_separate (abfd.get (), file_name, 0, obj->objfile);
+      symbol_file_add_separate (abfd, file_name, 0, obj->objfile);
     }
-  CATCH (except, RETURN_MASK_ALL)
+  catch (const gdb_exception &except)
     {
-      GDB_PY_HANDLE_EXCEPTION (except);
+      return gdbpy_handle_gdb_exception (nullptr, except);
     }
-  END_CATCH
+
+  Py_RETURN_NONE;
+}
+
+/* Implementation of
+  gdb.Objfile.lookup_global_symbol (self, string [, domain]) -> gdb.Symbol.  */
+
+static PyObject *
+objfpy_lookup_global_symbol (PyObject *self, PyObject *args, PyObject *kw)
+{
+  static const char *keywords[] = { "name", "domain", NULL };
+  objfile_object *obj = (objfile_object *) self;
+  const char *symbol_name;
+  int domain = VAR_DOMAIN;
+
+  OBJFPY_REQUIRE_VALID (obj);
+
+  if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s|i", keywords, &symbol_name,
+					&domain))
+    return nullptr;
+
+  try
+    {
+      domain_search_flags flags = from_scripting_domain (domain);
+      struct symbol *sym = lookup_global_symbol_from_objfile
+	(obj->objfile, GLOBAL_BLOCK, symbol_name, flags).symbol;
+      if (sym == nullptr)
+	Py_RETURN_NONE;
+
+      return symbol_to_symbol_object (sym);
+    }
+  catch (const gdb_exception &except)
+    {
+      return gdbpy_handle_gdb_exception (nullptr, except);
+    }
+
+  Py_RETURN_NONE;
+}
+
+/* Implementation of
+  gdb.Objfile.lookup_static_symbol (self, string [, domain]) -> gdb.Symbol.  */
+
+static PyObject *
+objfpy_lookup_static_symbol (PyObject *self, PyObject *args, PyObject *kw)
+{
+  static const char *keywords[] = { "name", "domain", NULL };
+  objfile_object *obj = (objfile_object *) self;
+  const char *symbol_name;
+  int domain = VAR_DOMAIN;
+
+  OBJFPY_REQUIRE_VALID (obj);
+
+  if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s|i", keywords, &symbol_name,
+					&domain))
+    return nullptr;
+
+  try
+    {
+      domain_search_flags flags = from_scripting_domain (domain);
+      struct symbol *sym = lookup_global_symbol_from_objfile
+	(obj->objfile, STATIC_BLOCK, symbol_name, flags).symbol;
+      if (sym == nullptr)
+	Py_RETURN_NONE;
+
+      return symbol_to_symbol_object (sym);
+    }
+  catch (const gdb_exception &except)
+    {
+      return gdbpy_handle_gdb_exception (nullptr, except);
+    }
 
   Py_RETURN_NONE;
 }
@@ -445,10 +538,10 @@ objfpy_repr (PyObject *self_)
   objfile *obj = self->objfile;
 
   if (obj == nullptr)
-    return PyString_FromString ("<gdb.Objfile (invalid)>");
+    return gdb_py_invalid_object_repr (self_);
 
-  return PyString_FromFormat ("<gdb.Objfile filename=%s>",
-			      objfile_filename (obj));
+  return PyUnicode_FromFormat ("<gdb.Objfile filename=%s>",
+			       objfile_name (obj));
 }
 
 /* Subroutine of gdbpy_lookup_objfile_by_build_id to simplify it.
@@ -485,64 +578,13 @@ objfpy_build_id_matches (const struct bfd_build_id *build_id,
   for (i = 0; i < build_id->size; ++i)
     {
       char c1 = string[i * 2], c2 = string[i * 2 + 1];
-      int byte = (host_hex_value (c1) << 4) | host_hex_value (c2);
+      int byte = (fromhex (c1) << 4) | fromhex (c2);
 
       if (byte != build_id->data[i])
 	return 0;
     }
 
   return 1;
-}
-
-/* Subroutine of gdbpy_lookup_objfile to simplify it.
-   Look up an objfile by its file name.  */
-
-static struct objfile *
-objfpy_lookup_objfile_by_name (const char *name)
-{
-  for (objfile *objfile : current_program_space->objfiles ())
-    {
-      const char *filename;
-
-      if ((objfile->flags & OBJF_NOT_FILENAME) != 0)
-	continue;
-      /* Don't return separate debug files.  */
-      if (objfile->separate_debug_objfile_backlink != NULL)
-	continue;
-
-      filename = objfile_filename (objfile);
-      if (filename != NULL && compare_filenames_for_search (filename, name))
-	return objfile;
-      if (compare_filenames_for_search (objfile->original_name, name))
-	return objfile;
-    }
-
-  return NULL;
-}
-
-/* Subroutine of gdbpy_lookup_objfile to simplify it.
-   Look up an objfile by its build id.  */
-
-static struct objfile *
-objfpy_lookup_objfile_by_build_id (const char *build_id)
-{
-  for (objfile *objfile : current_program_space->objfiles ())
-    {
-      const struct bfd_build_id *obfd_build_id;
-
-      if (objfile->obfd == NULL)
-	continue;
-      /* Don't return separate debug files.  */
-      if (objfile->separate_debug_objfile_backlink != NULL)
-	continue;
-      obfd_build_id = build_id_bfd_get (objfile->obfd);
-      if (obfd_build_id == NULL)
-	continue;
-      if (objfpy_build_id_matches (obfd_build_id, build_id))
-	return objfile;
-    }
-
-  return NULL;
 }
 
 /* Implementation of gdb.lookup_objfile.  */
@@ -554,7 +596,6 @@ gdbpy_lookup_objfile (PyObject *self, PyObject *args, PyObject *kw)
   const char *name;
   PyObject *by_build_id_obj = NULL;
   int by_build_id;
-  struct objfile *objfile;
 
   if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s|O!", keywords,
 					&name, &PyBool_Type, &by_build_id_obj))
@@ -570,17 +611,64 @@ gdbpy_lookup_objfile (PyObject *self, PyObject *args, PyObject *kw)
       by_build_id = cmp;
     }
 
-  if (by_build_id)
+  if (by_build_id && !objfpy_build_id_ok (name))
     {
-      if (!objfpy_build_id_ok (name))
-	{
-	  PyErr_SetString (PyExc_TypeError, _("Not a valid build id."));
-	  return NULL;
-	}
-      objfile = objfpy_lookup_objfile_by_build_id (name);
+      PyErr_SetString (PyExc_TypeError, _("Not a valid build id."));
+      return NULL;
     }
+
+  struct objfile *objfile = nullptr;
+  if (by_build_id)
+    gdbarch_iterate_over_objfiles_in_search_order
+      (current_inferior ()->arch (),
+       [&objfile, name] (struct objfile *obj)
+	 {
+	   /* Don't return separate debug files.  */
+	   if (obj->separate_debug_objfile_backlink != nullptr)
+	     return 0;
+
+	   bfd *obfd = obj->obfd.get ();
+	   if (obfd == nullptr)
+	     return 0;
+
+	   const bfd_build_id *obfd_build_id = build_id_bfd_get (obfd);
+	   if (obfd_build_id == nullptr)
+	     return 0;
+
+	   if (!objfpy_build_id_matches (obfd_build_id, name))
+	     return 0;
+
+	   objfile = obj;
+	   return 1;
+	 }, gdbpy_current_objfile);
   else
-    objfile = objfpy_lookup_objfile_by_name (name);
+    gdbarch_iterate_over_objfiles_in_search_order
+      (current_inferior ()->arch (),
+       [&objfile, name] (struct objfile *obj)
+	 {
+	   /* Don't return separate debug files.  */
+	   if (obj->separate_debug_objfile_backlink != nullptr)
+	     return 0;
+
+	   if ((obj->flags & OBJF_NOT_FILENAME) != 0)
+	     return 0;
+
+	   const char *filename = objfile_filename (obj);
+	   if (filename != NULL
+	       && compare_filenames_for_search (filename, name))
+	     {
+	       objfile = obj;
+	       return 1;
+	     }
+
+	   if (compare_filenames_for_search (obj->original_name, name))
+	     {
+	       objfile = obj;
+	       return 1;
+	     }
+
+	   return 0;
+	 }, gdbpy_current_objfile);
 
   if (objfile != NULL)
     return objfile_to_objfile_object (objfile).release ();
@@ -591,16 +679,6 @@ gdbpy_lookup_objfile (PyObject *self, PyObject *args, PyObject *kw)
 
 
 
-/* Clear the OBJFILE pointer in an Objfile object and remove the
-   reference.  */
-static void
-py_free_objfile (struct objfile *objfile, void *datum)
-{
-  gdbpy_enter enter_py (get_objfile_arch (objfile), current_language);
-  gdbpy_ref<objfile_object> object ((objfile_object *) datum);
-  object->objfile = NULL;
-}
-
 /* Return a new reference to the Python object of type Objfile
    representing OBJFILE.  If the object has already been created,
    return it.  Otherwise, create it.  Return NULL and set the Python
@@ -610,7 +688,7 @@ gdbpy_ref<>
 objfile_to_objfile_object (struct objfile *objfile)
 {
   PyObject *result
-    = ((PyObject *) objfile_data (objfile, objfpy_objfile_data_key));
+    = (PyObject *) objfpy_objfile_data_key.get (objfile);
   if (result == NULL)
     {
       gdbpy_ref<objfile_object> object
@@ -621,25 +699,20 @@ objfile_to_objfile_object (struct objfile *objfile)
 	return NULL;
 
       object->objfile = objfile;
-      set_objfile_data (objfile, objfpy_objfile_data_key, object.get ());
+      objfpy_objfile_data_key.set (objfile, object.get ());
       result = (PyObject *) object.release ();
     }
 
   return gdbpy_ref<>::new_reference (result);
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_objfile (void)
 {
-  objfpy_objfile_data_key
-    = register_objfile_data_with_cleanup (NULL, py_free_objfile);
-
-  if (PyType_Ready (&objfile_object_type) < 0)
-    return -1;
-
-  return gdb_pymodule_addobject (gdb_module, "Objfile",
-				 (PyObject *) &objfile_object_type);
+  return gdbpy_type_ready (&objfile_object_type);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_objfile);
 
 
 
@@ -653,6 +726,16 @@ Return true if this object file is valid, false if not." },
     METH_VARARGS | METH_KEYWORDS,
     "add_separate_debug_file (file_name).\n\
 Add FILE_NAME to the list of files containing debug info for the objfile." },
+
+  { "lookup_global_symbol", (PyCFunction) objfpy_lookup_global_symbol,
+    METH_VARARGS | METH_KEYWORDS,
+    "lookup_global_symbol (name [, domain]).\n\
+Look up a global symbol in this objfile and return it." },
+
+  { "lookup_static_symbol", (PyCFunction) objfpy_lookup_static_symbol,
+    METH_VARARGS | METH_KEYWORDS,
+    "lookup_static_symbol (name [, domain]).\n\
+Look up a static-linkage global symbol in this objfile and return it." },
 
   { NULL }
 };
@@ -682,6 +765,8 @@ static gdb_PyGetSetDef objfile_getset[] =
     "Type printers.", NULL },
   { "xmethods", objfpy_get_xmethods, NULL,
     "Debug methods.", NULL },
+  { "is_file", objfpy_get_is_file, nullptr,
+    "Whether this objfile came from a file.", nullptr },
   { NULL }
 };
 

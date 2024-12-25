@@ -1,5 +1,5 @@
 /* od-xcoff.c -- dump information about an xcoff object file.
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2024 Free Software Foundation, Inc.
    Written by Tristan Gingold, Adacore.
 
    This file is part of GNU Binutils.
@@ -23,6 +23,7 @@
 #include <stddef.h>
 #include <time.h>
 #include "safe-ctype.h"
+#include "libiberty.h"
 #include "bfd.h"
 #include "objdump.h"
 #include "bucomm.h"
@@ -300,7 +301,7 @@ static const struct xlat_table rtype_xlat[] =
     RTYPE_ENTRY (NEG),
     RTYPE_ENTRY (REL),
     RTYPE_ENTRY (TOC),
-    RTYPE_ENTRY (RTB),
+    RTYPE_ENTRY (TRL),
     RTYPE_ENTRY (GL),
     RTYPE_ENTRY (TCL),
     RTYPE_ENTRY (BA),
@@ -308,7 +309,6 @@ static const struct xlat_table rtype_xlat[] =
     RTYPE_ENTRY (RL),
     RTYPE_ENTRY (RLA),
     RTYPE_ENTRY (REF),
-    RTYPE_ENTRY (TRL),
     RTYPE_ENTRY (TRLA),
     RTYPE_ENTRY (RRTBI),
     RTYPE_ENTRY (RRTBA),
@@ -455,7 +455,7 @@ dump_xcoff32_aout_header (bfd *abfd, struct xcoff_dump *data)
               (int)sizeof (auxhdr));
       sz = sizeof (auxhdr);
     }
-  if (bfd_bread (&auxhdr, sz, abfd) != sz)
+  if (bfd_read (&auxhdr, sz, abfd) != sz)
     {
       non_fatal (_("cannot read auxhdr"));
       return;
@@ -542,7 +542,7 @@ dump_xcoff32_sections_header (bfd *abfd, struct xcoff_dump *data)
       struct external_scnhdr scn;
       unsigned int flags;
 
-      if (bfd_bread (&scn, sizeof (scn), abfd) != sizeof (scn))
+      if (bfd_read (&scn, sizeof (scn), abfd) != sizeof (scn))
         {
           non_fatal (_("cannot read section header"));
           return;
@@ -597,7 +597,7 @@ xcoff32_read_sections (bfd *abfd, struct xcoff_dump *data)
       struct external_scnhdr scn;
       struct xcoff32_section *s = &data->sects[i];
 
-      if (bfd_bread (&scn, sizeof (scn), abfd) != sizeof (scn))
+      if (bfd_read (&scn, sizeof (scn), abfd) != sizeof (scn))
         {
           non_fatal (_("cannot read section header"));
           free (data->sects);
@@ -644,7 +644,7 @@ xcoff32_read_symbols (bfd *abfd, struct xcoff_dump *data)
 
   /* Read string table.  */
   if (bfd_seek (abfd, stptr, SEEK_SET) != 0
-      || bfd_bread (&stsz_arr, sizeof (stsz_arr), abfd) != sizeof (stsz_arr))
+      || bfd_read (&stsz_arr, sizeof (stsz_arr), abfd) != sizeof (stsz_arr))
     {
       non_fatal (_("cannot read strings table length"));
       data->strings_size = 0;
@@ -659,7 +659,7 @@ xcoff32_read_symbols (bfd *abfd, struct xcoff_dump *data)
           data->strings = xmalloc (data->strings_size);
 
           memcpy (data->strings, stsz_arr, sizeof (stsz_arr));
-          if (bfd_bread (data->strings + sizeof (stsz_arr), remsz, abfd)
+          if (bfd_read (data->strings + sizeof (stsz_arr), remsz, abfd)
               != remsz)
             {
               non_fatal (_("cannot read strings table"));
@@ -683,7 +683,7 @@ xcoff32_read_symbols (bfd *abfd, struct xcoff_dump *data)
       int j;
       union xcoff32_symbol *s = &data->syms[i];
 
-      if (bfd_bread (&sym, sizeof (sym), abfd) != sizeof (sym))
+      if (bfd_read (&sym, sizeof (sym), abfd) != sizeof (sym))
         {
           non_fatal (_("cannot read symbol entry"));
           goto clean;
@@ -716,7 +716,7 @@ xcoff32_read_symbols (bfd *abfd, struct xcoff_dump *data)
 
       for (j = 0; j < s->sym.numaux; j++, i++)
         {
-           if (bfd_bread (&s[j + 1].aux,
+           if (bfd_read (&s[j + 1].aux,
                           sizeof (union external_auxent), abfd)
                != sizeof (union external_auxent))
             {
@@ -763,7 +763,7 @@ dump_xcoff32_symbols (bfd *abfd, struct xcoff_dump *data)
     {
       bfd_size_type size;
 
-      size = bfd_get_section_size (debugsec);
+      size = bfd_section_size (debugsec);
       debug = (char *) xmalloc (size);
       bfd_get_section_contents (abfd, debugsec, debug, 0, size);
     }
@@ -839,13 +839,13 @@ dump_xcoff32_symbols (bfd *abfd, struct xcoff_dump *data)
                 {
                   /* Function aux entry  (Do not translate).  */
                   printf ("  exptr: %08x fsize: %08x lnnoptr: %08x endndx: %u\n",
-                          (unsigned)bfd_h_get_32 (abfd, aux->x_sym.x_tagndx),
+                          (unsigned)bfd_h_get_32 (abfd, aux->x_fcn.x_exptr),
                           (unsigned)bfd_h_get_32
-                            (abfd, aux->x_sym.x_misc.x_fsize),
+                            (abfd, aux->x_fcn.x_fsize),
                           (unsigned)bfd_h_get_32
-                            (abfd, aux->x_sym.x_fcnary.x_fcn.x_lnnoptr),
+                            (abfd, aux->x_fcn.x_lnnoptr),
                           (unsigned)bfd_h_get_32
-                            (abfd, aux->x_sym.x_fcnary.x_fcn.x_endndx));
+                            (abfd, aux->x_fcn.x_endndx));
                 }
               else if (j == 1 || (j == 0 && s->sym.numaux == 1))
                 {
@@ -900,7 +900,7 @@ dump_xcoff32_symbols (bfd *abfd, struct xcoff_dump *data)
             case C_FCN:
               printf ("  lnno: %u\n",
                       (unsigned)bfd_h_get_16
-                      (abfd, aux->x_sym.x_misc.x_lnsz.x_lnno));
+                      (abfd, aux->x_sym.x_lnno));
               break;
             default:
               /* Do not translate - generic field name.  */
@@ -948,7 +948,7 @@ dump_xcoff32_relocs (bfd *abfd, struct xcoff_dump *data)
           unsigned char rsize;
           unsigned int symndx;
 
-          if (bfd_bread (&rel, sizeof (rel), abfd) != sizeof (rel))
+          if (bfd_read (&rel, sizeof (rel), abfd) != sizeof (rel))
             {
               non_fatal (_("cannot read relocation entry"));
               return;
@@ -1003,7 +1003,7 @@ dump_xcoff32_lineno (bfd *abfd, struct xcoff_dump *data)
           struct external_lineno ln;
           unsigned int no;
 
-          if (bfd_bread (&ln, sizeof (ln), abfd) != sizeof (ln))
+          if (bfd_read (&ln, sizeof (ln), abfd) != sizeof (ln))
             {
               non_fatal (_("cannot read line number entry"));
               return;
@@ -1051,7 +1051,7 @@ dump_xcoff32_loader (bfd *abfd)
       printf (_("no .loader section in file\n"));
       return;
     }
-  size = bfd_get_section_size (loader);
+  size = bfd_section_size (loader);
   if (size < sizeof (*lhdr))
     {
       printf (_("section .loader is too short\n"));
@@ -1198,7 +1198,7 @@ dump_xcoff32_except (bfd *abfd, struct xcoff_dump *data)
       printf (_("no .except section in file\n"));
       return;
     }
-  size = bfd_get_section_size (sec);
+  size = bfd_section_size (sec);
   excp_data = (bfd_byte *) xmalloc (size);
   bfd_get_section_contents (abfd, sec, excp_data, 0, size);
   exceptab = (struct external_exceptab *)excp_data;
@@ -1241,7 +1241,7 @@ dump_xcoff32_typchk (bfd *abfd)
       printf (_("no .typchk section in file\n"));
       return;
     }
-  size = bfd_get_section_size (sec);
+  size = bfd_section_size (sec);
   data = (bfd_byte *) xmalloc (size);
   bfd_get_section_contents (abfd, sec, data, 0, size);
 
@@ -1449,9 +1449,9 @@ dump_xcoff32_traceback (bfd *abfd, struct xcoff_dump *data)
   text_sec = bfd_get_section_by_name (abfd, ".text");
   if (text_sec == NULL)
     return;
-  text_vma = bfd_get_section_vma (abfd, text_sec);
+  text_vma = bfd_section_vma (text_sec);
 
-  text_size = bfd_get_section_size (text_sec);
+  text_size = bfd_section_size (text_sec);
   text = (char *) xmalloc (text_size);
   bfd_get_section_contents (abfd, text_sec, text, 0, text_size);
 
@@ -1638,7 +1638,7 @@ xcoff_dump_obj (bfd *abfd)
 
   /* Read file header.  */
   if (bfd_seek (abfd, 0, SEEK_SET) != 0
-      || bfd_bread (&fhdr, sizeof (fhdr), abfd) != sizeof (fhdr))
+      || bfd_read (&fhdr, sizeof (fhdr), abfd) != sizeof (fhdr))
     {
       non_fatal (_("cannot read header"));
       return;
@@ -1680,47 +1680,49 @@ dump_dumpx_core (bfd *abfd, struct external_core_dumpx *hdr)
 {
   if (options[OPT_FILE_HEADER].selected)
     {
-      printf ("  signal:     %u\n", bfd_h_get_8 (abfd, hdr->c_signo));
-      printf ("  flags:      0x%02x\n", bfd_h_get_8 (abfd, hdr->c_flag));
+      printf ("  signal:     %u\n",
+	      (unsigned) bfd_h_get_8 (abfd, hdr->c_signo));
+      printf ("  flags:      0x%02x\n",
+	      (unsigned) bfd_h_get_8 (abfd, hdr->c_flag));
       printf ("  entries:    %u\n",
 	      (unsigned) bfd_h_get_16 (abfd, hdr->c_entries));
 #ifdef BFD64
-      printf ("  fdsinfox:   offset: 0x%08" BFD_VMA_FMT "x\n",
+      printf ("  fdsinfox:   offset: 0x%08" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_fdsinfox));
-      printf ("  loader:     offset: 0x%08" BFD_VMA_FMT "x, "
-	      "size: 0x%" BFD_VMA_FMT"x\n",
+      printf ("  loader:     offset: 0x%08" PRIx64 ", "
+	      "size: 0x%" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_loader),
 	      bfd_h_get_64 (abfd, hdr->c_lsize));
-      printf ("  thr:        offset: 0x%08" BFD_VMA_FMT "x, nbr: %u\n",
+      printf ("  thr:        offset: 0x%08" PRIx64 ", nbr: %u\n",
 	      bfd_h_get_64 (abfd, hdr->c_thr),
 	      (unsigned) bfd_h_get_32 (abfd, hdr->c_n_thr));
-      printf ("  segregions: offset: 0x%08" BFD_VMA_FMT "x, "
-	      "nbr: %" BFD_VMA_FMT "u\n",
+      printf ("  segregions: offset: 0x%08" PRIx64 ", "
+	      "nbr: %" PRIu64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_segregion),
 	      bfd_h_get_64 (abfd, hdr->c_segs));
-      printf ("  stack:      offset: 0x%08" BFD_VMA_FMT "x, "
-	      "org: 0x%" BFD_VMA_FMT"x, "
-	      "size: 0x%" BFD_VMA_FMT"x\n",
+      printf ("  stack:      offset: 0x%08" PRIx64 ", "
+	      "org: 0x%" PRIx64 ", "
+	      "size: 0x%" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_stack),
 	      bfd_h_get_64 (abfd, hdr->c_stackorg),
 	      bfd_h_get_64 (abfd, hdr->c_size));
-      printf ("  data:       offset: 0x%08" BFD_VMA_FMT "x, "
-	      "org: 0x%" BFD_VMA_FMT"x, "
-	      "size: 0x%" BFD_VMA_FMT"x\n",
+      printf ("  data:       offset: 0x%08" PRIx64 ", "
+	      "org: 0x%" PRIx64 ", "
+	      "size: 0x%" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_data),
 	      bfd_h_get_64 (abfd, hdr->c_dataorg),
 	      bfd_h_get_64 (abfd, hdr->c_datasize));
-      printf ("  sdata:         org: 0x%" BFD_VMA_FMT"x, "
-	      "size: 0x%" BFD_VMA_FMT"x\n",
+      printf ("  sdata:         org: 0x%" PRIx64 ", "
+	      "size: 0x%" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_sdorg),
 	      bfd_h_get_64 (abfd, hdr->c_sdsize));
-      printf ("  vmmregions: offset: 0x%" BFD_VMA_FMT"x, "
-	      "num: 0x%" BFD_VMA_FMT"x\n",
+      printf ("  vmmregions: offset: 0x%" PRIx64 ", "
+	      "num: 0x%" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_vmm),
 	      bfd_h_get_64 (abfd, hdr->c_vmmregions));
       printf ("  impl:       0x%08x\n",
 	      (unsigned) bfd_h_get_32 (abfd, hdr->c_impl));
-      printf ("  cprs:       0x%" BFD_VMA_FMT "x\n",
+      printf ("  cprs:       0x%" PRIx64 "\n",
 	      bfd_h_get_64 (abfd, hdr->c_cprs));
 #endif
     }
@@ -1733,7 +1735,7 @@ dump_dumpx_core (bfd *abfd, struct external_core_dumpx *hdr)
 
       ldr = xmalloc (len);
       if (bfd_seek (abfd, off, SEEK_SET) != 0
-	  || bfd_bread (ldr, len, abfd) != len)
+	  || bfd_read (ldr, len, abfd) != len)
 	non_fatal (_("cannot read loader info table"));
       else
 	{
@@ -1782,7 +1784,7 @@ xcoff_dump_core (bfd *abfd)
 
   /* Read file header.  */
   if (bfd_seek (abfd, 0, SEEK_SET) != 0
-      || bfd_bread (&hdr, sizeof (hdr), abfd) != sizeof (hdr))
+      || bfd_read (&hdr, sizeof (hdr), abfd) != sizeof (hdr))
     {
       non_fatal (_("cannot core read header"));
       return;

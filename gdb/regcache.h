@@ -1,6 +1,6 @@
 /* Cache and manage the values of registers for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,27 +17,30 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef REGCACHE_H
-#define REGCACHE_H
+#ifndef GDB_REGCACHE_H
+#define GDB_REGCACHE_H
 
-#include "common/common-regcache.h"
-#include <forward_list>
+#include "gdbsupport/array-view.h"
+#include "gdbsupport/common-regcache.h"
+#include "gdbsupport/function-view.h"
+#include "gdbsupport/traits.h"
 
 struct regcache;
 struct regset;
 struct gdbarch;
-struct address_space;
+class thread_info;
+struct process_stratum_target;
+struct inferior;
+class ui_out;
 
-extern struct regcache *get_current_regcache (void);
-extern struct regcache *get_thread_regcache (ptid_t ptid);
+extern struct regcache *get_thread_regcache (process_stratum_target *target,
+					     ptid_t ptid);
 
 /* Get the regcache of THREAD.  */
 extern struct regcache *get_thread_regcache (thread_info *thread);
 
-extern struct regcache *get_thread_arch_regcache (ptid_t, struct gdbarch *);
-extern struct regcache *get_thread_arch_aspace_regcache (ptid_t,
-							 struct gdbarch *,
-							 struct address_space *);
+extern regcache *get_thread_arch_regcache (inferior *inf_for_target_calls,
+					   ptid_t ptid, gdbarch *arch);
 
 extern enum register_status
   regcache_raw_read_signed (struct regcache *regcache,
@@ -68,7 +71,7 @@ extern void regcache_cooked_write_unsigned (struct regcache *regcache,
 
 /* Special routines to read/write the PC.  */
 
-/* For regcache_read_pc see common/common-regcache.h.  */
+/* For regcache_read_pc see gdbsupport/common-regcache.h.  */
 extern void regcache_write_pc (struct regcache *regcache, CORE_ADDR pc);
 
 /* Mapping between register numbers and offsets in a buffer, for use
@@ -146,6 +149,15 @@ extern void regcache_collect_regset (const struct regset *regset,
 				     int regnum, void *buf, size_t size);
 
 
+/* Return true if a set of registers contains the value of the
+   register numbered REGNUM.  The size of the set of registers is
+   given in SIZE, and the layout of the set of registers is described
+   by MAP.  */
+
+extern bool regcache_map_supplies (const struct regcache_map_entry *map,
+				   int regnum, struct gdbarch *gdbarch,
+				   size_t size);
+
 /* The type of a register.  This function is slightly more efficient
    then its gdbarch vector counterpart since it returns a precomputed
    value stored in a table.  */
@@ -158,16 +170,19 @@ extern struct type *register_type (struct gdbarch *gdbarch, int regnum);
    
 extern int register_size (struct gdbarch *gdbarch, int regnum);
 
-typedef gdb::function_view<register_status (int regnum, gdb_byte *buf)>
-  register_read_ftype;
+using register_read_ftype
+  = gdb::function_view<register_status (int, gdb::array_view<gdb_byte>)>;
 
 /* A (register_number, register_value) pair.  */
 
-typedef struct cached_reg
+struct cached_reg_t
 {
   int num;
-  gdb_byte *data;
-} cached_reg_t;
+  gdb::unique_xmalloc_ptr<gdb_byte> data;
+
+  cached_reg_t () = default;
+  cached_reg_t (cached_reg_t &&rhs) = default;
+};
 
 /* Buffer of registers.  */
 
@@ -181,11 +196,14 @@ public:
   /* Return regcache's architecture.  */
   gdbarch *arch () const;
 
-  /* See common/common-regcache.h.  */
+  /* See gdbsupport/common-regcache.h.  */
   enum register_status get_register_status (int regnum) const override;
 
-  /* See common/common-regcache.h.  */
-  void raw_collect (int regnum, void *buf) const override;
+  /* See gdbsupport/common-regcache.h.  */
+  void raw_collect (int regnum, gdb::array_view<gdb_byte> dst) const override;
+
+  /* Deprecated overload of the above.  */
+  void raw_collect (int regnum, void *dst) const;
 
   /* Collect register REGNUM from REGCACHE.  Store collected value as an integer
      at address ADDR, in target endian, with length ADDR_LEN and sign IS_SIGNED.
@@ -195,17 +213,23 @@ public:
   void raw_collect_integer (int regnum, gdb_byte *addr, int addr_len,
 			    bool is_signed) const;
 
-  /* Collect register REGNUM from REGCACHE, starting at OFFSET in register,
-     reading only LEN.  */
-  void raw_collect_part (int regnum, int offset, int len, gdb_byte *out) const;
+  /* Collect part of register REGNUM from this register buffer.  Start at OFFSET
+     in register.  The size is given by the size of DST.  */
+  void raw_collect_part (int regnum, int offset,
+			 gdb::array_view<gdb_byte> dst) const;
 
-  /* See common/common-regcache.h.  */
-  void raw_supply (int regnum, const void *buf) override;
+  /* Deprecated overload of the above.  */
+  void raw_collect_part (int regnum, int offset, int len, gdb_byte *dst) const
+  { raw_collect_part (regnum, offset, gdb::make_array_view (dst, len)); }
+
+  /* See gdbsupport/common-regcache.h.  */
+  void raw_supply (int regnum, gdb::array_view<const gdb_byte> src) override;
+
+  /* Deprecated overload of the above.  */
+  void raw_supply (int regnum, const void *src);
 
   void raw_supply (int regnum, const reg_buffer &src)
-  {
-    raw_supply (regnum, src.register_buffer (regnum));
-  }
+  { raw_supply (regnum, src.register_buffer (regnum)); }
 
   /* Supply register REGNUM to REGCACHE.  Value to supply is an integer stored
      at address ADDR, in target endian, with length ADDR_LEN and sign IS_SIGNED.
@@ -220,15 +244,20 @@ public:
      unavailable).  */
   void raw_supply_zeroed (int regnum);
 
-  /* Supply register REGNUM to REGCACHE, starting at OFFSET in register, writing
-     only LEN, without editing the rest of the register.  */
-  void raw_supply_part (int regnum, int offset, int len, const gdb_byte *in);
+  /* See gdbsupport/common-regcache.h.  */
+  void raw_supply_part_zeroed (int regnum, int offset, size_t size) override;
+
+  /* Supply part of register REGNUM to this register buffer.  Start at OFFSET in
+     the register.  The size is given by the size of SRC.  The rest of the
+     register left untouched.  */
+  void raw_supply_part (int regnum, int offset,
+			gdb::array_view<const gdb_byte> src);
 
   void invalidate (int regnum);
 
   virtual ~reg_buffer () = default;
 
-  /* See common/common-regcache.h.  */
+  /* See gdbsupport/common-regcache.h.  */
   bool raw_compare (int regnum, const void *buf, int offset) const override;
 
 protected:
@@ -237,7 +266,11 @@ protected:
 
   int num_raw_registers () const;
 
-  gdb_byte *register_buffer (int regnum) const;
+  /* Return a view on register REGNUM's buffer cache.  */
+  template <typename ElemType>
+  gdb::array_view<ElemType> register_buffer (int regnum) const;
+  gdb::array_view<const gdb_byte> register_buffer (int regnum) const;
+  gdb::array_view<gdb_byte> register_buffer (int regnum);
 
   /* Save a register cache.  The set of registers saved into the
      regcache determined by the save_reggroup.  COOKED_READ returns
@@ -267,27 +300,41 @@ public:
 
   /* Transfer a raw register [0..NUM_REGS) from core-gdb to this regcache,
      return its value in *BUF and return its availability status.  */
+  register_status raw_read (int regnum, gdb::array_view<gdb_byte> dst);
 
-  enum register_status raw_read (int regnum, gdb_byte *buf);
+  /* Deprecated overload of the above.  */
+  register_status raw_read (int regnum, gdb_byte *dst);
+
   template<typename T, typename = RequireLongest<T>>
-  enum register_status raw_read (int regnum, T *val);
+  register_status raw_read (int regnum, T *val);
 
   /* Partial transfer of raw registers.  Return the status of the register.  */
-  enum register_status raw_read_part (int regnum, int offset, int len,
-				      gdb_byte *buf);
+  register_status raw_read_part (int regnum, int offset,
+				 gdb::array_view<gdb_byte> dst);
+
+  /* Deprecated overload of the above.  */
+  register_status raw_read_part (int regnum, int offset, int len,
+				 gdb_byte *dst)
+  { return raw_read_part (regnum, offset, gdb::make_array_view (dst, len)); }
 
   /* Make certain that the register REGNUM is up-to-date.  */
   virtual void raw_update (int regnum) = 0;
 
   /* Transfer a raw register [0..NUM_REGS+NUM_PSEUDO_REGS) from core-gdb to
-     this regcache, return its value in *BUF and return its availability status.  */
-  enum register_status cooked_read (int regnum, gdb_byte *buf);
+     this regcache, return its value in DST and return its availability status.  */
+  register_status cooked_read (int regnum, gdb::array_view<gdb_byte> dst);
+  register_status cooked_read (int regnum, gdb_byte *dst);
+
   template<typename T, typename = RequireLongest<T>>
-  enum register_status cooked_read (int regnum, T *val);
+  register_status cooked_read (int regnum, T *val);
 
   /* Partial transfer of a cooked register.  */
-  enum register_status cooked_read_part (int regnum, int offset, int len,
-					 gdb_byte *buf);
+  register_status cooked_read_part (int regnum, int offset,
+				    gdb::array_view<gdb_byte> dst);
+
+  /* Deprecated overload of the above.  */
+  register_status cooked_read_part (int regnum, int offset, int len, gdb_byte *src)
+  { return cooked_read_part (regnum, offset, gdb::make_array_view (src, len)); }
 
   /* Read register REGNUM from the regcache and return a new value.  This
      will call mark_value_bytes_unavailable as appropriate.  */
@@ -297,8 +344,8 @@ protected:
 
   /* Perform a partial register transfer using a read, modify, write
      operation.  Will fail if register is currently invalid.  */
-  enum register_status read_part (int regnum, int offset, int len,
-				  gdb_byte *out, bool is_raw);
+  register_status read_part (int regnum, int offset,
+			     gdb::array_view<gdb_byte> dst, bool is_raw);
 };
 
 /* Buffer of registers, can be read and written.  */
@@ -325,12 +372,6 @@ class regcache : public detached_regcache
 public:
   DISABLE_COPY_AND_ASSIGN (regcache);
 
-  /* Return REGCACHE's address space.  */
-  const address_space *aspace () const
-  {
-    return m_aspace;
-  }
-
   /* Restore 'this' regcache.  The set of registers restored into
      the regcache determined by the restore_reggroup.
      Writes to regcache will go through to the target.  SRC is a
@@ -340,13 +381,19 @@ public:
   /* Update the value of raw register REGNUM (in the range [0..NUM_REGS)) and
      transfer its value to core-gdb.  */
 
-  void raw_write (int regnum, const gdb_byte *buf);
+  void raw_write (int regnum, gdb::array_view<const gdb_byte> src);
+
+  /* Deprecated overload of the above.  */
+  void raw_write (int regnum, const gdb_byte *src);
 
   template<typename T, typename = RequireLongest<T>>
   void raw_write (int regnum, T val);
 
   /* Transfer of pseudo-registers.  */
-  void cooked_write (int regnum, const gdb_byte *buf);
+  void cooked_write (int regnum, gdb::array_view<const gdb_byte> src);
+
+  /* Deprecated overload of the above.  */
+  void cooked_write (int regnum, const gdb_byte *src);
 
   template<typename T, typename = RequireLongest<T>>
   void cooked_write (int regnum, T val);
@@ -355,19 +402,48 @@ public:
 
   /* Partial transfer of raw registers.  Perform read, modify, write style
      operations.  */
-  void raw_write_part (int regnum, int offset, int len, const gdb_byte *buf);
+  void raw_write_part (int regnum, int offset,
+		       gdb::array_view<const gdb_byte> src);
+
+  /* Deprecated overload of the above.  */
+  void raw_write_part (int regnum, int offset, int len, const gdb_byte *src)
+  { raw_write_part (regnum, offset, gdb::make_array_view (src, len)); }
 
   /* Partial transfer of a cooked register.  Perform read, modify, write style
      operations.  */
-  void cooked_write_part (int regnum, int offset, int len,
-			  const gdb_byte *buf);
+  void cooked_write_part (int regnum, int offset,
+			  gdb::array_view<const gdb_byte> src);
 
-  void supply_regset (const struct regset *regset,
+  /* Deprecated overload of the above.  */
+  void cooked_write_part (int regnum, int offset, int len, const gdb_byte *src)
+  { cooked_write_part (regnum, offset, gdb::make_array_view (src, len)); }
+
+  /* Transfer a set of registers (as described by REGSET) between
+     REGCACHE and BUF.  If REGNUM == -1, transfer all registers
+     belonging to the regset, otherwise just the register numbered
+     REGNUM.  The REGSET's 'regmap' field must point to an array of
+     'struct regcache_map_entry'.  The valid register numbers in each
+     entry in 'struct regcache_map_entry' are offset by REGBASE.  */
+
+  void supply_regset (const struct regset *regset, int regbase,
 		      int regnum, const void *buf, size_t size);
 
+  void collect_regset (const struct regset *regset, int regbase, int regnum,
+		       void *buf, size_t size) const;
+
+  /* Same as the above, but with REGBASE == 0.  */
+
+  void supply_regset (const struct regset *regset,
+		      int regnum, const void *buf, size_t size)
+  {
+    supply_regset (regset, 0, regnum, buf, size);
+  }
 
   void collect_regset (const struct regset *regset, int regnum,
-		       void *buf, size_t size) const;
+		       void *buf, size_t size) const
+  {
+    collect_regset (regset, 0, regnum, buf, size);
+  }
 
   /* Return REGCACHE's ptid.  */
 
@@ -383,15 +459,11 @@ public:
     this->m_ptid = ptid;
   }
 
-/* Dump the contents of a register from the register cache to the target
-   debug.  */
-  void debug_print_register (const char *func, int regno);
+  /* Return a string with the contents of a register, suitable for debug output.  */
+  std::string register_debug_string (int regno);
 
-  static void regcache_thread_ptid_changed (ptid_t old_ptid, ptid_t new_ptid);
 protected:
-  regcache (gdbarch *gdbarch, const address_space *aspace_);
-
-  static std::forward_list<regcache *> current_regcache;
+  regcache (inferior *inf_for_target_calls, gdbarch *gdbarch);
 
 private:
 
@@ -403,31 +475,35 @@ private:
   /* Transfer a single or all registers belonging to a certain register
      set to or from a buffer.  This is the main worker function for
      regcache_supply_regset and regcache_collect_regset.  */
-  void transfer_regset (const struct regset *regset,
+  void transfer_regset (const struct regset *regset, int regbase,
 			struct regcache *out_regcache,
 			int regnum, const gdb_byte *in_buf,
 			gdb_byte *out_buf, size_t size) const;
 
   /* Perform a partial register transfer using a read, modify, write
      operation.  */
-  enum register_status write_part (int regnum, int offset, int len,
-				   const gdb_byte *in, bool is_raw);
+  register_status write_part (int regnum, int offset,
+			      gdb::array_view<const gdb_byte> src,
+			      bool is_raw);
 
-  /* The address space of this register cache (for registers where it
-     makes sense, like PC or SP).  */
-  const address_space * const m_aspace;
+  /* The inferior to switch to, to make target calls.
+
+     This may not be the inferior of thread M_PTID.  For instance, this
+     regcache might be for a fork child we are about to detach, so there will
+     never be an inferior for that thread / process.  Nevertheless, we need to
+     be able to switch to the target stack that can handle register reads /
+     writes for this regcache, and that's what this inferior is for.  */
+  inferior *m_inf_for_target_calls;
 
   /* If this is a read-write cache, which thread's registers is
      it connected to?  */
   ptid_t m_ptid;
 
-  friend struct regcache *
-  get_thread_arch_aspace_regcache (ptid_t ptid, struct gdbarch *gdbarch,
-				   struct address_space *aspace);
-
-  friend void
-  registers_changed_ptid (ptid_t ptid);
+  friend regcache *get_thread_arch_regcache (inferior *inf_for_target_calls,
+					     ptid_t ptid, gdbarch *gdbarch);
 };
+
+using regcache_up = std::unique_ptr<regcache>;
 
 class readonly_detached_regcache : public readable_regcache
 {
@@ -449,7 +525,8 @@ public:
 };
 
 extern void registers_changed (void);
-extern void registers_changed_ptid (ptid_t);
+extern void registers_changed_ptid (process_stratum_target *target,
+				    ptid_t ptid);
 
 /* Indicate that registers of THREAD may have changed, so invalidate
    the cache.  */
@@ -460,7 +537,7 @@ extern void registers_changed_thread (thread_info *thread);
 class register_dump
 {
 public:
-  void dump (ui_file *file);
+  void dump (ui_out *out, const char *name);
   virtual ~register_dump () = default;
 
 protected:
@@ -468,11 +545,16 @@ protected:
     : m_gdbarch (arch)
   {}
 
-  /* Dump the register REGNUM contents.  If REGNUM is -1, print the
-     header.  */
-  virtual void dump_reg (ui_file *file, int regnum) = 0;
+  /* Number of additional table headers.  */
+  virtual int num_additional_headers () = 0;
+
+  /* Add the additional headers to OUT.  */
+  virtual void additional_headers (ui_out *out) = 0;
+
+  /* Dump the register REGNUM contents.  */
+  virtual void dump_reg (ui_out *out, int regnum) = 0;
 
   gdbarch *m_gdbarch;
 };
 
-#endif /* REGCACHE_H */
+#endif /* GDB_REGCACHE_H */

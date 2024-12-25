@@ -1,4 +1,4 @@
-# Copyright 2011-2019 Free Software Foundation, Inc.
+# Copyright 2011-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,10 +22,7 @@ set exefile $testfile
 set baseone base/one/thefile.cc
 set basetwo base/two/thefile.cc
 
-if {[skip_cplus_tests]} {
-    unsupported "skipping c++ tests"
-    return
-}
+require allow_cplus_tests
 
 if {[prepare_for_testing "failed to prepare" $exefile \
 	 [list $srcfile $baseone $basetwo] \
@@ -201,7 +198,7 @@ gdb_test "break lspec.h:$line" \
 # Multi-inferior tests.
 #
 
-gdb_test "add-inferior" "Added inferior 2" \
+gdb_test "add-inferior" "Added inferior 2.*" \
     "add inferior for linespec tests"
 
 gdb_test "inferior 2" "Switching to inferior 2 .*" \
@@ -213,6 +210,6 @@ gdb_test "file $binfile" \
     "Reading symbols from .*" \
     "set the new inferior file for linespec tests"
 
-gdb_test "break main" \
-    "Breakpoint \[0-9\]+ at $hex: main. .2 locations." \
+gdb_test "break -q main" \
+    "Breakpoint \[0-9\]+ at $hex: -qualified main. .2 locations." \
     "set breakpoint at main in both inferiors"

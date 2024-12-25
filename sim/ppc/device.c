@@ -21,6 +21,9 @@
 #ifndef _DEVICE_C_
 #define _DEVICE_C_
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <stdio.h>
 
 #include "device_table.h"
@@ -29,18 +32,8 @@
 #include "events.h"
 #include "psim.h"
 
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 #include <ctype.h>
 
 STATIC_INLINE_DEVICE (void) clean_device_properties(device *);
@@ -97,8 +90,8 @@ detach_device_interrupt_edge(device *me,
     if (old_edge->dest == dest
 	&& old_edge->dest_port == dest_port
 	&& old_edge->my_port == my_port) {
-      if (old_edge->disposition == permenant_object)
-	device_error(me, "attempt to delete permenant interrupt");
+      if (old_edge->disposition == permanent_object)
+	device_error(me, "attempt to delete permanent interrupt");
       *list = old_edge->next;
       free(old_edge);
       return;
@@ -114,7 +107,7 @@ clean_device_interrupt_edges(device_interrupt_edge **list)
   while (*list != NULL) {
     device_interrupt_edge *old_edge = *list;
     switch (old_edge->disposition) {
-    case permenant_object:
+    case permanent_object:
       list = &old_edge->next;
       break;
     case tempoary_object:
@@ -190,10 +183,9 @@ device_full_name(device *leaf,
                  unsigned sizeof_buf)
 {
   /* get a buffer */
-  char full_name[1024];
-  if (buf == (char*)0) {
-    buf = full_name;
-    sizeof_buf = sizeof(full_name);
+  if (buf == NULL) {
+    sizeof_buf = 1024;
+    buf = malloc(sizeof_buf);
   }
 
   /* construct a name */
@@ -221,9 +213,6 @@ device_full_name(device *leaf,
     strcat (buf, unit);
   }
   
-  /* return it usefully */
-  if (buf == full_name)
-    buf = (char *) strdup(full_name);
   return buf;
 }
 
@@ -817,7 +806,7 @@ clean_device_properties(device *me)
   while (*delete_point != NULL) {
     device_property_entry *current = *delete_point;
     switch (current->value->disposition) {
-    case permenant_object:
+    case permanent_object:
       /* zap the current value, will be initialized later */
       ASSERT(current->init_array != NULL);
       if (current->value->array != NULL) {
@@ -851,7 +840,7 @@ device_init_static_properties(device *me,
        property = property->next) {
     ASSERT(property->init_array != NULL);
     ASSERT(property->value->array == NULL);
-    ASSERT(property->value->disposition == permenant_object);
+    ASSERT(property->value->disposition == permanent_object);
     switch (property->value->type) {
     case array_property:
     case boolean_property:
@@ -883,7 +872,7 @@ device_init_runtime_properties(device *me,
        property != NULL;
        property = property->next) {
     switch (property->value->disposition) {
-    case permenant_object:
+    case permanent_object:
       switch (property->value->type) {
       case ihandle_property:
 	{
@@ -967,7 +956,7 @@ device_add_array_property(device *me,
 {
   device_add_property(me, property, array_property,
                       array, sizeof_array, array, sizeof_array,
-                      NULL, permenant_object);
+                      NULL, permanent_object);
 }
 
 INLINE_DEVICE\
@@ -1000,11 +989,11 @@ device_add_boolean_property(device *me,
                             const char *property,
                             int boolean)
 {
-  signed32 new_boolean = (boolean ? -1 : 0);
+  int32_t new_boolean = (boolean ? -1 : 0);
   device_add_property(me, property, boolean_property,
                       &new_boolean, sizeof(new_boolean),
                       &new_boolean, sizeof(new_boolean),
-                      NULL, permenant_object);
+                      NULL, permanent_object);
 }
 
 INLINE_DEVICE\
@@ -1034,7 +1023,7 @@ device_add_ihandle_runtime_property(device *me,
   device_add_property(me, property, ihandle_property,
 		      ihandle->full_path, strlen(ihandle->full_path) + 1,
 		      NULL, 0,
-		      NULL, permenant_object);
+		      NULL, permanent_object);
 }
 
 INLINE_DEVICE\
@@ -1045,11 +1034,11 @@ device_find_ihandle_runtime_property(device *me,
 {
   device_property_entry *entry = find_property_entry(me, property);
   TRACE(trace_devices,
-	("device_find_ihandle_runtime_property(me=0x%lx, property=%s)\n",
-	 (long)me, property));
+	("device_find_ihandle_runtime_property(me=%p, property=%s)\n",
+	 me, property));
   if (entry == NULL
       || entry->value->type != ihandle_property
-      || entry->value->disposition != permenant_object)
+      || entry->value->disposition != permanent_object)
     device_error(me, "property %s not found or of wrong type", property);
   ASSERT(entry->init_array != NULL);
   /* the full path */
@@ -1104,7 +1093,7 @@ device_add_integer_property(device *me,
   device_add_property(me, property, integer_property,
                       &integer, sizeof(integer),
                       &integer, sizeof(integer),
-                      NULL, permenant_object);
+                      NULL, permanent_object);
 }
 
 INLINE_DEVICE\
@@ -1115,8 +1104,8 @@ device_find_integer_property(device *me,
   const device_property *node;
   signed_cell integer;
   TRACE(trace_devices,
-	("device_find_integer(me=0x%lx, property=%s)\n",
-	 (long)me, property));
+	("device_find_integer(me=%p, property=%s)\n",
+	 me, property));
   node = device_find_property(me, property);
   if (node == (device_property*)0
       || node->type != integer_property)
@@ -1137,8 +1126,8 @@ device_find_integer_array_property(device *me,
   int sizeof_integer = sizeof(*integer);
   signed_cell *cell;
   TRACE(trace_devices,
-	("device_find_integer(me=0x%lx, property=%s)\n",
-	 (long)me, property));
+	("device_find_integer(me=%p, property=%s)\n",
+	 me, property));
 
   /* check things sane */
   node = device_find_property(me, property);
@@ -1236,7 +1225,7 @@ device_add_range_array_property(device *me,
   device_add_property(me, property, range_array_property,
 		      cells, sizeof_cells,
 		      cells, sizeof_cells,
-		      NULL, permenant_object);
+		      NULL, permanent_object);
 
   free(cells);
 }
@@ -1327,7 +1316,7 @@ device_add_reg_array_property(device *me,
   device_add_property(me, property, reg_array_property,
 		      cells, sizeof_cells,
 		      cells, sizeof_cells,
-		      NULL, permenant_object);
+		      NULL, permanent_object);
 
   free(cells);
 }
@@ -1383,7 +1372,7 @@ device_add_string_property(device *me,
   device_add_property(me, property, string_property,
                       string, strlen(string) + 1,
                       string, strlen(string) + 1,
-                      NULL, permenant_object);
+                      NULL, permanent_object);
 }
 
 INLINE_DEVICE\
@@ -1435,7 +1424,7 @@ device_add_string_array_property(device *me,
   device_add_property(me, property, string_array_property,
 		      array, sizeof_array,
 		      array, sizeof_array,
-		      NULL, permenant_object);
+		      NULL, permanent_object);
 }
 
 INLINE_DEVICE\
@@ -1464,7 +1453,7 @@ device_find_string_array_property(device *me,
     if (node->sizeof_array == 0
 	|| ((char*)node->array)[node->sizeof_array - 1] != '\0')
       device_error(me, "property %s invalid for string array", property);
-    /* FALL THROUGH */
+    ATTRIBUTE_FALLTHROUGH;
   case string_array_property:
     ASSERT(node->sizeof_array > 0);
     ASSERT(((char*)node->array)[node->sizeof_array - 1] == '\0');
@@ -1506,10 +1495,10 @@ device_add_duplicate_property(device *me,
 {
   device_property_entry *master;
   TRACE(trace_devices,
-	("device_add_duplicate_property(me=0x%lx, property=%s, ...)\n",
-	 (long)me, property));
-  if (original->disposition != permenant_object)
-    device_error(me, "Can only duplicate permenant objects");
+	("device_add_duplicate_property(me=%p, property=%s, ...)\n",
+	 me, property));
+  if (original->disposition != permanent_object)
+    device_error(me, "Can only duplicate permanent objects");
   /* find the original's master */
   master = original->owner->properties;
   while (master->value != original) {
@@ -1521,7 +1510,7 @@ device_add_duplicate_property(device *me,
 		      original->type,
 		      master->init_array, master->sizeof_init_array,
 		      original->array, original->sizeof_array,
-		      original, permenant_object);
+		      original, permanent_object);
 }
 
 
@@ -1890,7 +1879,7 @@ device_instance_to_external(device_instance *instance)
 INLINE_DEVICE\
 (event_entry_tag)
 device_event_queue_schedule(device *me,
-			    signed64 delta_time,
+			    int64_t delta_time,
 			    device_event_handler *handler,
 			    void *data)
 {
@@ -1910,7 +1899,7 @@ device_event_queue_deschedule(device *me,
 }
 
 INLINE_DEVICE\
-(signed64)
+(int64_t)
 device_event_queue_time(device *me)
 {
   return event_queue_time(psim_event_queue(me->system));
@@ -1925,8 +1914,6 @@ INLINE_DEVICE\
 device_clean(device *me,
 	     void *data)
 {
-  psim *system;
-  system = (psim*)data;
   TRACE(trace_device_init, ("device_clean - initializing %s", me->path));
   clean_device_interrupt_edges(&me->interrupt_destinations);
   clean_device_instances(me);

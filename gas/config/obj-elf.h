@@ -1,5 +1,5 @@
 /* ELF object file format.
-   Copyright (C) 1992-2019 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -33,7 +33,6 @@
 #define OUTPUT_FLAVOR bfd_target_elf_flavour
 #endif
 
-#define BYTES_IN_WORD 4		/* for now */
 #include "bfd/elf-bfd.h"
 
 #include "targ-cpu.h"
@@ -55,18 +54,41 @@ extern int mips_flag_mdebug;
 #endif
 #endif
 
+enum elf_visibility
+{
+  visibility_unchanged = 0,
+  visibility_local,
+  visibility_hidden,
+  visibility_remove
+};
+
+struct elf_versioned_name_list
+{
+  char *name;
+  struct elf_versioned_name_list *next;
+};
+
 /* Additional information we keep for each symbol.  */
 struct elf_obj_sy
 {
   /* Whether the symbol has been marked as local.  */
-  int local;
+  unsigned int local : 1;
+
+  /* Whether the symbol has been marked for rename with @@@.  */
+  unsigned int rename : 1;
+
+  /* Whether the symbol has a bad version name.  */
+  unsigned int bad_version : 1;
+
+  /* Whether visibility of the symbol should be changed.  */
+  ENUM_BITFIELD (elf_visibility) visibility : 2;
 
   /* Use this to keep track of .size expressions that involve
      differences that we can't compute yet.  */
   expressionS *size;
 
-  /* The name specified by the .symver directive.  */
-  char *versioned_name;
+  /* The list of names specified by the .symver directive.  */
+  struct elf_versioned_name_list *versioned_name;
 
 #ifdef ECOFF_DEBUGGING
   /* If we are generating ECOFF debugging information, we need some
@@ -77,17 +99,29 @@ struct elf_obj_sy
 #endif
 };
 
-#define OBJ_SYMFIELD_TYPE struct elf_obj_sy
+/* Match section group name, the sh_info field and the section_id
+   field.  */
+struct elf_section_match
+{
+  const char *   group_name;
+  const char *   linked_to_symbol_name;
+  unsigned int   section_id;
+  unsigned int   sh_info;		/* ELF section information.  */
+  bfd_vma        sh_flags;		/* ELF section flags.  */
+  flagword       flags;
+};
 
-#ifndef FALSE
-#define FALSE 0
-#define TRUE  !FALSE
-#endif
+#define OBJ_SYMFIELD_TYPE struct elf_obj_sy
 
 #ifndef obj_begin
 #define obj_begin() elf_begin ()
 #endif
 extern void elf_begin (void);
+
+#ifndef obj_end
+#define obj_end() elf_end ()
+#endif
+extern void elf_end (void);
 
 #ifndef LOCAL_LABEL_PREFIX
 #define LOCAL_LABEL_PREFIX '.'
@@ -116,7 +150,8 @@ extern void elf_begin (void);
 
 int elf_s_get_other (symbolS *);
 #ifndef S_GET_OTHER
-#define S_GET_OTHER(S)	(elf_s_get_other (S))
+#define S_GET_OTHER(S) \
+  (elf_symbol (symbol_get_bfdsym (S))->internal_elf_sym.st_other)
 #endif
 #ifndef S_SET_OTHER
 #define S_SET_OTHER(S,V) \
@@ -150,7 +185,7 @@ extern void elf_frob_file_after_relocs (void);
 #ifndef obj_app_file
 #define obj_app_file elf_file_symbol
 #endif
-extern void elf_file_symbol (const char *, int);
+extern void elf_file_symbol (const char *);
 
 extern void obj_elf_section_change_hook (void);
 
@@ -159,16 +194,17 @@ extern const char * obj_elf_section_name (void);
 extern void obj_elf_previous (int);
 extern void obj_elf_version (int);
 extern void obj_elf_common (int);
+extern void obj_elf_bss (int);
 extern void obj_elf_data (int);
 extern void obj_elf_text (int);
 extern void obj_elf_change_section
-  (const char *, unsigned int, unsigned int, bfd_vma, int, const char *,
-   int, int);
+  (const char *, unsigned int, bfd_vma, int, struct elf_section_match *,
+   bool);
 extern void obj_elf_vtable_inherit (int);
 extern void obj_elf_vtable_entry (int);
 extern struct fix * obj_elf_get_vtable_inherit (void);
 extern struct fix * obj_elf_get_vtable_entry (void);
-extern bfd_boolean obj_elf_seen_attribute
+extern bool obj_elf_seen_attribute
   (int, unsigned int);
 extern int obj_elf_vendor_attribute (int);
 
@@ -188,6 +224,11 @@ void elf_obj_symbol_new_hook (symbolS *);
 #define obj_symbol_new_hook	elf_obj_symbol_new_hook
 #endif
 
+void elf_obj_symbol_clone_hook (symbolS *, symbolS *);
+#ifndef obj_symbol_clone_hook
+#define obj_symbol_clone_hook	elf_obj_symbol_clone_hook
+#endif
+
 void elf_copy_symbol_attributes (symbolS *, symbolS *);
 #ifndef OBJ_COPY_SYMBOL_ATTRIBUTES
 #define OBJ_COPY_SYMBOL_ATTRIBUTES(DEST, SRC) \
@@ -202,7 +243,7 @@ void elf_adjust_symtab (void);
 #ifndef SEPARATE_STAB_SECTIONS
 /* Avoid ifndef each separate macro setting by wrapping the whole of the
    stab group on the assumption that whoever sets SEPARATE_STAB_SECTIONS
-   caters to ECOFF_DEBUGGING and the right setting of INIT_STAB_SECTIONS
+   caters to ECOFF_DEBUGGING and the right setting of INIT_STAB_SECTION
    and OBJ_PROCESS_STAB too, without needing the tweaks below.  */
 
 /* Stabs go in a separate section.  */
@@ -210,8 +251,8 @@ void elf_adjust_symtab (void);
 
 /* We need 12 bytes at the start of the section to hold some initial
    information.  */
-extern void obj_elf_init_stab_section (segT);
-#define INIT_STAB_SECTION(seg) obj_elf_init_stab_section (seg)
+extern void obj_elf_init_stab_section (segT, segT);
+#define INIT_STAB_SECTION(stab, str) obj_elf_init_stab_section (stab, str)
 
 #ifdef ECOFF_DEBUGGING
 /* We smuggle stabs in ECOFF rather than using a separate section.
@@ -221,13 +262,13 @@ extern void obj_elf_init_stab_section (segT);
 #define SEPARATE_STAB_SECTIONS (!ECOFF_DEBUGGING)
 
 #undef  INIT_STAB_SECTION
-#define INIT_STAB_SECTION(seg) \
-  ((void) (ECOFF_DEBUGGING ? 0 : (obj_elf_init_stab_section (seg), 0)))
+#define INIT_STAB_SECTION(stab, str) \
+  ((void) (ECOFF_DEBUGGING ? 0 : (obj_elf_init_stab_section (stab, str), 0)))
 
 #undef OBJ_PROCESS_STAB
-#define OBJ_PROCESS_STAB(seg, what, string, type, other, desc)		\
+#define OBJ_PROCESS_STAB(what, string, type, other, desc)		\
   if (ECOFF_DEBUGGING)							\
-    ecoff_stab ((seg), (what), (string), (type), (other), (desc))
+    ecoff_stab ((what), (string), (type), (other), (desc))
 #endif /* ECOFF_DEBUGGING */
 
 #endif /* SEPARATE_STAB_SECTIONS not defined.  */
@@ -235,6 +276,11 @@ extern void obj_elf_init_stab_section (segT);
 extern void elf_frob_symbol (symbolS *, int *);
 #ifndef obj_frob_symbol
 #define obj_frob_symbol(symp, punt) elf_frob_symbol (symp, &punt)
+#endif
+
+extern void elf_fixup_removed_symbol (symbolS **);
+#ifndef obj_fixup_removed_symbol
+#define obj_fixup_removed_symbol(sympp) elf_fixup_removed_symbol (sympp)
 #endif
 
 extern void elf_pop_insert (void);
@@ -251,5 +297,7 @@ extern void elf_ecoff_set_ext (symbolS *, struct ecoff_extr *);
 extern asection *elf_com_section_ptr;
 extern symbolS * elf_common_parse (int ignore ATTRIBUTE_UNUSED, symbolS *symbolP,
 				   addressT size);
+
+extern void elf_set_group_name (asection *, const char *);
 
 #endif /* _OBJ_ELF_H */

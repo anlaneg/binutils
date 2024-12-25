@@ -12,10 +12,9 @@ foo:
 
 	iretw
 	iretl
-	iret
 	iretq
 	sysretl
-	sysret
+	mov	%rsp,%rbp
 	sysretq
 
 	.intel_syntax noprefix
@@ -24,5 +23,11 @@ foo:
 	iret
 	iretq
 	sysretd
-	sysret
+	mov	rbp,rsp
 	sysretq
+
+	.att_syntax prefix
+	adcxl %ecx, %edx
+	adoxl %ecx, %edx
+	adcxq %rcx, %rdx
+	adoxq %rcx, %rdx

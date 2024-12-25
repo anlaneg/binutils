@@ -1,5 +1,5 @@
 /* tc-or1k.c -- Assembler for the OpenRISC family.
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
    Contributed for OR32 by Johan Rydberg, jrydberg@opencores.org
 
    This file is part of GAS, the GNU Assembler.
@@ -49,20 +49,20 @@ typedef struct
 }
 or1k_insn;
 
-const char comment_chars[]        = "#";
+const char comment_chars[]        = ";#";
 const char line_comment_chars[]   = "#";
 const char line_separator_chars[] = ";";
 const char EXP_CHARS[]            = "eE";
 const char FLT_CHARS[]            = "dD";
 
 #define OR1K_SHORTOPTS "m:"
-const char * md_shortopts = OR1K_SHORTOPTS;
+const char md_shortopts[] = OR1K_SHORTOPTS;
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 unsigned long or1k_machine = 0; /* default */
 
@@ -83,14 +83,12 @@ ignore_pseudo (int val ATTRIBUTE_UNUSED)
   discard_rest_of_line ();
 }
 
-static bfd_boolean nodelay = FALSE;
+static bool nodelay = false;
 static void
 s_nodelay (int val ATTRIBUTE_UNUSED)
 {
-  nodelay = TRUE;
+  nodelay = true;
 }
-
-const char or1k_comment_chars [] = ";#";
 
 /* The target specific pseudo-ops which we support.  */
 const pseudo_typeS md_pseudo_table[] =
@@ -165,7 +163,7 @@ md_operand (expressionS * expressionP)
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
+  int align = bfd_section_alignment (segment);
   return ((size + (1 << align) - 1) & -(1 << align));
 }
 
@@ -275,24 +273,21 @@ md_number_to_chars (char * buf, valueT val, int n)
    type, and store the appropriate bytes in *litP.  The number of LITTLENUMS
    emitted is stored in *sizeP .  An error message is returned, or NULL on OK.  */
 
-/* Equal to MAX_PRECISION in atof-ieee.c.  */
-#define MAX_LITTLENUMS 6
-
 const char *
 md_atof (int type, char * litP, int *  sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
-bfd_boolean
+bool
 or1k_fix_adjustable (fixS * fixP)
 {
   /* We need the symbol name for the VTABLE entries.  */
   if (fixP->fx_r_type == BFD_RELOC_VTABLE_INHERIT
       || fixP->fx_r_type == BFD_RELOC_VTABLE_ENTRY)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 #define GOT_NAME "_GLOBAL_OFFSET_TABLE_"

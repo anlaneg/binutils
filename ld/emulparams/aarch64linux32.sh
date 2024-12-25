@@ -1,3 +1,5 @@
+source_sh ${srcdir}/emulparams/dt-relr.sh
+
 ARCH="aarch64:ilp32"
 MACHINE=
 NOP=0x1f2003d5
@@ -9,7 +11,7 @@ BIG_OUTPUT_FORMAT="elf32-bigaarch64"
 LITTLE_OUTPUT_FORMAT="elf32-littleaarch64"
 NO_REL_RELOCS=yes
 
-TEMPLATE_NAME=elf32
+TEMPLATE_NAME=elf
 EXTRA_EM_FILE=aarch64elf
 
 GENERATE_SHLIB_SCRIPT=yes

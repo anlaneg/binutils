@@ -1,6 +1,6 @@
 /* frv simulator fr400 dependent profiling code.
 
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
    Contributed by Red Hat
 
 This file is part of the GNU simulators.
@@ -16,9 +16,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-*/
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define WANT_CPU
 #define WANT_CPU_FRVBF
 
@@ -174,6 +176,7 @@ set_acc_use_not_media_p4 (SIM_CPU *cpu, INT acc)
     d->cur_acc_p4 &= ~(((DI)1) << acc);
 }
 
+#if 0
 static int
 acc_use_is_media_p4 (SIM_CPU *cpu, INT acc)
 {
@@ -182,6 +185,7 @@ acc_use_is_media_p4 (SIM_CPU *cpu, INT acc)
     return d->cur_acc_p4 & (((DI)1) << acc);
   return 0;
 }
+#endif
 
 static void
 set_use_is_media_p6 (SIM_CPU *cpu, INT fr)
@@ -628,7 +632,6 @@ frvbf_model_fr400_u_media_1 (SIM_CPU *cpu, const IDESC *idesc,
 {
   int cycles;
   FRV_PROFILE_STATE *ps;
-  const CGEN_INSN *insn;
   int busy_adjustment[] = {0, 0};
   int *fr;
 
@@ -639,7 +642,6 @@ frvbf_model_fr400_u_media_1 (SIM_CPU *cpu, const IDESC *idesc,
   cycles = idesc->timing->units[unit_num].done;
 
   ps = CPU_PROFILE_STATE (cpu);
-  insn = idesc->idata;
 
   /* The latency of the registers may be less than previously recorded,
      depending on how they were used previously.
@@ -1669,9 +1671,7 @@ frvbf_model_fr400_u_media_4 (SIM_CPU *cpu, const IDESC *idesc,
 {
   int cycles;
   FRV_PROFILE_STATE *ps;
-  const CGEN_INSN *insn;
   int busy_adjustment[] = {0};
-  int *fr;
 
   if (model_insn == FRV_INSN_MODEL_PASS_1)
     return 0;
@@ -1680,7 +1680,6 @@ frvbf_model_fr400_u_media_4 (SIM_CPU *cpu, const IDESC *idesc,
   cycles = idesc->timing->units[unit_num].done;
 
   ps = CPU_PROFILE_STATE (cpu);
-  insn = idesc->idata;
 
   /* The latency of the registers may be less than previously recorded,
      depending on how they were used previously.
@@ -1705,7 +1704,6 @@ frvbf_model_fr400_u_media_4 (SIM_CPU *cpu, const IDESC *idesc,
   post_wait_for_FR (cpu, out_FRk);
 
   /* Restore the busy cycles of the registers we used.  */
-  fr = ps->fr_busy;
 
   /* The latency of the output register will be at least the latency of the
      other inputs.  Once initiated, post-processing will take 1 cycle.  */
@@ -1747,7 +1745,6 @@ frvbf_model_fr400_u_media_4_acc_dual (SIM_CPU *cpu, const IDESC *idesc,
 {
   int cycles;
   FRV_PROFILE_STATE *ps;
-  const CGEN_INSN *insn;
   INT ACC40Si_1;
   INT FRk_1;
 
@@ -1760,8 +1757,6 @@ frvbf_model_fr400_u_media_4_acc_dual (SIM_CPU *cpu, const IDESC *idesc,
   ps = CPU_PROFILE_STATE (cpu);
   ACC40Si_1 = DUAL_REG (in_ACC40Si);
   FRk_1 = DUAL_REG (out_FRk);
-
-  insn = idesc->idata;
 
   /* The post processing must wait if there is a dependency on a FR
      which is not ready yet.  */
@@ -1798,7 +1793,6 @@ frvbf_model_fr400_u_media_6 (SIM_CPU *cpu, const IDESC *idesc,
 {
   int cycles;
   FRV_PROFILE_STATE *ps;
-  const CGEN_INSN *insn;
   int busy_adjustment[] = {0};
   int *fr;
 
@@ -1809,7 +1803,6 @@ frvbf_model_fr400_u_media_6 (SIM_CPU *cpu, const IDESC *idesc,
   cycles = idesc->timing->units[unit_num].done;
 
   ps = CPU_PROFILE_STATE (cpu);
-  insn = idesc->idata;
 
   /* The latency of the registers may be less than previously recorded,
      depending on how they were used previously.

@@ -1,4 +1,4 @@
-/* Copyright 2012-2019 Free Software Foundation, Inc.
+/* Copyright 2012-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -97,7 +97,7 @@ SYMBOL(main):
 	.byte	0x87
 	.4byte	.Lskeleton_debug_line0	/* DW_AT_stmt_list */
 
-	/* Manually inserted to have a DW_AT_specification refering to
+	/* Manually inserted to have a DW_AT_specification referring to
 	   something and appearing ahead of it.  */
 	.uleb128 0x8	/* DW_TAG_class_type */
 	.4byte .Ltu_class_type - .Ltu_start_dwo
@@ -143,7 +143,7 @@ SYMBOL(main):
 	.4byte	0	/* Offset to Type DIE */
 	.uleb128 0x2	/* (DIE (0) DW_TAG_type_unit) */
 	.ascii "/tmp/src/gdb/testsuite\0"	/* DW_AT_comp_dir */
-	.ascii "fission-reread.dwo\0" /* DW_AT_GNU_dwo_name */
+	.asciz DWO /* DW_AT_GNU_dwo_name */
 	.4byte	.Ldebug_pubnames0	/* DW_AT_GNU_pubnames */
 	.4byte	.Ldebug_pubtypes0	/* DW_AT_GNU_pubtypes */
 	.4byte	.Ldebug_addr0	/* DW_AT_GNU_addr_base */
@@ -214,7 +214,7 @@ SYMBOL(main):
 	.4byte	.Letext0-.Ltext0	/* DW_AT_high_pc */
 	.4byte	.Ldebug_line0	/* DW_AT_stmt_list */
 	.ascii "/tmp/src/gdb/testsuite\0"	/* DW_AT_comp_dir */
-	.ascii "fission-reread.dwo\0" /* DW_AT_GNU_dwo_name */
+	.asciz DWO /* DW_AT_GNU_dwo_name */
 	.4byte	.Ldebug_pubnames0	/* DW_AT_GNU_pubnames */
 	.4byte	.Ldebug_pubtypes0	/* DW_AT_GNU_pubtypes */
 	.4byte	.Ldebug_addr0	/* DW_AT_GNU_addr_base */
@@ -460,3 +460,8 @@ SYMBOL(main):
 .Ldebug_addr0:
 	.4byte	.LFB0	/* DW_AT_low_pc */
 	.4byte	SYMBOL(baz)	/* DW_AT_location */
+#ifdef __arm__
+	.section	.note.GNU-stack,"",%progbits
+#else
+	.section	.note.GNU-stack,"",@progbits
+#endif

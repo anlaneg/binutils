@@ -1,5 +1,5 @@
 /* BFD back-end for Irix core files.
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2024 Free Software Foundation, Inc.
    Written by Stu Grossman, Cygnus Support.
    Converted to back-end form by Ian Lance Taylor, Cygnus Support
 
@@ -61,7 +61,7 @@ do_sections64 (bfd *abfd, struct coreout *coreout)
 
   for (i = 0; i < coreout->c_nvmap; i++)
     {
-      val = bfd_bread (&vmap, (bfd_size_type) sizeof vmap, abfd);
+      val = bfd_read (&vmap, sizeof vmap, abfd);
       if (val != sizeof vmap)
 	break;
 
@@ -109,7 +109,7 @@ do_sections (bfd *abfd, struct coreout *coreout)
 
   for (i = 0; i < coreout->c_nvmap; i++)
     {
-      val = bfd_bread (&vmap, (bfd_size_type) sizeof vmap, abfd);
+      val = bfd_read (&vmap, sizeof vmap, abfd);
       if (val != sizeof vmap)
 	break;
 
@@ -166,15 +166,15 @@ make_bfd_asection (bfd *abfd,
   return asect;
 }
 
-static const bfd_target *
+static bfd_cleanup
 irix_core_core_file_p (bfd *abfd)
 {
   int val;
   struct coreout coreout;
   struct idesc *idg, *idf, *ids;
-  bfd_size_type amt;
+  size_t amt;
 
-  val = bfd_bread (&coreout, (bfd_size_type) sizeof coreout, abfd);
+  val = bfd_read (&coreout, sizeof coreout, abfd);
   if (val != sizeof coreout)
     {
       if (bfd_get_error () != bfd_error_system_call)
@@ -203,7 +203,8 @@ irix_core_core_file_p (bfd *abfd)
   if (!core_hdr (abfd))
     return NULL;
 
-  strncpy (core_command (abfd), coreout.c_name, CORE_NAMESIZE);
+  strncpy (core_command (abfd), coreout.c_name, CORE_NAMESIZE - 1);
+  core_command (abfd)[CORE_NAMESIZE - 1] = 0;
   core_signal (abfd) = coreout.c_sigcause;
 
   if (bfd_seek (abfd, coreout.c_vmapoffset, SEEK_SET) != 0)
@@ -244,7 +245,7 @@ irix_core_core_file_p (bfd *abfd)
   /* OK, we believe you.  You're a core file (sure, sure).  */
   bfd_default_set_arch_mach (abfd, bfd_arch_mips, 0);
 
-  return abfd->xvec;
+  return _bfd_no_cleanup;
 
  fail:
   bfd_release (abfd, core_hdr (abfd));
@@ -275,9 +276,9 @@ swap_abort(void)
 #define	NO_GET ((bfd_vma (*) (const void *)) swap_abort)
 #define	NO_PUT ((void (*) (bfd_vma, void *)) swap_abort)
 #define	NO_GETS ((bfd_signed_vma (*) (const void *)) swap_abort)
-#define	NO_GET64 ((bfd_uint64_t (*) (const void *)) swap_abort)
-#define	NO_PUT64 ((void (*) (bfd_uint64_t, void *)) swap_abort)
-#define	NO_GETS64 ((bfd_int64_t (*) (const void *)) swap_abort)
+#define	NO_GET64 ((uint64_t (*) (const void *)) swap_abort)
+#define	NO_PUT64 ((void (*) (uint64_t, void *)) swap_abort)
+#define	NO_GETS64 ((int64_t (*) (const void *)) swap_abort)
 
 const bfd_target core_irix_vec =
   {
@@ -293,6 +294,7 @@ const bfd_target core_irix_vec =
     ' ',						   /* ar_pad_char */
     16,							   /* ar_max_namelen */
     0,							   /* match_priority */
+    TARGET_KEEP_UNUSED_SECTION_SYMBOLS, /* keep unused section symbols.  */
     NO_GET64, NO_GETS64, NO_PUT64,	/* 64 bit data */
     NO_GET, NO_GETS, NO_PUT,		/* 32 bit data */
     NO_GET, NO_GETS, NO_PUT,		/* 16 bit data */

@@ -1,11 +1,11 @@
-# Copyright (C) 2014-2019 Free Software Foundation, Inc.
+# Copyright (C) 2014-2024 Free Software Foundation, Inc.
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
 # notice and this notice are preserved.
 
 cat << EOF
-/* Copyright (C) 2014-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
@@ -19,6 +19,10 @@ SEARCH_DIR(.);
 ${RELOCATING+EXTERN(__ctbp __ep __gp)};
 SECTIONS
 {
+  /* PR 32100: GDB makes use of the fact that the .note.gnu.build-id
+     section is typically placed next to the ELF headers.  */
+  .note.gnu.build-id ${RELOCATING-0}: { *(.note.gnu.build-id) }
+
   /* This saves a little space in the ELF file, since the zda starts
      at a higher location that the ELF headers take up.  */
 
@@ -71,7 +75,7 @@ SECTIONS
   .rela.bss	: { *(.rela.bss) }
   .rel.plt	: { *(.rel.plt) }
   .rela.plt	: { *(.rela.plt) }
-  .init		: { KEEP (*(.init)) } =0
+  .init		: { KEEP (*(SORT_NONE(.init))) } =0
   .plt		: { *(.plt) }
 
   .text		:
@@ -79,7 +83,7 @@ SECTIONS
     *(.text)
     ${RELOCATING+*(.text.*)}
 
-    /* .gnu.warning sections are handled specially by elf32.em.  */
+    /* .gnu.warning sections are handled specially by elf.em.  */
     *(.gnu.warning)
     ${RELOCATING+*(.gnu.linkonce.t*)}
   } =0
@@ -102,7 +106,7 @@ SECTIONS
     *(.call_table_text)
   }
 
-  .fini		: { KEEP (*(.fini)) } =0
+  .fini		: { KEEP (*(SORT_NONE(.fini))) } =0
   .rodata	: { *(.rodata) ${RELOCATING+*(.rodata.*) *(.gnu.linkonce.r*)} }
   .rodata1	: { *(.rodata1) }
 
@@ -196,18 +200,10 @@ SECTIONS
 
   .note.renesas 0 : { KEEP(*(.note.renesas)) }
 
-  /* Stabs debugging sections.  */
-  .stab 0		: { *(.stab) }
-  .stabstr 0		: { *(.stabstr) }
-  .stab.excl 0		: { *(.stab.excl) }
-  .stab.exclstr 0	: { *(.stab.exclstr) }
-  .stab.index 0		: { *(.stab.index) }
-  .stab.indexstr 0	: { *(.stab.indexstr) }
-  .comment 0		: { *(.comment) }
-
 EOF
 
-. $srcdir/scripttempl/DWARF.sc
+source_sh $srcdir/scripttempl/misc-sections.sc
+source_sh $srcdir/scripttempl/DWARF.sc
 
 cat <<EOF
   /* User stack.  */

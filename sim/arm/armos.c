@@ -21,7 +21,9 @@
    fun, and definign VAILDATE will define SWI 1 to enter SVC mode, and SWI
    0x11 to halt the emulator.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "ansidecl.h"
 #include "libiberty.h"
 
@@ -29,15 +31,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
-#include "targ-vals.h"
-
-#ifndef TARGET_O_BINARY
-#define TARGET_O_BINARY 0
-#endif
-
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>		/* For SEEK_SET etc.  */
-#endif
 
 #include "armdefs.h"
 #include "armos.h"
@@ -54,7 +48,7 @@
 /* For RDIError_BreakpointReached.  */
 #include "dbg_rdi.h"
 
-#include "gdb/callback.h"
+#include "sim/callback.h"
 extern host_callback *sim_callback;
 
 extern unsigned ARMul_OSInit       (ARMul_State *);
@@ -105,7 +99,6 @@ ARMul_OSInit (ARMul_State * state)
 #ifndef NOOS
 #ifndef VALIDATE
   ARMword instr, i, j;
-  struct OSblock *OSptr = (struct OSblock *) state->OSptr;
 
   if (state->OSptr == NULL)
     {
@@ -117,7 +110,6 @@ ARMul_OSInit (ARMul_State * state)
 	}
     }
 
-  OSptr = (struct OSblock *) state->OSptr;
   state->Reg[13] = ADDRSUPERSTACK;			/* Set up a stack for the current mode...  */
   ARMul_SetReg (state, SVC32MODE,   13, ADDRSUPERSTACK);/* ...and for supervisor mode...  */
   ARMul_SetReg (state, ABORT32MODE, 13, ADDRSUPERSTACK);/* ...and for abort 32 mode...  */
@@ -186,7 +178,17 @@ ARMul_OSInit (ARMul_State * state)
    return TRUE;
 }
 
-static int translate_open_mode[] =
+/* These are libgloss defines, but seem to be common across all supported ARM
+   targets at the moment.  These should get moved to the callback open_map.  */
+#define TARGET_O_BINARY 0
+#define TARGET_O_APPEND 0x8
+#define TARGET_O_CREAT 0x200
+#define TARGET_O_RDONLY 0x0
+#define TARGET_O_RDWR 0x2
+#define TARGET_O_TRUNC 0x400
+#define TARGET_O_WRONLY 0x1
+
+static const int translate_open_mode[] =
 {
   TARGET_O_RDONLY,		/* "r"   */
   TARGET_O_RDONLY + TARGET_O_BINARY,	/* "rb"  */
@@ -293,8 +295,8 @@ SWIread (ARMul_State * state, ARMword f, ARMword ptr, ARMword len)
     {
       sim_callback->printf_filtered
 	(sim_callback,
-	 "sim: Unable to read 0x%ulx bytes - out of memory\n",
-	 len);
+	 "sim: Unable to read 0x%lx bytes - out of memory\n",
+	 (long)len);
       return;
     }
 
@@ -437,7 +439,7 @@ ARMul_OSHandleSWI (ARMul_State * state, ARMword number)
     case SWI_Time:
       if (swi_mask & SWI_MASK_DEMON)
 	{
-	  state->Reg[0] = (ARMword) sim_callback->time (sim_callback, NULL);
+	  state->Reg[0] = (ARMword) sim_callback->time (sim_callback);
 	  OSptr->ErrorNo = sim_callback->get_errno (sim_callback);
 	}
       else
@@ -592,7 +594,7 @@ ARMul_OSHandleSWI (ARMul_State * state, ARMword number)
 	      break;
 
 	    case AngelSWI_Reason_Time:
-	      state->Reg[0] = (ARMword) sim_callback->time (sim_callback, NULL);
+	      state->Reg[0] = (ARMword) sim_callback->time (sim_callback);
 	      OSptr->ErrorNo = sim_callback->get_errno (sim_callback);
 	      break;
 
@@ -695,11 +697,13 @@ ARMul_OSHandleSWI (ARMul_State * state, ARMword number)
 	    case AngelSWI_Reason_Remove:
 	      SWIremove (state,
 			 ARMul_ReadWord (state, addr));
+	      break;
 
 	    case AngelSWI_Reason_Rename:
 	      SWIrename (state,
 			 ARMul_ReadWord (state, addr),
 			 ARMul_ReadWord (state, addr + 4));
+	      break;
 	    }
 	}
       else
@@ -781,7 +785,7 @@ ARMul_OSHandleSWI (ARMul_State * state, ARMword number)
 	      break;
 
 	    case 17: /* Utime.  */
-	      state->Reg[0] = state->Reg[1] = (ARMword) sim_callback->time (sim_callback, NULL);
+	      state->Reg[0] = state->Reg[1] = (ARMword) sim_callback->time (sim_callback);
 	      OSptr->ErrorNo = sim_callback->get_errno (sim_callback);
 	      break;
 
@@ -828,6 +832,7 @@ ARMul_OSHandleSWI (ARMul_State * state, ARMword number)
 	    }
 	  break;
 	}
+      ATTRIBUTE_FALLTHROUGH;
 
     default:
       unhandled = TRUE;

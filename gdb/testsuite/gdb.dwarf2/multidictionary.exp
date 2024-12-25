@@ -1,4 +1,4 @@
-# Copyright 2019 Free Software Foundation, Inc.
+# Copyright 2019-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,14 +18,12 @@
 load_lib dwarf.exp
 
 # This test can only be run on targets which support DWARF.
-if {![dwarf2_support]} {
-    return 0
-}
+require dwarf2_support
 
 standard_testfile main.c .S
 
 # Create the DWARF.  This is derived from the reproducer in the bug
-# mentioned above.  This DIE tree is typical of compilations wtih
+# mentioned above.  This DIE tree is typical of compilations with
 # LTO enabled.
 
 set asm_file [standard_output_file $srcfile2]
@@ -147,7 +145,10 @@ if {[build_executable $testfile.exp $testfile [list $asm_file $srcfile] {}] \
 }
 
 # We force the DIEs above to be read in via "-readnow".
-gdb_spawn_with_cmdline_opts "-readnow"
+save_vars { GDBFLAGS } {
+    set GDBFLAGS "$GDBFLAGS -readnow"
+    clean_restart
+}
 gdb_load $binfile
 
 # All we need to do is check whether GDB is alive.  Without

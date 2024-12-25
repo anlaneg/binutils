@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (C) 2018-2019 Free Software Foundation, Inc.
+# Copyright (C) 2018-2024 Free Software Foundation, Inc.
 #
 # This file is part of GDB.
 #
@@ -30,19 +30,20 @@
 # FORMAT must be a string compatible with "strftime".  If nothing is
 # provided, we choose a reasonable format.
 
-import fileinput
 import datetime
-import sys
+import fileinput
 import os
+import sys
 
 if len(sys.argv) > 1:
     fmt = sys.argv[1]
 else:
-    fmt = '[%b %d %H:%M:%S]'
+    fmt = "[%b %d %H:%M:%S]"
 
 mypid = os.getpid()
 
-for line in fileinput.input('-'):
-    sys.stdout.write("{} [{}] {}".format(datetime.datetime.now().strftime(fmt),
-                                         mypid, line))
+for line in fileinput.input("-"):
+    sys.stdout.write(
+        "{} [{}] {}".format(datetime.datetime.now().strftime(fmt), mypid, line)
+    )
     sys.stdout.flush()

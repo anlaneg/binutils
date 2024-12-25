@@ -1,6 +1,6 @@
 /* Target description support for GDB.
 
-   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+   Copyright (C) 2006-2024 Free Software Foundation, Inc.
 
    Contributed by CodeSourcery.
 
@@ -19,15 +19,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TARGET_DESCRIPTIONS_H
-#define TARGET_DESCRIPTIONS_H 1
-#include "common/tdesc.h"
+#ifndef GDB_TARGET_DESCRIPTIONS_H
+#define GDB_TARGET_DESCRIPTIONS_H
+#include "gdbsupport/tdesc.h"
+#include "gdbarch.h"
 
 struct tdesc_arch_data;
 struct target_ops;
-/* An inferior's target description info is stored in this opaque
-   object.  There's one such object per inferior.  */
-struct target_desc_info;
 struct inferior;
 
 /* Fetch the current inferior's description, and switch its current
@@ -41,27 +39,10 @@ void target_find_description (void);
 
 void target_clear_description (void);
 
-/* Return the current inferior's target description.  This should only
-   be used by gdbarch initialization code; most access should be
-   through an existing gdbarch.  */
+/* Return INF's target description.  This should only be used by gdbarch
+   initialization code; most access should be through an existing gdbarch.  */
 
-const struct target_desc *target_current_description (void);
-
-/* Copy inferior target description data.  Used for example when
-   handling (v)forks, where child's description is the same as the
-   parent's, since the child really is a copy of the parent.  */
-
-void copy_inferior_target_desc_info (struct inferior *destinf,
-				     struct inferior *srcinf);
-
-/* Free a target_desc_info object.  */
-
-void target_desc_info_free (struct target_desc_info *tdesc_info);
-
-/* Returns true if INFO indicates the target description had been
-   supplied by the user.  */
-
-int target_desc_info_from_user_p (struct target_desc_info *info);
+const target_desc *target_current_description (inferior *inf);
 
 /* Record architecture-specific functions to call for pseudo-register
    support.  If tdesc_use_registers is called and gdbarch_num_pseudo_regs
@@ -79,6 +60,42 @@ void set_tdesc_pseudo_register_reggroup_p
   (struct gdbarch *gdbarch,
    gdbarch_register_reggroup_p_ftype *pseudo_reggroup_p);
 
+/* Pointer to a function that should be called for each unknown register in
+   a target description, used by TDESC_USE_REGISTERS.
+
+   GDBARCH is the architecture the target description is for, FEATURE is
+   the feature the unknown register is in, and REG_NAME is the name of the
+   register from the target description.  The POSSIBLE_REGNUM is a proposed
+   (GDB internal) number for this register.
+
+   The callback function can return, (-1) to indicate that the register
+   should not be assigned POSSIBLE_REGNUM now (though it might be later),
+   GDB will number the register automatically later on.  Return
+   POSSIBLE_REGNUM (or greater) to have this register assigned that number.
+   Returning a value less that POSSIBLE_REGNUM is also acceptable, but take
+   care not to clash with a register number that has already been
+   assigned.
+
+   The callback will always be called on the registers in the order they
+   appear in the target description.  This means all unknown registers
+   within a single feature will be called one after another.  */
+
+typedef int (*tdesc_unknown_register_ftype)
+	(struct gdbarch *gdbarch, tdesc_feature *feature,
+	 const char *reg_name, int possible_regnum);
+
+/* A deleter adapter for a target arch data.  */
+
+struct tdesc_arch_data_deleter
+{
+  void operator() (struct tdesc_arch_data *data) const;
+};
+
+/* A unique pointer specialization that holds a target_desc.  */
+
+typedef std::unique_ptr<tdesc_arch_data, tdesc_arch_data_deleter>
+  tdesc_arch_data_up;
+
 /* Update GDBARCH to use the TARGET_DESC for registers.  TARGET_DESC
    may be GDBARCH's target description or (if GDBARCH does not have
    one which describes registers) another target description
@@ -94,18 +111,13 @@ void set_tdesc_pseudo_register_reggroup_p
 
 void tdesc_use_registers (struct gdbarch *gdbarch,
 			  const struct target_desc *target_desc,
-			  struct tdesc_arch_data *early_data);
+			  tdesc_arch_data_up &&early_data,
+			  tdesc_unknown_register_ftype unk_reg_cb = NULL);
 
 /* Allocate initial data for validation of a target description during
    gdbarch initialization.  */
 
-struct tdesc_arch_data *tdesc_data_alloc (void);
-
-/* Clean up data allocated by tdesc_data_alloc.  This should only
-   be called to discard the data; tdesc_use_registers takes ownership
-   of its EARLY_DATA argument.  */
-
-void tdesc_data_cleanup (void *data_untyped);
+tdesc_arch_data_up tdesc_data_alloc ();
 
 /* Search FEATURE for a register named NAME.  Record REGNO and the
    register in DATA; when tdesc_use_registers is called, REGNO will be
@@ -138,6 +150,10 @@ int tdesc_numbered_register_choices (const struct tdesc_feature *feature,
 				     struct tdesc_arch_data *data,
 				     int regno, const char *const names[]);
 
+/* Return true if DATA contains an entry for REGNO, a GDB register
+   number.  */
+
+extern bool tdesc_found_register (struct tdesc_arch_data *data, int regno);
 
 /* Accessors for target descriptions.  */
 
@@ -197,25 +213,12 @@ struct type *tdesc_find_type (struct gdbarch *gdbarch, const char *id);
    specify a group.  */
 
 int tdesc_register_in_reggroup_p (struct gdbarch *gdbarch, int regno,
-				  struct reggroup *reggroup);
-
-
-/* A deleter adapter for a target desc.  */
-
-struct target_desc_deleter
-{
-  void operator() (struct target_desc *desc) const;
-};
-
-/* A unique pointer specialization that holds a target_desc.  */
-
-typedef std::unique_ptr<target_desc, target_desc_deleter> target_desc_up;
+				  const struct reggroup *reggroup);
 
 /* Methods for constructing a target description.  */
 
 void set_tdesc_architecture (struct target_desc *,
 			     const struct bfd_arch_info *);
-void set_tdesc_osabi (struct target_desc *, enum gdb_osabi osabi);
 void set_tdesc_property (struct target_desc *,
 			 const char *key, const char *value);
 void tdesc_add_compatible (struct target_desc *,
@@ -233,4 +236,4 @@ void record_xml_tdesc (const char *xml_file,
 }
 #endif
 
-#endif /* TARGET_DESCRIPTIONS_H */
+#endif /* GDB_TARGET_DESCRIPTIONS_H */

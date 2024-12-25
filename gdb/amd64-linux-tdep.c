@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux x86-64.
 
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
    Contributed by Jiri Smid, SuSE Labs.
 
    This file is part of GDB.
@@ -18,8 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "arch-utils.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "gdbcore.h"
 #include "regcache.h"
@@ -33,7 +33,7 @@
 #include "amd64-linux-tdep.h"
 #include "i386-linux-tdep.h"
 #include "linux-tdep.h"
-#include "common/x86-xstate.h"
+#include "gdbsupport/x86-xstate.h"
 
 #include "amd64-tdep.h"
 #include "solib-svr4.h"
@@ -41,12 +41,19 @@
 #include "glibc-tdep.h"
 #include "arch/amd64.h"
 #include "target-descriptions.h"
+#include "expop.h"
+#include "arch/amd64-linux-tdesc.h"
+#include "inferior.h"
 
 /* The syscall's XML filename for i386.  */
 #define XML_SYSCALL_FILENAME_AMD64 "syscalls/amd64-linux.xml"
 
 #include "record-full.h"
 #include "linux-record.h"
+
+#include <string_view>
+
+#define DEFAULT_TAG_MASK 0xffffffffffffffffULL
 
 /* Mapping between the general-purpose registers in `struct user'
    format and GDB's register cache layout.  */
@@ -84,6 +91,8 @@ int amd64_linux_gregset_reg_offset[] =
   -1, -1, -1, -1, -1, -1, -1, -1, -1,
   -1, -1, -1, -1, -1, -1, -1, -1,
   -1, -1, -1, -1, -1, -1, -1, -1,
+  /* MPX is deprecated.  Yet we keep this to not give the registers below
+     a new number.  That could break older gdbservers.  */
   -1, -1, -1, -1,		/* MPX registers BND0 ... BND3.  */
   -1, -1,			/* MPX registers BNDCFGU and BNDSTATUS.  */
   -1, -1, -1, -1, -1, -1, -1, -1,     /* xmm16 ... xmm31 (AVX512)  */
@@ -132,7 +141,7 @@ static const gdb_byte amd64_x32_linux_sigtramp_code[] =
    the routine.  Otherwise, return 0.  */
 
 static CORE_ADDR
-amd64_linux_sigtramp_start (struct frame_info *this_frame)
+amd64_linux_sigtramp_start (const frame_info_ptr &this_frame)
 {
   struct gdbarch *gdbarch;
   const gdb_byte *sigtramp_code;
@@ -146,7 +155,7 @@ amd64_linux_sigtramp_start (struct frame_info *this_frame)
      PC is not at the start of the instruction sequence, there will be
      a few trailing readable bytes on the stack.  */
 
-  if (!safe_frame_unwind_memory (this_frame, pc, buf, sizeof buf))
+  if (!safe_frame_unwind_memory (this_frame, pc, buf))
     return 0;
 
   if (buf[0] != LINUX_SIGTRAMP_INSN0)
@@ -155,7 +164,7 @@ amd64_linux_sigtramp_start (struct frame_info *this_frame)
 	return 0;
 
       pc -= LINUX_SIGTRAMP_OFFSET1;
-      if (!safe_frame_unwind_memory (this_frame, pc, buf, sizeof buf))
+      if (!safe_frame_unwind_memory (this_frame, pc, buf))
 	return 0;
     }
 
@@ -174,7 +183,7 @@ amd64_linux_sigtramp_start (struct frame_info *this_frame)
    routine.  */
 
 static int
-amd64_linux_sigtramp_p (struct frame_info *this_frame)
+amd64_linux_sigtramp_p (const frame_info_ptr &this_frame)
 {
   CORE_ADDR pc = get_frame_pc (this_frame);
   const char *name;
@@ -200,7 +209,7 @@ amd64_linux_sigtramp_p (struct frame_info *this_frame)
    address of the associated sigcontext structure.  */
 
 static CORE_ADDR
-amd64_linux_sigcontext_addr (struct frame_info *this_frame)
+amd64_linux_sigcontext_addr (const frame_info_ptr &this_frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -236,7 +245,7 @@ amd64_linux_get_syscall_number (struct gdbarch *gdbarch,
      is stored at %rax register.  */
   regcache->cooked_read (AMD64_LINUX_ORIG_RAX_REGNUM, buf);
 
-  ret = extract_signed_integer (buf, 8, byte_order);
+  ret = extract_signed_integer (buf, byte_order);
 
   return ret;
 }
@@ -278,14 +287,12 @@ static int amd64_linux_sc_reg_offset[] =
 
 static int
 amd64_linux_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
-				 struct reggroup *group)
+				 const struct reggroup *group)
 { 
-  if (regnum == AMD64_LINUX_ORIG_RAX_REGNUM
-      || regnum == AMD64_FSBASE_REGNUM
-      || regnum == AMD64_GSBASE_REGNUM)
+  if (regnum == AMD64_LINUX_ORIG_RAX_REGNUM)
     return (group == system_reggroup
-            || group == save_reggroup
-            || group == restore_reggroup);
+	    || group == save_reggroup
+	    || group == restore_reggroup);
   return i386_register_reggroup_p (gdbarch, regnum, group);
 }
 
@@ -458,6 +465,12 @@ amd64_canonicalize_syscall (enum amd64_syscall syscall_number)
   case amd64_sys_pipe:
   case amd64_x32_sys_pipe:
     return gdb_sys_pipe;
+
+  case amd64_sys_pipe2:
+    return gdb_sys_pipe2;
+
+  case amd64_sys_getrandom:
+    return gdb_sys_getrandom;
 
   case amd64_sys_select:
   case amd64_x32_sys_select:
@@ -1464,7 +1477,7 @@ amd64_linux_syscall_record_common (struct regcache *regcache,
     case amd64_sys_rt_sigreturn:
     case amd64_x32_sys_rt_sigreturn:
       if (amd64_all_but_ip_registers_record (regcache))
-        return -1;
+	return -1;
       return 0;
       break;
 
@@ -1495,17 +1508,18 @@ amd64_linux_syscall_record_common (struct regcache *regcache,
 
   if (syscall_gdb == gdb_sys_no_syscall)
     {
-      printf_unfiltered (_("Process record and replay target doesn't "
-                           "support syscall number %s\n"), 
-			 pulongest (syscall_native));
+      gdb_printf (gdb_stderr,
+		  _("Process record and replay target doesn't "
+		    "support syscall number %s\n"), 
+		  pulongest (syscall_native));
       return -1;
     }
   else
     {
       ret = record_linux_system_call (syscall_gdb, regcache,
-                                      linux_record_tdep_p);
+				      linux_record_tdep_p);
       if (ret)
-        return ret;
+	return ret;
     }
 
  record_regs:
@@ -1538,8 +1552,8 @@ amd64_x32_linux_syscall_record (struct regcache *regcache)
 
 static int
 amd64_linux_record_signal (struct gdbarch *gdbarch,
-                           struct regcache *regcache,
-                           enum gdb_signal signal)
+			   struct regcache *regcache,
+			   enum gdb_signal signal)
 {
   ULONGEST rsp;
 
@@ -1561,43 +1575,14 @@ amd64_linux_record_signal (struct gdbarch *gdbarch,
      sp -= sizeof (struct rt_sigframe);  */
   rsp -= AMD64_LINUX_frame_size;
   if (record_full_arch_list_add_mem (rsp, AMD64_LINUX_redzone
-                                     + AMD64_LINUX_xstate
-                                     + AMD64_LINUX_frame_size))
+				     + AMD64_LINUX_xstate
+				     + AMD64_LINUX_frame_size))
     return -1;
 
   if (record_full_arch_list_add_end ())
     return -1;
 
   return 0;
-}
-
-const target_desc *
-amd64_linux_read_description (uint64_t xcr0_features_bit, bool is_x32)
-{
-  static target_desc *amd64_linux_tdescs \
-    [2/*AVX*/][2/*MPX*/][2/*AVX512*/][2/*PKRU*/] = {};
-  static target_desc *x32_linux_tdescs[2/*AVX*/][2/*AVX512*/] = {};
-
-  target_desc **tdesc;
-
-  if (is_x32)
-    {
-      tdesc = &x32_linux_tdescs[(xcr0_features_bit & X86_XSTATE_AVX) ? 1 : 0 ]
-	[(xcr0_features_bit & X86_XSTATE_AVX512) ? 1 : 0];
-    }
-  else
-    {
-      tdesc = &amd64_linux_tdescs[(xcr0_features_bit & X86_XSTATE_AVX) ? 1 : 0]
-	[(xcr0_features_bit & X86_XSTATE_MPX) ? 1 : 0]
-	[(xcr0_features_bit & X86_XSTATE_AVX512) ? 1 : 0]
-	[(xcr0_features_bit & X86_XSTATE_PKRU) ? 1 : 0];
-    }
-
-  if (*tdesc == NULL)
-    *tdesc = amd64_create_target_description (xcr0_features_bit, is_x32,
-					      true, true);
-
-  return *tdesc;
 }
 
 /* Get Linux/x86 target description from core dump.  */
@@ -1608,7 +1593,10 @@ amd64_linux_core_read_description (struct gdbarch *gdbarch,
 				  bfd *abfd)
 {
   /* Linux/x86-64.  */
-  uint64_t xcr0 = i386_linux_core_read_xcr0 (abfd);
+  x86_xsave_layout layout;
+  uint64_t xcr0 = i386_linux_core_read_xsave_info (abfd, layout);
+  if (xcr0 == 0)
+    xcr0 = X86_XSTATE_SSE_MASK;
 
   return amd64_linux_read_description (xcr0 & X86_XSTATE_ALL_MASK,
 				       gdbarch_ptr_bit (gdbarch) == 32);
@@ -1649,12 +1637,14 @@ amd64_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 					  void *cb_data,
 					  const struct regcache *regcache)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   cb (".reg", 27 * 8, 27 * 8, &i386_gregset, NULL, cb_data);
   cb (".reg2", 512, 512, &amd64_fpregset, NULL, cb_data);
-  cb (".reg-xstate", X86_XSTATE_SIZE (tdep->xcr0), X86_XSTATE_SIZE (tdep->xcr0),
-      &amd64_linux_xstateregset, "XSAVE extended state", cb_data);
+  if (tdep->xsave_layout.sizeof_xsave != 0)
+    cb (".reg-xstate", tdep->xsave_layout.sizeof_xsave,
+	tdep->xsave_layout.sizeof_xsave, &amd64_linux_xstateregset,
+	"XSAVE extended state", cb_data);
 }
 
 /* The instruction sequences used in x86_64 machines for a
@@ -1733,16 +1723,15 @@ amd64_dtrace_disable_probe (struct gdbarch *gdbarch, CORE_ADDR addr)
 /* Implementation of `gdbarch_dtrace_parse_probe_argument', as defined
    in gdbarch.h.  */
 
-static void
+static expr::operation_up
 amd64_dtrace_parse_probe_argument (struct gdbarch *gdbarch,
-				   struct parser_state *pstate,
 				   int narg)
 {
-  struct stoken str;
-
   /* DTrace probe arguments can be found on the ABI-defined places for
      regular arguments at the current PC.  The probe abstraction
      currently supports up to 12 arguments for probes.  */
+
+  using namespace expr;
 
   if (narg < 6)
     {
@@ -1757,12 +1746,7 @@ amd64_dtrace_parse_probe_argument (struct gdbarch *gdbarch,
 	};
       int regno = arg_reg_map[narg];
       const char *regname = user_reg_map_regnum_to_name (gdbarch, regno);
-
-      write_exp_elt_opcode (pstate, OP_REGISTER);
-      str.ptr = regname;
-      str.length = strlen (regname);
-      write_exp_string (pstate, str);
-      write_exp_elt_opcode (pstate, OP_REGISTER);
+      return make_operation<register_operation> (regname);
     }
   else
     {
@@ -1770,36 +1754,87 @@ amd64_dtrace_parse_probe_argument (struct gdbarch *gdbarch,
       const char *regname = user_reg_map_regnum_to_name (gdbarch, AMD64_RSP_REGNUM);
 
       /* Displacement.  */
-      write_exp_elt_opcode (pstate, OP_LONG);
-      write_exp_elt_type (pstate, builtin_type (gdbarch)->builtin_long);
-      write_exp_elt_longcst (pstate, narg - 6);
-      write_exp_elt_opcode (pstate, OP_LONG);
+      struct type *long_type = builtin_type (gdbarch)->builtin_long;
+      operation_up disp	= make_operation<long_const_operation> (long_type,
+								narg - 6);
 
       /* Register: SP.  */
-      write_exp_elt_opcode (pstate, OP_REGISTER);
-      str.ptr = regname;
-      str.length = strlen (regname);
-      write_exp_string (pstate, str);
-      write_exp_elt_opcode (pstate, OP_REGISTER);
+      operation_up reg = make_operation<register_operation> (regname);
 
-      write_exp_elt_opcode (pstate, BINOP_ADD);
+      operation_up add = make_operation<add_operation> (std::move (disp),
+							std::move (reg));
 
       /* Cast to long. */
-      write_exp_elt_opcode (pstate, UNOP_CAST);
-      write_exp_elt_type (pstate,
-			  lookup_pointer_type (builtin_type (gdbarch)->builtin_long));
-      write_exp_elt_opcode (pstate, UNOP_CAST);
+      operation_up cast = make_operation<unop_cast_operation> (std::move (add),
+							       long_type);
 
-      write_exp_elt_opcode (pstate, UNOP_IND);
+      return make_operation<unop_ind_operation> (std::move (cast));
     }
 }
 
-static void
-amd64_linux_init_abi_common(struct gdbarch_info info, struct gdbarch *gdbarch)
-{
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+/* Extract the untagging mask based on the currently active linear address
+   masking (LAM) mode, which is stored in the /proc/<pid>/status file.
+   If we cannot extract the untag mask (for example, if we don't have
+   execution), we assume address tagging is not enabled and return the
+   DEFAULT_TAG_MASK.  */
 
-  linux_init_abi (info, gdbarch);
+static CORE_ADDR
+amd64_linux_lam_untag_mask ()
+{
+  if (!target_has_execution ())
+    return DEFAULT_TAG_MASK;
+
+  inferior *inf = current_inferior ();
+  if (inf->fake_pid_p)
+    return DEFAULT_TAG_MASK;
+
+  const std::string filename = string_printf ("/proc/%d/status", inf->pid);
+  gdb::unique_xmalloc_ptr<char> status_file
+    = target_fileio_read_stralloc (nullptr, filename.c_str ());
+
+  if (status_file == nullptr)
+    return DEFAULT_TAG_MASK;
+
+  std::string_view status_file_view (status_file.get ());
+  constexpr std::string_view untag_mask_str = "untag_mask:\t";
+  const size_t found = status_file_view.find (untag_mask_str);
+  if (found != std::string::npos)
+    {
+      const char* start = status_file_view.data() + found
+			  + untag_mask_str.length ();
+      char* endptr;
+      errno = 0;
+      unsigned long long result = std::strtoul (start, &endptr, 0);
+      if (errno != 0 || endptr == start)
+	error (_("Failed to parse untag_mask from file %s."),
+	       std::string (filename).c_str ());
+
+      return result;
+    }
+
+   return DEFAULT_TAG_MASK;
+}
+
+/* Adjust watchpoint address based on the currently active linear address
+   masking (LAM) mode using the untag mask.  Check each time for a new
+   mask, as LAM is enabled at runtime.  */
+
+static CORE_ADDR
+amd64_linux_remove_non_address_bits_watchpoint (gdbarch *gdbarch,
+						CORE_ADDR addr)
+{
+  /* Clear insignificant bits of a target address using the untag
+     mask.  */
+  return (addr & amd64_linux_lam_untag_mask ());
+}
+
+static void
+amd64_linux_init_abi_common(struct gdbarch_info info, struct gdbarch *gdbarch,
+			    int num_disp_step_buffers)
+{
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
+
+  linux_init_abi (info, gdbarch, num_disp_step_buffers);
 
   tdep->sigtramp_p = amd64_linux_sigtramp_p;
   tdep->sigcontext_addr = amd64_linux_sigcontext_addr;
@@ -1807,6 +1842,8 @@ amd64_linux_init_abi_common(struct gdbarch_info info, struct gdbarch *gdbarch)
   tdep->sc_num_regs = ARRAY_SIZE (amd64_linux_sc_reg_offset);
 
   tdep->xsave_xcr0_offset = I386_LINUX_XSAVE_XCR0_OFFSET;
+  set_gdbarch_core_read_x86_xsave_layout
+    (gdbarch, i386_linux_core_read_x86_xsave_layout);
 
   /* Add the %orig_rax register used for syscall restarting.  */
   set_gdbarch_write_pc (gdbarch, amd64_linux_write_pc);
@@ -1816,11 +1853,11 @@ amd64_linux_init_abi_common(struct gdbarch_info info, struct gdbarch *gdbarch)
   /* Functions for 'catch syscall'.  */
   set_xml_syscall_file_name (gdbarch, XML_SYSCALL_FILENAME_AMD64);
   set_gdbarch_get_syscall_number (gdbarch,
-                                  amd64_linux_get_syscall_number);
+				  amd64_linux_get_syscall_number);
 
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
-                                             svr4_fetch_objfile_link_map);
+					     svr4_fetch_objfile_link_map);
 
   /* GNU/Linux uses SVR4-style shared libraries.  */
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
@@ -1837,23 +1874,20 @@ amd64_linux_init_abi_common(struct gdbarch_info info, struct gdbarch *gdbarch)
 
   /* Displaced stepping.  */
   set_gdbarch_displaced_step_copy_insn (gdbarch,
-                                        amd64_displaced_step_copy_insn);
+					amd64_displaced_step_copy_insn);
   set_gdbarch_displaced_step_fixup (gdbarch, amd64_displaced_step_fixup);
-  set_gdbarch_displaced_step_location (gdbarch,
-                                       linux_displaced_step_location);
 
   set_gdbarch_process_record (gdbarch, i386_process_record);
   set_gdbarch_process_record_signal (gdbarch, amd64_linux_record_signal);
 
-  set_gdbarch_get_siginfo_type (gdbarch, x86_linux_get_siginfo_type);
-  set_gdbarch_handle_segmentation_fault (gdbarch,
-					 i386_linux_handle_segmentation_fault);
+  set_gdbarch_remove_non_address_bits_watchpoint
+    (gdbarch, amd64_linux_remove_non_address_bits_watchpoint);
 }
 
 static void
 amd64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
   struct tdesc_arch_data *tdesc_data = info.tdesc_data;
   const struct tdesc_feature *feature;
   int valid_p;
@@ -1882,7 +1916,7 @@ amd64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   if (!valid_p)
     return;
 
-  amd64_linux_init_abi_common (info, gdbarch);
+  amd64_linux_init_abi_common (info, gdbarch, 2);
 
   /* Initialize the amd64_linux_record_tdep.  */
   /* These values are the size of the type that will be used in a system
@@ -2055,7 +2089,7 @@ amd64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 
   /* GNU/Linux uses SVR4-style shared libraries.  */
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_lp64_fetch_link_map_offsets);
+    (gdbarch, linux_lp64_fetch_link_map_offsets);
 
   /* Register DTrace handlers.  */
   set_gdbarch_dtrace_parse_probe_argument (gdbarch, amd64_dtrace_parse_probe_argument);
@@ -2067,7 +2101,7 @@ amd64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 static void
 amd64_x32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
   struct tdesc_arch_data *tdesc_data = info.tdesc_data;
   const struct tdesc_feature *feature;
   int valid_p;
@@ -2097,7 +2131,7 @@ amd64_x32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   if (!valid_p)
     return;
 
-  amd64_linux_init_abi_common (info, gdbarch);
+  amd64_linux_init_abi_common (info, gdbarch, 0);
 
   /* Initialize the amd64_x32_linux_record_tdep.  */
   /* These values are the size of the type that will be used in a system
@@ -2269,42 +2303,15 @@ amd64_x32_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 
   /* GNU/Linux uses SVR4-style shared libraries.  */
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_ilp32_fetch_link_map_offsets);
+    (gdbarch, linux_ilp32_fetch_link_map_offsets);
 }
 
+void _initialize_amd64_linux_tdep ();
 void
-_initialize_amd64_linux_tdep (void)
+_initialize_amd64_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_i386, bfd_mach_x86_64,
 			  GDB_OSABI_LINUX, amd64_linux_init_abi);
   gdbarch_register_osabi (bfd_arch_i386, bfd_mach_x64_32,
 			  GDB_OSABI_LINUX, amd64_x32_linux_init_abi);
-
-#if GDB_SELF_TEST
-  struct
-  {
-    const char *xml;
-    uint64_t mask;
-  } xml_masks[] = {
-    { "i386/amd64-linux.xml", X86_XSTATE_SSE_MASK },
-    { "i386/amd64-avx-linux.xml", X86_XSTATE_AVX_MASK },
-    { "i386/amd64-mpx-linux.xml", X86_XSTATE_MPX_MASK },
-    { "i386/amd64-avx-mpx-linux.xml", X86_XSTATE_AVX_MPX_MASK },
-    { "i386/amd64-avx-avx512-linux.xml", X86_XSTATE_AVX_AVX512_MASK },
-    { "i386/amd64-avx-mpx-avx512-pku-linux.xml",
-      X86_XSTATE_AVX_MPX_AVX512_PKU_MASK },
-    { "i386/x32-linux.xml", X86_XSTATE_SSE_MASK },
-    { "i386/x32-avx-linux.xml", X86_XSTATE_AVX_MASK },
-    { "i386/x32-avx-avx512-linux.xml", X86_XSTATE_AVX_AVX512_MASK },
-  };
-
-  for (auto &a : xml_masks)
-    {
-      auto tdesc = amd64_linux_read_description (a.mask,
-						 startswith (a.xml,
-							     "i386/x32"));
-
-      selftests::record_xml_tdesc (a.xml, tdesc);
-    }
-#endif /* GDB_SELF_TEST */
 }

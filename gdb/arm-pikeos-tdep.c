@@ -1,4 +1,4 @@
-/* Copyright (C) 2016-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2016-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,7 +15,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "objfiles.h"
 #include "arm-tdep.h"
 #include "osabi.h"
@@ -81,12 +80,13 @@ arm_pikeos_osabi_sniffer (bfd *abfd)
     return GDB_OSABI_UNKNOWN;
 }
 
+void _initialize_arm_pikeos_tdep ();
 void
-_initialize_arm_pikeos_tdep (void)
+_initialize_arm_pikeos_tdep ()
 {
   /* Register the sniffer for the PikeOS targets.  */
   gdbarch_register_osabi_sniffer (bfd_arch_arm, bfd_target_elf_flavour,
-                                  arm_pikeos_osabi_sniffer);
+				  arm_pikeos_osabi_sniffer);
   gdbarch_register_osabi (bfd_arch_arm, 0, GDB_OSABI_PIKEOS,
-                          arm_pikeos_init_abi);
+			  arm_pikeos_init_abi);
 }

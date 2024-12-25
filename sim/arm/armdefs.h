@@ -14,10 +14,13 @@
     You should have received a copy of the GNU General Public License
     along with this program; if not, see <http://www.gnu.org/licenses/>. */
 
-#include "config.h"
+#ifndef ARMDEFS_H
+#define ARMDEFS_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <ansidecl.h>
 
 #define FALSE 0
 #define TRUE 1
@@ -183,6 +186,7 @@ struct ARMul_State
 *                   Macros to extract instruction fields                    *
 \***************************************************************************/
 
+#undef BIT /* common/sim-bits.h conflict :( */
 #define BIT(n) ( (ARMword)(instr>>(n))&1)	/* bit n of instruction */
 #define BITS(m,n) ( (ARMword)(instr<<(31-(n))) >> ((31-(n))+(m)) )	/* bits m to n of instr */
 #define TOPBITS(n) (instr >> (n))	/* bits 31 to n of instr */
@@ -415,5 +419,8 @@ extern unsigned ARMul_OSHandleSWI (ARMul_State * state, ARMword number);
 extern void ARMul_UndefInstr      (ARMul_State *, ARMword);
 extern void ARMul_FixCPSR         (ARMul_State *, ARMword, ARMword);
 extern void ARMul_FixSPSR         (ARMul_State *, ARMword, ARMword);
-extern void ARMul_ConsolePrint    (ARMul_State *, const char *, ...);
+extern void ARMul_ConsolePrint    (ARMul_State *, const char *, ...)
+    ATTRIBUTE_PRINTF (2, 3);
 extern void ARMul_SelectProcessor (ARMul_State *, unsigned);
+
+#endif

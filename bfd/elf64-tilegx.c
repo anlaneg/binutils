@@ -1,5 +1,5 @@
 /* TILE-Gx-specific support for 64-bit ELF.
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2024 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -28,14 +28,14 @@
 
 /* Support for core dump NOTE sections.  */
 
-static bfd_boolean
+static bool
 tilegx_elf_grok_prstatus (bfd *abfd, Elf_Internal_Note *note)
 {
   int offset;
   size_t size;
 
   if (note->descsz != TILEGX_PRSTATUS_SIZEOF)
-    return FALSE;
+    return false;
 
   /* pr_cursig */
   elf_tdata (abfd)->core->signal =
@@ -54,11 +54,11 @@ tilegx_elf_grok_prstatus (bfd *abfd, Elf_Internal_Note *note)
 					  size, note->descpos + offset);
 }
 
-static bfd_boolean
+static bool
 tilegx_elf_grok_psinfo (bfd *abfd, Elf_Internal_Note *note)
 {
   if (note->descsz != TILEGX_PRPSINFO_SIZEOF)
-    return FALSE;
+    return false;
 
   elf_tdata (abfd)->core->program
     = _bfd_elfcore_strndup (abfd, note->descdata + TILEGX_PRPSINFO_OFFSET_PR_FNAME, 16);
@@ -77,7 +77,7 @@ tilegx_elf_grok_psinfo (bfd *abfd, Elf_Internal_Note *note)
       command[n - 1] = '\0';
   }
 
-  return TRUE;
+  return true;
 }
 
 
@@ -106,7 +106,7 @@ tilegx_elf_grok_psinfo (bfd *abfd, Elf_Internal_Note *note)
 #define elf_backend_check_relocs	     tilegx_elf_check_relocs
 #define elf_backend_adjust_dynamic_symbol    tilegx_elf_adjust_dynamic_symbol
 #define elf_backend_omit_section_dynsym	     tilegx_elf_omit_section_dynsym
-#define elf_backend_size_dynamic_sections    tilegx_elf_size_dynamic_sections
+#define elf_backend_late_size_sections	     tilegx_elf_late_size_sections
 #define elf_backend_relocate_section	     tilegx_elf_relocate_section
 #define elf_backend_finish_dynamic_symbol    tilegx_elf_finish_dynamic_symbol
 #define elf_backend_finish_dynamic_sections  tilegx_elf_finish_dynamic_sections

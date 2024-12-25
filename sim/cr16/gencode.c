@@ -1,5 +1,5 @@
 /* Simulation code for the CR16 processor.
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
    Contributed by M Ranga Swami Reddy <MR.Swami.Reddy@nsc.com>
 
    This file is part of GDB, the GNU debugger.
@@ -17,8 +17,9 @@
    You should have received a copy of the GNU General Public License
    along with this program. If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
-#include "config.h"
 #include <stdio.h>
 #include <ctype.h>
 #include <limits.h>
@@ -48,9 +49,6 @@ write_header (void)
 {
   int i = 0; 
 
-  /* Start searching from end of instruction table.  */
-  const inst *instruction = &cr16_instruction[NUMOPCODES - 1];
-
   /* Loop over instruction table until a full match is found.  */
   for ( ; i < NUMOPCODES; i++)
     printf("void OP_%lX_%X (SIM_DESC, SIM_CPU *);\t\t/* %s */\n",
@@ -65,9 +63,11 @@ write_header (void)
 static void
 write_template (void)
 {
-  int i = 0,j, k, flags;
+  int i = 0, j, k;
 
+  printf ("#include \"defs.h\"\n");
   printf ("#include \"sim-main.h\"\n");
+  printf ("#include \"cr16-sim.h\"\n");
   printf ("#include \"simops.h\"\n\n");
 
   for ( ; i < NUMOPCODES; i++)
@@ -111,9 +111,10 @@ write_template (void)
 
 
 long Opcodes[512];
-static int curop=0;
 
 #if 0
+static int curop=0;
+
 static void
 check_opcodes( long op)
 {
@@ -131,7 +132,8 @@ write_opcodes (void)
   int i = 0, j = 0, k;
   
   /* write out opcode table.  */
-  printf ("#include \"sim-main.h\"\n");
+  printf ("#include \"defs.h\"\n");
+  printf ("#include \"cr16-sim.h\"\n");
   printf ("#include \"simops.h\"\n\n");
   printf ("struct simops Simops[] = {\n");
   

@@ -1,4 +1,4 @@
-# Copyright 2010-2019 Free Software Foundation, Inc.
+# Copyright 2010-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,28 +22,10 @@ proc gdb_py_test_silent_cmd { cmd name report_pass } {
     global gdb_prompt
 
     gdb_test_multiple $cmd $name {
+	-re "Error occurred in Python:.*$gdb_prompt $" { fail $name }
 	-re "Traceback.*$gdb_prompt $" { fail $name }
 	-re "$gdb_prompt $"            { if $report_pass { pass $name } }
     }
-}
-
-# Usage: gdb_py_test_multiple NAME INPUT RESULT {INPUT RESULT}...
-# Run a test named NAME, consisting of multiple lines of input.
-# After each input line INPUT, search for result line RESULT.
-# Succeed if all results are seen; fail otherwise.
-
-proc gdb_py_test_multiple { name args } {
-    global gdb_prompt
-    foreach {input result} $args {
-	if {[gdb_test_multiple $input "$name - $input" {
-	    -re "\[\r\n\]*($result)\[\r\n\]+($gdb_prompt | *>)$" {
-		pass "$name - $input"
-	    }
-	}]} {
-	    return 1
-	}
-    }
-    return 0
 }
 
 # Return the result of python expression EXPR.  DEFAULT is returned if
@@ -69,4 +51,29 @@ proc get_python_valueof { exp default {test ""} } {
 	}
     }
     return ${val}
+}
+
+# Return true if Python module NAME is available, otherwise, return
+# false.
+
+proc gdb_py_module_available { name } {
+    set available "unknown"
+    gdb_test_multiple "python import ${name}" "" {
+	-re -wrap "ModuleNotFoundError.*: No module named '${name}'.*" {
+	    set available false
+	}
+	-re -wrap "ImportError: No module named '?${name}'?.*" {
+	    set available false
+	}
+	-re -wrap "python import ${name}" {
+	    set available true
+	}
+    }
+
+    if { $available == "unknown" } {
+	perror "unexpected output from python import"
+	set available false
+    }
+
+    return ${available}
 }

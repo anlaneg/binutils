@@ -14,6 +14,9 @@
     You should have received a copy of the GNU General Public License
     along with this program; if not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "armdefs.h"
 #include "armos.h"
 #include "armemu.h"
@@ -131,7 +134,7 @@ check_cp15_access (ARMul_State * state,
 	return ARMul_CANT;
       break;
     case 7:
-      /* Permissable combinations:
+      /* Permissible combinations:
 	   Opcode_2  CRm
 	      0       5
 	      0       6
@@ -154,7 +157,7 @@ check_cp15_access (ARMul_State * state,
       break;
 
     case 8:
-      /* Permissable combinations:
+      /* Permissible combinations:
 	   Opcode_2  CRm
 	      0       5
 	      0       6
@@ -229,7 +232,7 @@ write_cp15_reg (ARMul_State * state,
 	  /* Writes are not allowed.  */
 	  return;
 
-	case 1: /* Auxillary Control.  */
+	case 1: /* Auxiliary Control.  */
 	  /* Only BITS (5, 4) and BITS (1, 0) can be written.  */
 	  value &= 0x33;
 	  break;

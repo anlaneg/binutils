@@ -13,6 +13,7 @@ AC_DEFUN([GCC_AC_THREAD_HEADER],
 case $1 in
     aix)	thread_header=config/rs6000/gthr-aix.h ;;
     dce)	thread_header=config/pa/gthr-dce.h ;;
+    gcn)	thread_header=config/gcn/gthr-gcn.h ;;
     lynx)	thread_header=config/gthr-lynx.h ;;
     mipssde)	thread_header=config/mips/gthr-mipssde.h ;;
     posix)	thread_header=gthr-posix.h ;;
@@ -21,6 +22,7 @@ case $1 in
     tpf)	thread_header=config/s390/gthr-tpf.h ;;
     vxworks)	thread_header=config/gthr-vxworks.h ;;
     win32)	thread_header=config/i386/gthr-win32.h ;;
+    mcf)	thread_header=config/i386/gthr-mcf.h ;;
 esac
 AC_SUBST(thread_header)
 ])

@@ -52,7 +52,7 @@
 
    If an instruction field was found, enlarge the field size so that
    it is forced to at least include bits starting from <force_first>
-   (<force_last>).  To stop this occuring, use <force_first> = <last>
+   (<force_last>).  To stop this occurring, use <force_first> = <last>
    + 1 and <force_last> = <first> - 1.
 
    <force_slash>
@@ -64,7 +64,7 @@
 
    Treat any contained register (string) fields as constant when
    determining the instruction field.  For the instruction decode (and
-   controled by IDECODE_EXPAND_SEMANTICS) this forces the expansion of
+   controlled by IDECODE_EXPAND_SEMANTICS) this forces the expansion of
    what would otherwize be non constant bits of an instruction.
 
    <use_switch>
@@ -134,7 +134,7 @@ extern void force_decode_gen_type
 (const char *type);
 
 extern decode_table *load_decode_table
-(char *file_name,
+(const char *file_name,
  int hi_bit_nr);
 
 extern void dump_decode_rule

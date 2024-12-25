@@ -1,6 +1,6 @@
 /* GDB commands implemented in Scheme.
 
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,10 +20,9 @@
 /* See README file in this directory for implementation notes, coding
    conventions, et.al.  */
 
-#include "defs.h"
 #include <ctype.h>
 #include "charset.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "cli/cli-decode.h"
 #include "completer.h"
 #include "guile-internal.h"
@@ -37,7 +36,7 @@
    any side-effects.  This means that the smob needs to store everything
    that was passed to make-command.  */
 
-typedef struct _command_smob
+struct command_smob
 {
   /* This always appears first.  */
   gdb_smob base;
@@ -85,7 +84,7 @@ typedef struct _command_smob
      the object since a reference to it comes from non-gc-managed space
      (the command context pointer).  */
   SCM containing_scm;
-} command_smob;
+};
 
 static const char command_smob_name[] = "gdb:command";
 
@@ -111,7 +110,7 @@ struct cmdscm_completer
 static const struct cmdscm_completer cmdscm_completers[] =
 {
   { "COMPLETE_NONE", noop_completer },
-  { "COMPLETE_FILENAME", filename_completer },
+  { "COMPLETE_FILENAME", filename_maybe_quoted_completer },
   { "COMPLETE_LOCATION", location_completer },
   { "COMPLETE_COMMAND", command_completer },
   { "COMPLETE_SYMBOL", symbol_completer },
@@ -291,10 +290,9 @@ cmdscm_destroyer (struct cmd_list_element *self, void *context)
 /* Called by gdb to invoke the command.  */
 
 static void
-cmdscm_function (struct cmd_list_element *command,
-		 const char *args, int from_tty)
+cmdscm_function (const char *args, int from_tty, cmd_list_element *command)
 {
-  command_smob *c_smob/*obj*/ = (command_smob *) get_cmd_context (command);
+  command_smob *c_smob/*obj*/ = (command_smob *) command->context ();
   SCM arg_scm, tty_scm, result;
 
   gdb_assert (c_smob != NULL);
@@ -383,7 +381,7 @@ cmdscm_completer (struct cmd_list_element *command,
 		  completion_tracker &tracker,
 		  const char *text, const char *word)
 {
-  command_smob *c_smob/*obj*/ = (command_smob *) get_cmd_context (command);
+  command_smob *c_smob/*obj*/ = (command_smob *) command->context ();
   SCM completer_result_scm;
   SCM text_scm, word_scm;
 
@@ -476,9 +474,7 @@ gdbscm_parse_command_name (const char *name,
   struct cmd_list_element *elt;
   int len = strlen (name);
   int i, lastchar;
-  char *prefix_text;
-  const char *prefix_text2;
-  char *result, *msg;
+  char *msg;
 
   /* Skip trailing whitespace.  */
   for (i = len - 1; i >= 0 && (name[i] == ' ' || name[i] == '\t'); --i)
@@ -492,14 +488,11 @@ gdbscm_parse_command_name (const char *name,
   lastchar = i;
 
   /* Find first character of the final word.  */
-  for (; i > 0 && (isalnum (name[i - 1])
-		   || name[i - 1] == '-'
-		   || name[i - 1] == '_');
-       --i)
+  for (; i > 0 && valid_cmd_char_p (name[i - 1]); --i)
     ;
-  result = (char *) xmalloc (lastchar - i + 2);
-  memcpy (result, &name[i], lastchar - i + 1);
-  result[lastchar - i + 1] = '\0';
+  gdb::unique_xmalloc_ptr<char> result ((char *) xmalloc (lastchar - i + 2));
+  memcpy (result.get (), &name[i], lastchar - i + 1);
+  result.get ()[lastchar - i + 1] = '\0';
 
   /* Skip whitespace again.  */
   for (--i; i >= 0 && (name[i] == ' ' || name[i] == '\t'); --i)
@@ -507,36 +500,33 @@ gdbscm_parse_command_name (const char *name,
   if (i < 0)
     {
       *base_list = start_list;
-      return result;
+      return result.release ();
     }
 
-  prefix_text = (char *) xmalloc (i + 2);
-  memcpy (prefix_text, name, i + 1);
-  prefix_text[i + 1] = '\0';
+  gdb::unique_xmalloc_ptr<char> prefix_text ((char *) xmalloc (i + 2));
+  memcpy (prefix_text.get (), name, i + 1);
+  prefix_text.get ()[i + 1] = '\0';
 
-  prefix_text2 = prefix_text;
-  elt = lookup_cmd_1 (&prefix_text2, *start_list, NULL, 1);
+  const char *prefix_text2 = prefix_text.get ();
+  elt = lookup_cmd_1 (&prefix_text2, *start_list, NULL, NULL, 1);
   if (elt == NULL || elt == CMD_LIST_AMBIGUOUS)
     {
-      msg = xstrprintf (_("could not find command prefix '%s'"), prefix_text);
-      xfree (prefix_text);
-      xfree (result);
+      msg = xstrprintf (_("could not find command prefix '%s'"),
+			prefix_text.get ()).release ();
       scm_dynwind_begin ((scm_t_dynwind_flags) 0);
       gdbscm_dynwind_xfree (msg);
       gdbscm_out_of_range_error (func_name, arg_pos,
 				 gdbscm_scm_from_c_string (name), msg);
     }
 
-  if (elt->prefixlist)
+  if (elt->is_prefix ())
     {
-      xfree (prefix_text);
-      *base_list = elt->prefixlist;
-      return result;
+      *base_list = elt->subcommands;
+      return result.release ();
     }
 
-  msg = xstrprintf (_("'%s' is not a prefix command"), prefix_text);
-  xfree (prefix_text);
-  xfree (result);
+  msg = xstrprintf (_("'%s' is not a prefix command"),
+		    prefix_text.get ()).release ();
   scm_dynwind_begin ((scm_t_dynwind_flags) 0);
   gdbscm_dynwind_xfree (msg);
   gdbscm_out_of_range_error (func_name, arg_pos,
@@ -638,9 +628,9 @@ gdbscm_canonicalize_command_name (const char *name, int want_trailing_space)
      One of the COMPLETE_* constants defined in the gdb module.
      A procedure of three arguments: (lambda (self text word) ...).
        Its result is one of:
-         A list of strings.
-         A <gdb:iterator> object that returns the set of possible completions,
-         ending with #f.
+	 A list of strings.
+	 A <gdb:iterator> object that returns the set of possible completions,
+	 ending with #f.
 	 TODO(dje): Once PR 16699 is fixed, add support for returning
 	 a COMPLETE_* constant.
    If not specified, then completion is not supported for this command.
@@ -758,7 +748,8 @@ gdbscm_register_command_x (SCM self)
   c_smob->cmd_name = gdbscm_gc_xstrdup (cmd_name);
   xfree (cmd_name);
 
-  TRY
+  gdbscm_gdb_exception exc {};
+  try
     {
       if (c_smob->is_prefix)
 	{
@@ -768,7 +759,7 @@ gdbscm_register_command_x (SCM self)
 
 	  cmd = add_prefix_cmd (c_smob->cmd_name, c_smob->cmd_class,
 				NULL, c_smob->doc, &c_smob->sub_list,
-				c_smob->name, allow_unknown, cmd_list);
+				allow_unknown, cmd_list);
 	}
       else
 	{
@@ -776,11 +767,11 @@ gdbscm_register_command_x (SCM self)
 			 c_smob->doc, cmd_list);
 	}
     }
-  CATCH (except, RETURN_MASK_ALL)
+  catch (const gdb_exception &except)
     {
-      GDBSCM_HANDLE_GDB_EXCEPTION (except);
+      exc = unpack (except);
     }
-  END_CATCH
+  GDBSCM_HANDLE_GDB_EXCEPTION (exc);
 
   /* Note: At this point the command exists in gdb.
      So no more errors after this point.  */
@@ -790,7 +781,7 @@ gdbscm_register_command_x (SCM self)
   cmd->destroyer = cmdscm_destroyer;
 
   c_smob->command = cmd;
-  set_cmd_context (cmd, c_smob);
+  cmd->set_context (c_smob);
 
   if (gdbscm_is_true (c_smob->complete))
     {

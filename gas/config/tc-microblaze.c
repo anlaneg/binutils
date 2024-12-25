@@ -1,6 +1,6 @@
 /* tc-microblaze.c -- Assemble code for Xilinx MicroBlaze
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -39,7 +39,7 @@
 #define OPTION_EL (OPTION_MD_BASE + 1)
 
 void microblaze_generate_symbol (char *sym);
-static bfd_boolean check_spl_reg (unsigned *);
+static bool check_spl_reg (unsigned *);
 
 /* Several places in this file insert raw instructions into the
    object. They should generate the instruction
@@ -114,7 +114,7 @@ const relax_typeS md_relax_table[] =
   { 0x7fffffff, 0x80000000, INST_WORD_SIZE*2, 0 }   /* 18: TEXT_PC_OFFSET.  */
 };
 
-static struct hash_control * opcode_hash_control;	/* Opcode mnemonics.  */
+static htab_t  opcode_hash_control;	/* Opcode mnemonics.  */
 
 static segT sbss_segment = 0; 	/* Small bss section.  */
 static segT sbss2_segment = 0; 	/* Section not used.  */
@@ -135,35 +135,14 @@ microblaze_generate_symbol (char *sym)
 
 /* Handle the section changing pseudo-ops. */
 
-static void
-microblaze_s_text (int ignore ATTRIBUTE_UNUSED)
-{
-#ifdef OBJ_ELF
-  obj_elf_text (ignore);
-#else
-  s_text (ignore);
-#endif
-}
-
-static void
-microblaze_s_data (int ignore ATTRIBUTE_UNUSED)
-{
-#ifdef OBJ_ELF
-  obj_elf_change_section (".data", SHT_PROGBITS, 0, SHF_ALLOC+SHF_WRITE,
-			  0, 0, 0, 0);
-#else
-  s_data (ignore);
-#endif
-}
-
 /* Things in the .sdata segment are always considered to be in the small data section.  */
 
 static void
 microblaze_s_sdata (int ignore ATTRIBUTE_UNUSED)
 {
 #ifdef OBJ_ELF
-  obj_elf_change_section (".sdata", SHT_PROGBITS, 0, SHF_ALLOC+SHF_WRITE,
-			  0, 0, 0, 0);
+  obj_elf_change_section (".sdata", SHT_PROGBITS, SHF_ALLOC+SHF_WRITE,
+			  0, 0, false);
 #else
   s_data (ignore);
 #endif
@@ -281,16 +260,16 @@ microblaze_s_rdata (int localvar)
   if (localvar == 0)
     {
       /* rodata.  */
-      obj_elf_change_section (".rodata", SHT_PROGBITS, 0, SHF_ALLOC,
-			      0, 0, 0, 0);
+      obj_elf_change_section (".rodata", SHT_PROGBITS, SHF_ALLOC,
+			      0, 0, false);
       if (rodata_segment == 0)
 	rodata_segment = subseg_new (".rodata", 0);
     }
   else
     {
       /* 1 .sdata2.  */
-      obj_elf_change_section (".sdata2", SHT_PROGBITS, 0, SHF_ALLOC,
-			      0, 0, 0, 0);
+      obj_elf_change_section (".sdata2", SHT_PROGBITS, SHF_ALLOC,
+			      0, 0, false);
     }
 #else
   s_data (ignore);
@@ -298,20 +277,13 @@ microblaze_s_rdata (int localvar)
 }
 
 static void
-microblaze_s_bss (int localvar)
+microblaze_s_sbss (int ignore ATTRIBUTE_UNUSED)
 {
 #ifdef OBJ_ELF
-  if (localvar == 0) /* bss.  */
-    obj_elf_change_section (".bss", SHT_NOBITS, 0, SHF_ALLOC+SHF_WRITE,
-			    0, 0, 0, 0);
-  else if (localvar == 1)
-    {
-      /* sbss.  */
-      obj_elf_change_section (".sbss", SHT_NOBITS, 0, SHF_ALLOC+SHF_WRITE,
-			      0, 0, 0, 0);
-      if (sbss_segment == 0)
-	sbss_segment = subseg_new (".sbss", 0);
-    }
+  obj_elf_change_section (".sbss", SHT_NOBITS, SHF_ALLOC+SHF_WRITE,
+			  0, 0, false);
+  if (sbss_segment == 0)
+    sbss_segment = subseg_new (".sbss", 0);
 #else
   s_data (ignore);
 #endif
@@ -385,7 +357,6 @@ microblaze_s_weakext (int ignore ATTRIBUTE_UNUSED)
 const pseudo_typeS md_pseudo_table[] =
 {
   {"lcomm", microblaze_s_lcomm, 1},
-  {"data", microblaze_s_data, 0},
   {"data8", cons, 1},      /* Same as byte.  */
   {"data16", cons, 2},     /* Same as hword.  */
   {"data32", cons, 4},     /* Same as word.  */
@@ -396,9 +367,10 @@ const pseudo_typeS md_pseudo_table[] =
   {"rodata", microblaze_s_rdata, 0},
   {"sdata2", microblaze_s_rdata, 1},
   {"sdata", microblaze_s_sdata, 0},
-  {"bss", microblaze_s_bss, 0},
-  {"sbss", microblaze_s_bss, 1},
-  {"text", microblaze_s_text, 0},
+#ifndef OBJ_ELF
+  {"bss", s_data, 0},
+#endif
+  {"sbss", microblaze_s_sbss, 0},
   {"word", cons, 4},
   {"frame", s_ignore, 0},
   {"mask", s_ignore, 0}, /* Emitted by gcc.  */
@@ -411,13 +383,13 @@ const pseudo_typeS md_pseudo_table[] =
 void
 md_begin (void)
 {
-  struct op_code_struct * opcode;
+  const struct op_code_struct * opcode;
 
-  opcode_hash_control = hash_new ();
+  opcode_hash_control = str_htab_create ();
 
   /* Insert unique names into hash table.  */
-  for (opcode = opcodes; opcode->name; opcode ++)
-    hash_insert (opcode_hash_control, opcode->name, (char *) opcode);
+  for (opcode = microblaze_opcodes; opcode->name; opcode ++)
+    str_hash_insert (opcode_hash_control, opcode->name, opcode, 0);
 }
 
 /* Try to parse a reg name.  */
@@ -740,7 +712,7 @@ parse_imm (char * s, expressionS * e, offsetT min, offsetT max)
 
   new_pointer = parse_exp (s, e);
 
-  if (!GOT_symbol && ! strncmp (s, GOT_SYMBOL_NAME, 20))
+  if (!GOT_symbol && startswith (s, GOT_SYMBOL_NAME))
     {
       GOT_symbol = symbol_find_or_make (GOT_SYMBOL_NAME);
     }
@@ -755,7 +727,7 @@ parse_imm (char * s, expressionS * e, offsetT min, offsetT max)
       if ((e->X_add_number >> 31) == 1)
 	e->X_add_number |= -((addressT) (1U << 31));
 
-      if (e->X_add_number < min || e->X_add_number > max)
+      if ((int)e->X_add_number < min || (int)e->X_add_number > max)
 	{
 	  as_fatal (_("operand must be absolute in range %lx..%lx, not %lx"),
 		    (long) min, (long) max, (long) e->X_add_number);
@@ -785,17 +757,17 @@ check_got (int * got_type, int * got_len)
     if (is_end_of_line[(unsigned char) *atp])
       return NULL;
 
-  if (strncmp (atp + 1, "GOTOFF", 5) == 0)
+  if (startswith (atp + 1, "GOTOFF"))
     {
       *got_len = 6;
       *got_type = IMM_GOTOFF;
     }
-  else if (strncmp (atp + 1, "GOT", 3) == 0)
+  else if (startswith (atp + 1, "GOT"))
     {
       *got_len = 3;
       *got_type = IMM_GOT;
     }
-  else if (strncmp (atp + 1, "PLT", 3) == 0)
+  else if (startswith (atp + 1, "PLT"))
     {
       *got_len = 3;
       *got_type = IMM_PLT;
@@ -858,7 +830,7 @@ parse_cons_expression_microblaze (expressionS *exp, int size)
 static const char * str_microblaze_ro_anchor = "RO";
 static const char * str_microblaze_rw_anchor = "RW";
 
-static bfd_boolean
+static bool
 check_spl_reg (unsigned * reg)
 {
   if ((*reg == REG_MSR)   || (*reg == REG_PC)
@@ -869,9 +841,9 @@ check_spl_reg (unsigned * reg)
       || (*reg == REG_TLBHI) || (*reg == REG_TLBSX)
       || (*reg == REG_SHR)   || (*reg == REG_SLR)
       || (*reg >= REG_PVR+MIN_PVR_REGNUM && *reg <= REG_PVR+MAX_PVR_REGNUM))
-    return TRUE;
+    return true;
 
-  return FALSE;
+  return false;
 }
 
 /* Here we decide which fixups can be adjusted to make them relative to
@@ -915,7 +887,7 @@ md_assemble (char * str)
   unsigned reg2;
   unsigned reg3;
   unsigned isize;
-  unsigned int immed, temp;
+  unsigned int immed = 0, immed2 = 0, temp;
   expressionS exp;
   char name[20];
 
@@ -942,7 +914,7 @@ md_assemble (char * str)
       return;
     }
 
-  opcode = (struct op_code_struct *) hash_find (opcode_hash_control, name);
+  opcode = (struct op_code_struct *) str_hash_find (opcode_hash_control, name);
   if (opcode == NULL)
     {
       as_bad (_("unknown opcode \"%s\""), name);
@@ -1072,9 +1044,13 @@ md_assemble (char * str)
 
           count = 32 - reg1;
           if (streq (name, "lmi"))
-            opcode = (struct op_code_struct *) hash_find (opcode_hash_control, "lwi");
+	    opcode
+	      = (struct op_code_struct *) str_hash_find (opcode_hash_control,
+							 "lwi");
           else
-            opcode = (struct op_code_struct *) hash_find (opcode_hash_control, "swi");
+	    opcode
+	      = (struct op_code_struct *) str_hash_find (opcode_hash_control,
+							 "swi");
           if (opcode == NULL)
             {
               as_bad (_("unknown opcode \"%s\""), "lwi");
@@ -1106,7 +1082,9 @@ md_assemble (char * str)
           if ((temp != 0) && (temp != 0xFFFF8000))
 	    {
               /* Needs an immediate inst.  */
-              opcode1 = (struct op_code_struct *) hash_find (opcode_hash_control, "imm");
+	      opcode1
+		= (struct op_code_struct *) str_hash_find (opcode_hash_control,
+							   "imm");
               if (opcode1 == NULL)
                 {
                   as_bad (_("unknown opcode \"%s\""), "imm");
@@ -1169,6 +1147,87 @@ md_assemble (char * str)
       inst |= (reg1 << RD_LOW) & RD_MASK;
       inst |= (reg2 << RA_LOW) & RA_MASK;
       inst |= (immed << IMM_LOW) & IMM5_MASK;
+      break;
+
+    case INST_TYPE_RD_R1_IMMW_IMMS:
+      if (strcmp (op_end, ""))
+	op_end = parse_reg (op_end + 1, &reg1);  /* Get rd.  */
+      else
+	{
+	  as_fatal (_("Error in statement syntax"));
+	  reg1 = 0;
+	}
+
+      if (strcmp (op_end, ""))
+	op_end = parse_reg (op_end + 1, &reg2);  /* Get r1.  */
+      else
+	{
+	  as_fatal (_("Error in statement syntax"));
+	  reg2 = 0;
+	}
+
+      /* Check for spl registers.  */
+      if (check_spl_reg (&reg1))
+	as_fatal (_("Cannot use special register with this instruction"));
+      if (check_spl_reg (&reg2))
+	as_fatal (_("Cannot use special register with this instruction"));
+
+      /* Width immediate value.  */
+      if (strcmp (op_end, ""))
+	op_end = parse_imm (op_end + 1, &exp, MIN_IMM_WIDTH, MAX_IMM_WIDTH);
+      else
+	as_fatal (_("Error in statement syntax"));
+
+      if (exp.X_op != O_constant)
+	{
+	  as_warn (_(
+	  "Symbol used as immediate width value for bit field instruction"));
+	  immed = 1;
+	}
+      else
+	immed = exp.X_add_number;
+
+      if (opcode->instr == bsefi && immed > 31)
+	as_fatal (_("Width value must be less than 32"));
+
+      /* Shift immediate value.  */
+      if (strcmp (op_end, ""))
+	op_end = parse_imm (op_end + 1, &exp, MIN_IMM, MAX_IMM);
+      else
+	as_fatal (_("Error in statement syntax"));
+
+      if (exp.X_op != O_constant)
+	{
+	  as_warn (_(
+	  "Symbol used as immediate shift value for bit field instruction"));
+	  immed2 = 0;
+	}
+      else
+	{
+	  output = frag_more (isize);
+	  immed2 = exp.X_add_number;
+	}
+
+      if (immed2 != (immed2 % 32))
+	{
+	  as_warn (_("Shift value greater than 32. using <value %% 32>"));
+	  immed2 = immed2 % 32;
+	}
+
+      /* Check combined value.  */
+      if (immed + immed2 > 32)
+	as_fatal (_("Width value + shift value must not be greater than 32"));
+
+      inst |= (reg1 << RD_LOW) & RD_MASK;
+      inst |= (reg2 << RA_LOW) & RA_MASK;
+
+      if (opcode->instr == bsefi)
+	inst |= (immed & IMM5_MASK) << IMM_WIDTH_LOW; /* bsefi */
+      else
+	inst |= ((immed + immed2 - 1) & IMM5_MASK)
+		<< IMM_WIDTH_LOW; /* bsifi */
+
+      inst |= (immed2 << IMM_LOW) & IMM5_MASK;
       break;
 
     case INST_TYPE_R1_R2:
@@ -1559,7 +1618,9 @@ md_assemble (char * str)
       if ((temp != 0) && (temp != 0xFFFF8000))
 	{
           /* Needs an immediate inst.  */
-          opcode1 = (struct op_code_struct *) hash_find (opcode_hash_control, "imm");
+	  opcode1
+	    = (struct op_code_struct *) str_hash_find (opcode_hash_control,
+						       "imm");
           if (opcode1 == NULL)
             {
               as_bad (_("unknown opcode \"%s\""), "imm");
@@ -1625,7 +1686,9 @@ md_assemble (char * str)
       if ((temp != 0) && (temp != 0xFFFF8000))
 	{
           /* Needs an immediate inst.  */
-          opcode1 = (struct op_code_struct *) hash_find (opcode_hash_control, "imm");
+          opcode1
+	    = (struct op_code_struct *) str_hash_find (opcode_hash_control,
+						       "imm");
           if (opcode1 == NULL)
             {
               as_bad (_("unknown opcode \"%s\""), "imm");
@@ -1698,7 +1761,9 @@ md_assemble (char * str)
       if ((temp != 0) && (temp != 0xFFFF8000))
 	{
           /* Needs an immediate inst.  */
-          opcode1 = (struct op_code_struct *) hash_find (opcode_hash_control, "imm");
+          opcode1
+	    = (struct op_code_struct *) str_hash_find (opcode_hash_control,
+						       "imm");
           if (opcode1 == NULL)
             {
               as_bad (_("unknown opcode \"%s\""), "imm");
@@ -1766,13 +1831,10 @@ md_undefined_symbol (char * name ATTRIBUTE_UNUSED)
   return NULL;
 }
 
-/* Various routines to kill one day.  */
-/* Equal to MAX_PRECISION in atof-ieee.c */
-#define MAX_LITTLENUMS 6
-
 /* Turn a string in input_line_pointer into a floating point constant of type
    type, and store the appropriate bytes in *litP.  The number of LITTLENUMS
    emitted is stored in *sizeP.  An error message is returned, or NULL on OK.*/
+
 const char *
 md_atof (int type, char * litP, int * sizeP)
 {
@@ -1839,16 +1901,18 @@ md_atof (int type, char * litP, int * sizeP)
   return NULL;
 }
 
-const char * md_shortopts = "";
+const char md_shortopts[] = "";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   {"EB", no_argument, NULL, OPTION_EB},
   {"EL", no_argument, NULL, OPTION_EL},
+  {"mlittle-endian", no_argument, NULL, OPTION_EL},
+  {"mbig-endian", no_argument, NULL, OPTION_EB},
   { NULL,          no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int md_short_jump_size;
 
@@ -1885,65 +1949,65 @@ md_convert_frag (bfd * abfd ATTRIBUTE_UNUSED,
     {
     case UNDEFINED_PC_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, TRUE, BFD_RELOC_64_PCREL);
+	       fragP->fr_offset, true, BFD_RELOC_64_PCREL);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case DEFINED_ABS_SEGMENT:
       if (fragP->fr_symbol == GOT_symbol)
         fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	         fragP->fr_offset, TRUE, BFD_RELOC_MICROBLAZE_64_GOTPC);
+	         fragP->fr_offset, true, BFD_RELOC_MICROBLAZE_64_GOTPC);
       else
         fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	         fragP->fr_offset, FALSE, BFD_RELOC_64);
+	         fragP->fr_offset, false, BFD_RELOC_64);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case DEFINED_RO_SEGMENT:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_32_ROSDA);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_32_ROSDA);
       fragP->fr_fix += INST_WORD_SIZE;
       fragP->fr_var = 0;
       break;
     case DEFINED_RW_SEGMENT:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_32_RWSDA);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_32_RWSDA);
       fragP->fr_fix += INST_WORD_SIZE;
       fragP->fr_var = 0;
       break;
     case DEFINED_PC_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE, fragP->fr_symbol,
-	       fragP->fr_offset, TRUE, BFD_RELOC_MICROBLAZE_32_LO_PCREL);
+	       fragP->fr_offset, true, BFD_RELOC_MICROBLAZE_32_LO_PCREL);
       fragP->fr_fix += INST_WORD_SIZE;
       fragP->fr_var = 0;
       break;
     case LARGE_DEFINED_PC_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, TRUE, BFD_RELOC_64_PCREL);
+	       fragP->fr_offset, true, BFD_RELOC_64_PCREL);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case GOT_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_GOT);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_GOT);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case TEXT_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_TEXTREL);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_TEXTREL);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case TEXT_PC_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_TEXTPCREL);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_TEXTPCREL);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case PLT_OFFSET:
       fixP = fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	              fragP->fr_offset, TRUE, BFD_RELOC_MICROBLAZE_64_PLT);
+	              fragP->fr_offset, true, BFD_RELOC_MICROBLAZE_64_PLT);
       /* fixP->fx_plt = 1; */
       (void) fixP;
       fragP->fr_fix += INST_WORD_SIZE * 2;
@@ -1951,25 +2015,25 @@ md_convert_frag (bfd * abfd ATTRIBUTE_UNUSED,
       break;
     case GOTOFF_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_GOTOFF);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_GOTOFF);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case TLSGD_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_TLSGD);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_TLSGD);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case TLSLD_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_TLSLD);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_TLSLD);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
     case TLSDTPREL_OFFSET:
       fix_new (fragP, fragP->fr_fix, INST_WORD_SIZE * 2, fragP->fr_symbol,
-	       fragP->fr_offset, FALSE, BFD_RELOC_MICROBLAZE_64_TLSDTPREL);
+	       fragP->fr_offset, false, BFD_RELOC_MICROBLAZE_64_TLSDTPREL);
       fragP->fr_fix += INST_WORD_SIZE * 2;
       fragP->fr_var = 0;
       break;
@@ -1986,7 +2050,7 @@ md_apply_fix (fixS *   fixP,
 	      valueT * valp,
 	      segT     segment)
 {
-  char *       buf  = fixP->fx_where + fixP->fx_frag->fr_literal;
+  char *       buf  = fixP->fx_where + &fixP->fx_frag->fr_literal[0];
   const char *       file = fixP->fx_file ? fixP->fx_file : _("unknown");
   const char * symname;
   /* Note: use offsetT because it is signed, valueT is unsigned.  */
@@ -2014,12 +2078,10 @@ md_apply_fix (fixS *   fixP,
     {
       if (S_IS_WEAK (fixP->fx_addsy)
 	  || (symbol_used_in_reloc_p (fixP->fx_addsy)
-	      && (((bfd_get_section_flags (stdoutput,
-					   S_GET_SEGMENT (fixP->fx_addsy))
+	      && (((bfd_section_flags (S_GET_SEGMENT (fixP->fx_addsy))
 		    & SEC_LINK_ONCE) != 0)
-		  || !strncmp (segment_name (S_GET_SEGMENT (fixP->fx_addsy)),
-			       ".gnu.linkonce",
-			       sizeof (".gnu.linkonce") - 1))))
+		  || startswith (segment_name (S_GET_SEGMENT (fixP->fx_addsy)),
+				 ".gnu.linkonce"))))
 	{
 	  val -= S_GET_VALUE (fixP->fx_addsy);
 	  if (val != 0 && ! fixP->fx_pcrel)
@@ -2123,7 +2185,8 @@ md_apply_fix (fixS *   fixP,
 	buf[i + INST_WORD_SIZE] = buf[i];
 
       /* Generate the imm instruction.  */
-      opcode1 = (struct op_code_struct *) hash_find (opcode_hash_control, "imm");
+      opcode1
+	= (struct op_code_struct *) str_hash_find (opcode_hash_control, "imm");
       if (opcode1 == NULL)
 	{
 	  as_bad (_("unknown opcode \"%s\""), "imm");
@@ -2171,7 +2234,8 @@ md_apply_fix (fixS *   fixP,
 	buf[i + INST_WORD_SIZE] = buf[i];
 
       /* Generate the imm instruction.  */
-      opcode1 = (struct op_code_struct *) hash_find (opcode_hash_control, "imm");
+      opcode1
+	= (struct op_code_struct *) str_hash_find (opcode_hash_control, "imm");
       if (opcode1 == NULL)
 	{
 	  as_bad (_("unknown opcode \"%s\""), "imm");
@@ -2198,6 +2262,8 @@ md_apply_fix (fixS *   fixP,
 	 moves code around due to relaxing.  */
       if (fixP->fx_r_type == BFD_RELOC_64_PCREL)
 	fixP->fx_r_type = BFD_RELOC_MICROBLAZE_64_NONE;
+      else if (fixP->fx_r_type == BFD_RELOC_32)
+	fixP->fx_r_type = BFD_RELOC_MICROBLAZE_32_NONE;
       else
 	fixP->fx_r_type = BFD_RELOC_NONE;
       fixP->fx_addsy = section_symbol (absolute_section);
@@ -2421,6 +2487,7 @@ tc_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
   switch (fixp->fx_r_type)
     {
     case BFD_RELOC_NONE:
+    case BFD_RELOC_MICROBLAZE_32_NONE:
     case BFD_RELOC_MICROBLAZE_64_NONE:
     case BFD_RELOC_32:
     case BFD_RELOC_MICROBLAZE_32_LO:
@@ -2515,6 +2582,9 @@ md_show_usage (FILE * stream ATTRIBUTE_UNUSED)
   /*  fprintf(stream, _("\
       MicroBlaze options:\n\
       -noSmall         Data in the comm and data sections do not go into the small data section\n")); */
+  fprintf (stream, _(" MicroBlaze specific assembler options:\n"));
+  fprintf (stream, "  -%-23s%s\n", "mbig-endian", N_("assemble for a big endian cpu"));
+  fprintf (stream, "  -%-23s%s\n", "mlittle-endian", N_("assemble for a little endian cpu"));      
 }
 
 

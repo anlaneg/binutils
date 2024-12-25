@@ -1,6 +1,5 @@
 # Check 32bit AVX512F instructions
 
-	.allow_index_reg
 	.text
 _start:
 
@@ -60,6 +59,9 @@ _start:
 	vmovups	%zmm5, %zmm6{%k7}	 # AVX512F
 	vmovups.s	%zmm5, %zmm6{%k7}{z}	 # AVX512F
 	vmovups	%zmm5, %zmm6{%k7}{z}	 # AVX512F
+	{evex} vmovq.s	%xmm5,%xmm6
+	{evex} vmovq	%xmm5,%xmm6
+
 	.intel_syntax noprefix
 	vmovapd.s	zmm6, zmm5	 # AVX512F
 	vmovapd	zmm6, zmm5	 # AVX512F

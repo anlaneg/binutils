@@ -1,6 +1,6 @@
 /* Low-level siginfo manipulation for amd64.
 
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,7 +18,6 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include <signal.h>
-#include "common/common-defs.h"
 #include "amd64-linux-siginfo.h"
 
 #define GDB_SI_SIZE 128
@@ -45,13 +44,13 @@ typedef int nat_timer_t;
 /* For native 64-bit, clock_t in _sigchld is 64-bit.  */
 typedef long nat_clock_t;
 
-typedef union nat_sigval
+union nat_sigval_t
 {
   nat_int_t sival_int;
   nat_uptr_t sival_ptr;
-} nat_sigval_t;
+};
 
-typedef struct nat_siginfo
+struct nat_siginfo_t
 {
   int si_signo;
   int si_errno;
@@ -112,7 +111,7 @@ typedef struct nat_siginfo
       int _fd;
     } _sigpoll;
   } _sifields;
-} nat_siginfo_t;
+};
 
 #endif /* __ILP32__ */
 
@@ -133,13 +132,13 @@ struct compat_timeval
   int tv_usec;
 };
 
-typedef union compat_sigval
+union compat_sigval_t
 {
   compat_int_t sival_int;
   compat_uptr_t sival_ptr;
-} compat_sigval_t;
+};
 
-typedef struct compat_siginfo
+struct compat_siginfo_t
 {
   int si_signo;
   int si_errno;
@@ -201,12 +200,12 @@ typedef struct compat_siginfo
       int _fd;
     } _sigpoll;
   } _sifields;
-} compat_siginfo_t;
+};
 
 /* For x32, clock_t in _sigchld is 64bit aligned at 4 bytes.  */
 typedef long __attribute__ ((__aligned__ (4))) compat_x32_clock_t;
 
-typedef struct compat_x32_siginfo
+struct __attribute__ ((__aligned__ (8))) compat_x32_siginfo_t
 {
   int si_signo;
   int si_errno;
@@ -263,7 +262,7 @@ typedef struct compat_x32_siginfo
       int _fd;
     } _sigpoll;
   } _sifields;
-} compat_x32_siginfo_t __attribute__ ((__aligned__ (8)));
+};
 
 /* To simplify usage of siginfo fields.  */
 
@@ -277,6 +276,8 @@ typedef struct compat_x32_siginfo
 #define cpt_si_ptr _sifields._rt._sigval.sival_ptr
 #define cpt_si_addr _sifields._sigfault._addr
 #define cpt_si_addr_lsb _sifields._sigfault._addr_lsb
+#define cpt_si_lower _sifields._sigfault.si_addr_bnd._lower
+#define cpt_si_upper _sifields._sigfault.si_addr_bnd._upper
 #define cpt_si_band _sifields._sigpoll._band
 #define cpt_si_fd _sifields._sigpoll._fd
 
@@ -288,6 +289,10 @@ typedef struct compat_x32_siginfo
 #endif
 #ifndef si_overrun
 #define si_overrun si_timer2
+#endif
+
+#ifndef SEGV_BNDERR
+#define SEGV_BNDERR	3
 #endif
 
 /* The type of the siginfo object the kernel returns in
@@ -324,6 +329,17 @@ compat_siginfo_from_siginfo (compat_siginfo_t *to, const siginfo_t *from)
       to->cpt_si_pid = from_ptrace.cpt_si_pid;
       to->cpt_si_uid = from_ptrace.cpt_si_uid;
     }
+#ifndef __ILP32__
+  /* The struct compat_x32_siginfo_t doesn't contain
+     cpt_si_lower/cpt_si_upper.  */
+  else if (to->si_code == SEGV_BNDERR
+	   && to->si_signo == SIGSEGV)
+    {
+      to->cpt_si_addr = from_ptrace.cpt_si_addr;
+      to->cpt_si_lower = from_ptrace.cpt_si_lower;
+      to->cpt_si_upper = from_ptrace.cpt_si_upper;
+    }
+#endif
   else if (to->si_code < 0)
     {
       to->cpt_si_pid = from_ptrace.cpt_si_pid;
@@ -565,20 +581,20 @@ amd64_linux_siginfo_fixup_common (siginfo_t *ptrace, gdb_byte *inf,
   if (mode == FIXUP_32)
     {
       if (direction == 0)
-	compat_siginfo_from_siginfo ((struct compat_siginfo *) inf, ptrace);
+	compat_siginfo_from_siginfo ((compat_siginfo_t *) inf, ptrace);
       else
-	siginfo_from_compat_siginfo (ptrace, (struct compat_siginfo *) inf);
+	siginfo_from_compat_siginfo (ptrace, (compat_siginfo_t *) inf);
 
       return 1;
     }
   else if (mode == FIXUP_X32)
     {
       if (direction == 0)
-	compat_x32_siginfo_from_siginfo ((struct compat_x32_siginfo *) inf,
+	compat_x32_siginfo_from_siginfo ((compat_x32_siginfo_t *) inf,
 					 ptrace);
       else
 	siginfo_from_compat_x32_siginfo (ptrace,
-					 (struct compat_x32_siginfo *) inf);
+					 (compat_x32_siginfo_t *) inf);
 
       return 1;
     }
@@ -587,10 +603,10 @@ amd64_linux_siginfo_fixup_common (siginfo_t *ptrace, gdb_byte *inf,
 
 /* Sanity check for the siginfo structure sizes.  */
 
-gdb_static_assert (sizeof (siginfo_t) == GDB_SI_SIZE);
+static_assert (sizeof (siginfo_t) == GDB_SI_SIZE);
 #ifndef __ILP32__
-gdb_static_assert (sizeof (nat_siginfo_t) == GDB_SI_SIZE);
+static_assert (sizeof (nat_siginfo_t) == GDB_SI_SIZE);
 #endif
-gdb_static_assert (sizeof (compat_x32_siginfo_t) == GDB_SI_SIZE);
-gdb_static_assert (sizeof (compat_siginfo_t) == GDB_SI_SIZE);
-gdb_static_assert (sizeof (ptrace_siginfo_t) == GDB_SI_SIZE);
+static_assert (sizeof (compat_x32_siginfo_t) == GDB_SI_SIZE);
+static_assert (sizeof (compat_siginfo_t) == GDB_SI_SIZE);
+static_assert (sizeof (ptrace_siginfo_t) == GDB_SI_SIZE);

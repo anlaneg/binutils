@@ -17,14 +17,12 @@
  
     */
 
-
-
 #include <getopt.h>
+#include <stdlib.h>
 
 #include "misc.h"
 #include "lf.h"
 #include "table.h"
-#include "build-config.h"
 
 #include "filter.h"
 
@@ -42,7 +40,7 @@
 #include "gen-support.h"
 
 int hi_bit_nr;
-int insn_bit_size = max_insn_bit_size;
+int insn_bit_size = ppc_max_insn_bit_size;
 
 igen_code code = generate_calls;
 
@@ -160,12 +158,12 @@ print_itrace(lf *file,
 	     table_entry *file_entry,
 	     int idecode)
 {
-  lf_print__external_reference(file, file_entry->line_nr, file_entry->file_name);
+  lf_print__external_ref(file, file_entry->line_nr, file_entry->file_name);
   lf_printf(file, "ITRACE(trace_%s, (\"%s %s\\n\"));\n",
 	    (idecode ? "idecode" : "semantics"),
 	    (idecode ? "idecode" : "semantics"),
 	    file_entry->fields[insn_name]);
-  lf_print__internal_reference(file);
+  lf_print__internal_ref(file);
 }
 
 
@@ -183,7 +181,7 @@ gen_semantics_h(insn_table *table,
   lf_printf(file, "\n");
   if ((code & generate_calls)) {
     lf_printf(file, "extern int option_mpc860c0;\n");
-    lf_printf(file, "#define PAGE_SIZE 0x1000\n");
+    lf_printf(file, "#define MPC860C0_PAGE_SIZE 0x1000\n");
     lf_printf(file, "\n");
     lf_printf(file, "PSIM_EXTERN_SEMANTICS(void)\n");
     lf_printf(file, "semantic_init(device* root);\n");
@@ -203,7 +201,7 @@ gen_semantics_h(insn_table *table,
     
   }
   else {
-    lf_print__this_file_is_empty(file);
+    lf_print__this_file_is_empty(file, "generating jumps");
   }
 }
 
@@ -219,6 +217,7 @@ gen_semantics_c(insn_table *table,
     lf_printf(file, "#include \"cpu.h\"\n");
     lf_printf(file, "#include \"idecode.h\"\n");
     lf_printf(file, "#include \"semantics.h\"\n");
+    lf_printf(file, "#include \"tree.h\"\n");
     lf_printf(file, "#ifdef HAVE_COMMON_FPU\n");
     lf_printf(file, "#include \"sim-inline.h\"\n");
     lf_printf(file, "#include \"sim-fpu.h\"\n");
@@ -233,7 +232,7 @@ gen_semantics_c(insn_table *table,
     lf_printf(file, "  option_mpc860c0 = 0;\n");
     lf_printf(file, "  if (tree_find_property(root, \"/options/mpc860c0\"))\n");
     lf_printf(file, "    option_mpc860c0 = tree_find_integer_property(root, \"/options/mpc860c0\");\n");
-    lf_printf(file, "    option_mpc860c0 *= 4;   /* convert word count to byte count */\n");
+    lf_printf(file, "  option_mpc860c0 *= 4;   /* convert word count to byte count */\n");
     lf_printf(file, "}\n");
     lf_printf(file, "\n");
     if (generate_expanded_instructions)
@@ -251,7 +250,7 @@ gen_semantics_c(insn_table *table,
     
   }
   else {
-    lf_print__this_file_is_empty(file);
+    lf_print__this_file_is_empty(file, "generating jump engine");
   }
 }
 
@@ -288,7 +287,7 @@ gen_icache_h(insn_table *table,
     
   }
   else {
-    lf_print__this_file_is_empty(file);
+    lf_print__this_file_is_empty(file, "generating jump engine");
   }
 }
 
@@ -332,7 +331,7 @@ gen_icache_c(insn_table *table,
     
   }
   else {
-    lf_print__this_file_is_empty(file);
+    lf_print__this_file_is_empty(file, "generating jump engine");
   }
 }
 
@@ -351,6 +350,7 @@ main(int argc,
   filter *filters = NULL;
   insn_table *instructions = NULL;
   table_include *includes = NULL;
+  static const struct option longopts[] = { { 0 } };
   char *real_file_name = NULL;
   int is_header = 0;
   int ch;
@@ -365,7 +365,7 @@ main(int argc,
     printf("  -C                    Include semantics in cache functions\n");
     printf("  -S                    Include insn (instruction) in icache\n");
     printf("  -R                    Use defines to reference cache vars\n");
-    printf("  -L                    Supress line numbering in output files\n");
+    printf("  -L                    Suppress line numbering in output files\n");
     printf("  -B <bit-size>         Set the number of bits in an instruction\n");
     printf("  -H <high-bit>         Set the nr of the high (msb bit)\n");
     printf("  -N <nr-cpus>          Specify the max number of cpus the simulation will support\n");
@@ -390,10 +390,14 @@ main(int argc,
     printf("  -f <output-file>      output support functions\n");
   }
 
-  while ((ch = getopt(argc, argv,
-		      "F:EI:RSLJT:CB:H:N:o:k:i:n:hc:d:m:s:t:f:"))
-	 != -1) {
+  while (
+      (ch = getopt_long (argc, argv, "F:EI:RSLJT:CB:H:N:o:k:i:n:hc:d:m:s:t:f:",
+			 longopts, NULL))
+      != -1)
+  {
+#if 0  /* For debugging.  */
     fprintf(stderr, "\t-%c %s\n", ch, (optarg ? optarg : ""));
+#endif
     switch(ch) {
     case 'C':
       code |= generate_with_icache;
@@ -434,15 +438,22 @@ main(int argc,
               {
               case '=':
 	        icache_size = atoi (argp + strlen ("gen-icache") + 1);
-	        code |= generate_with_icache;
+		if (enable_p)
+		  code |= generate_with_icache;
+		else
+		  code &= ~generate_with_icache;
                 break;
               case '\0':
-	        code |= generate_with_icache;
+		if (enable_p)
+		  code |= generate_with_icache;
+		else
+		  code &= ~generate_with_icache;
                 break;
               default:
-                error (NULL, "Expecting -Ggen-icache or -Ggen-icache=<N>\n");
+		ERROR ("Expecting -Ggen-icache or -Ggen-icache=<N>\n");
               }
           }
+	  break;
 	}
     case 'I':
       {
@@ -461,7 +472,7 @@ main(int argc,
       break;
     case 'B':
       insn_bit_size = a2i(optarg);
-      ASSERT(insn_bit_size > 0 && insn_bit_size <= max_insn_bit_size
+      ASSERT(insn_bit_size > 0 && insn_bit_size <= ppc_max_insn_bit_size
 	     && (hi_bit_nr == insn_bit_size-1 || hi_bit_nr == 0));
       break;
     case 'H':
@@ -469,7 +480,7 @@ main(int argc,
       ASSERT(hi_bit_nr == insn_bit_size-1 || hi_bit_nr == 0);
       break;
     case 'F':
-      filters = new_filter(optarg, filters);
+      filter_parse(&filters, optarg);
       break;
     case 'J':
       code &= ~generate_calls;
@@ -557,7 +568,7 @@ main(int argc,
       real_file_name = NULL;
       break;
     default:
-      error("unknown option\n");
+      ERROR("unknown option\n");
     }
   }
   return 0;

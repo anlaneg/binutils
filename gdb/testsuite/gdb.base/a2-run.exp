@@ -1,4 +1,4 @@
-#   Copyright 1988-2019 Free Software Foundation, Inc.
+#   Copyright 1988-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,9 +16,7 @@
 # This file was written by Rob Savoye. (rob@cygnus.com)
 
 # Can't do this test without stdio support.
-if [gdb_skip_stdio_test "a2run.exp"] {
-    return
-}
+require {!gdb_skip_stdio_test "a2run.exp"}
 
 #
 # test running programs
@@ -26,7 +24,11 @@ if [gdb_skip_stdio_test "a2run.exp"] {
 
 standard_testfile run.c
 
-if { [prepare_for_testing "failed to prepare" $testfile $srcfile] } {
+set flags {}
+lappend flags debug
+lappend_include_file flags $srcdir/lib/unbuffer_output.c
+
+if { [prepare_for_testing "failed to prepare" $testfile $srcfile $flags] } {
     return -1
 }
 
@@ -124,7 +126,7 @@ if {$res == 0} {
 
 # The remaining tests don't work for targets can't take arguments...
 
-if [target_info exists noargs] then {
+if {[target_info exists noargs]} {
     verbose "Skipping rest of a2-run.exp because of noargs."
     return
 }
@@ -135,7 +137,7 @@ gdb_run_cmd 5
 gdb_test_stdio "" "120" "" "run \"$testfile\" with arg"
 
 # Run again with same arguments.
-gdb_run_cmd
+gdb_run_cmd 5
 
 setup_xfail "arm-*-coff"
 gdb_test_stdio "" "120" "" "run \"$testfile\" again with same args"
@@ -147,6 +149,15 @@ gdb_run_cmd
 
 gdb_test_stdio "" "usage:  factorial <number>" "" "run after setting args to nil"
 
+# The remaining tests pass inferior arguments through GDB, so doesn't
+# work with stub targets, where GDB connects to debug an already started
+# process.
+
+if [use_gdb_stub] {
+    verbose "Skipping rest of a2-run.exp because target is a stub."
+    return
+}
+
 # Use "set args" command to specify an argument and run again.
 gdb_test_no_output "set args 6"
 
@@ -157,7 +168,7 @@ gdb_test_stdio "" "720" "" "run \"$testfile\" again after setting args"
 
 # GOAL: Test that shell is being used with "run".  For remote debugging
 # targets, there is no guarantee that a "shell" (whatever that is) is used.
-if ![is_remote target] then {
+if {![is_remote target]} {
     gdb_test_stdio "run `echo 8`" \
 	"40320" "" "run \"$testfile\" with shell"
 }

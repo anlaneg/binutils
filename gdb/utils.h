@@ -1,7 +1,5 @@
-/* *INDENT-OFF* */ /* ATTRIBUTE_PRINTF confuses indent, avoid running it
-		      for now.  */
 /* I/O, string, cleanup, and other random utilities for GDB.
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,18 +16,17 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef UTILS_H
-#define UTILS_H
+#ifndef GDB_UTILS_H
+#define GDB_UTILS_H
 
-#include "exceptions.h"
-#include "common/scoped_restore.h"
 #include <chrono>
 
-extern void initialize_utils (void);
+struct completion_match_for_lcd;
+class compiled_regex;
 
 /* String utilities.  */
 
-extern int sevenbit_strings;
+extern bool sevenbit_strings;
 
 /* Modes of operation for strncmp_iw_with_mode.  */
 
@@ -57,11 +54,14 @@ enum class strncmp_iw_mode
 
    MATCH_FOR_LCD is passed down so that the function can mark parts of
    the symbol name as ignored for completion matching purposes (e.g.,
-   to handle abi tags).  */
+   to handle abi tags).  If IGNORE_TEMPLATE_PARAMS is true, all template
+   parameter lists will be ignored when language is C++.  */
+
 extern int strncmp_iw_with_mode
   (const char *string1, const char *string2, size_t string2_len,
    strncmp_iw_mode mode, enum language language,
-   completion_match_for_lcd *match_for_lcd = NULL);
+   completion_match_for_lcd *match_for_lcd = NULL,
+   bool ignore_template_params = false);
 
 /* Do a strncmp() type operation on STRING1 and STRING2, ignoring any
    differences in whitespace.  STRING2_LEN is STRING2's length.
@@ -89,178 +89,19 @@ extern int strcmp_iw (const char *string1, const char *string2);
 
 extern int strcmp_iw_ordered (const char *, const char *);
 
-/* Return true if the strings are equal.  */
-
-extern bool streq (const char *, const char *);
-
-/* A variant of streq that is suitable for use as an htab
-   callback.  */
-
-extern int streq_hash (const void *, const void *);
-
-extern int subset_compare (const char *, const char *);
-
-int compare_positive_ints (const void *ap, const void *bp);
-
-/* Compare C strings for std::sort.  */
-
-static inline bool
-compare_cstrings (const char *str1, const char *str2)
-{
-  return strcmp (str1, str2) < 0;
-}
-
-/* A wrapper for bfd_errmsg to produce a more helpful error message
-   in the case of bfd_error_file_ambiguously recognized.
-   MATCHING, if non-NULL, is the corresponding argument to
-   bfd_check_format_matches, and will be freed.  */
-
-extern std::string gdb_bfd_errmsg (bfd_error_type error_tag, char **matching);
-
 /* Reset the prompt_for_continue clock.  */
 void reset_prompt_for_continue_wait_time (void);
 /* Return the time spent in prompt_for_continue.  */
 std::chrono::steady_clock::duration get_prompt_for_continue_wait_time ();
 
-/* Parsing utilites.  */
+/* Parsing utilities.  */
 
 extern int parse_pid_to_attach (const char *args);
 
 extern int parse_escape (struct gdbarch *, const char **);
 
-/* A wrapper for an array of char* that was allocated in the way that
-   'buildargv' does, and should be freed with 'freeargv'.  */
-
-class gdb_argv
-{
-public:
-
-  /* A constructor that initializes to NULL.  */
-
-  gdb_argv ()
-    : m_argv (NULL)
-  {
-  }
-
-  /* A constructor that calls buildargv on STR.  STR may be NULL, in
-     which case this object is initialized with a NULL array.  If
-     buildargv fails due to out-of-memory, call malloc_failure.
-     Therefore, the value is guaranteed to be non-NULL, unless the
-     parameter itself is NULL.  */
-
-  explicit gdb_argv (const char *str)
-    : m_argv (NULL)
-  {
-    reset (str);
-  }
-
-  /* A constructor that takes ownership of an existing array.  */
-
-  explicit gdb_argv (char **array)
-    : m_argv (array)
-  {
-  }
-
-  gdb_argv (const gdb_argv &) = delete;
-  gdb_argv &operator= (const gdb_argv &) = delete;
-
-  ~gdb_argv ()
-  {
-    freeargv (m_argv);
-  }
-
-  /* Call buildargv on STR, storing the result in this object.  Any
-     previous state is freed.  STR may be NULL, in which case this
-     object is reset with a NULL array.  If buildargv fails due to
-     out-of-memory, call malloc_failure.  Therefore, the value is
-     guaranteed to be non-NULL, unless the parameter itself is
-     NULL.  */
-
-  void reset (const char *str);
-
-  /* Return the underlying array.  */
-
-  char **get ()
-  {
-    return m_argv;
-  }
-
-  /* Return the underlying array, transferring ownership to the
-     caller.  */
-
-  char **release ()
-  {
-    char **result = m_argv;
-    m_argv = NULL;
-    return result;
-  }
-
-  /* Return the number of items in the array.  */
-
-  int count () const
-  {
-    return countargv (m_argv);
-  }
-
-  /* Index into the array.  */
-
-  char *operator[] (int arg)
-  {
-    gdb_assert (m_argv != NULL);
-    return m_argv[arg];
-  }
-
-  /* The iterator type.  */
-
-  typedef char **iterator;
-
-  /* Return an iterator pointing to the start of the array.  */
-
-  iterator begin ()
-  {
-    return m_argv;
-  }
-
-  /* Return an iterator pointing to the end of the array.  */
-
-  iterator end ()
-  {
-    return m_argv + count ();
-  }
-
-  bool operator!= (std::nullptr_t)
-  {
-    return m_argv != NULL;
-  }
-
-  bool operator== (std::nullptr_t)
-  {
-    return m_argv == NULL;
-  }
-
-private:
-
-  /* The wrapped array.  */
-
-  char **m_argv;
-};
-
 
 /* Cleanup utilities.  */
-
-/* A deleter for a hash table.  */
-struct htab_deleter
-{
-  void operator() (htab *ptr) const
-  {
-    htab_delete (ptr);
-  }
-};
-
-/* A unique_ptr wrapper for htab_t.  */
-typedef std::unique_ptr<htab, htab_deleter> htab_up;
-
-extern void free_current_contents (void *);
 
 extern void init_page_info (void);
 
@@ -311,16 +152,26 @@ extern int yquery (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
 
 extern void begin_line (void);
 
-extern void wrap_here (const char *);
+extern void wrap_here (int);
 
 extern void reinitialize_more_filter (void);
 
-extern int pagination_enabled;
+/* Return the number of characters in a line.  */
+
+extern int get_chars_per_line ();
+
+extern bool pagination_enabled;
+
+/* A flag indicating whether to timestamp debugging messages.  */
+extern bool debug_timestamp;
 
 extern struct ui_file **current_ui_gdb_stdout_ptr (void);
 extern struct ui_file **current_ui_gdb_stdin_ptr (void);
 extern struct ui_file **current_ui_gdb_stderr_ptr (void);
 extern struct ui_file **current_ui_gdb_stdlog_ptr (void);
+
+/* Flush STREAM.  */
+extern void gdb_flush (struct ui_file *stream);
 
 /* The current top level's ui_file streams.  */
 
@@ -328,101 +179,62 @@ extern struct ui_file **current_ui_gdb_stdlog_ptr (void);
 #define gdb_stdout (*current_ui_gdb_stdout_ptr ())
 /* Input stream */
 #define gdb_stdin (*current_ui_gdb_stdin_ptr ())
-/* Serious error notifications */
+/* Serious error notifications.  This bypasses the pager, if one is in
+   use.  */
 #define gdb_stderr (*current_ui_gdb_stderr_ptr ())
-/* Log/debug/trace messages that should bypass normal stdout/stderr
-   filtering.  For moment, always call this stream using
-   *_unfiltered.  In the very near future that restriction shall be
-   removed - either call shall be unfiltered.  (cagney 1999-06-13).  */
+/* Log/debug/trace messages that bypasses the pager, if one is in
+   use.  */
 #define gdb_stdlog (*current_ui_gdb_stdlog_ptr ())
 
 /* Truly global ui_file streams.  These are all defined in main.c.  */
 
-/* Target output that should bypass normal stdout/stderr filtering.
-   For moment, always call this stream using *_unfiltered.  In the
-   very near future that restriction shall be removed - either call
-   shall be unfiltered.  (cagney 1999-07-02).  */
+/* Target output that should bypass the pager, if one is in use.  */
 extern struct ui_file *gdb_stdtarg;
-extern struct ui_file *gdb_stdtargerr;
 extern struct ui_file *gdb_stdtargin;
 
 /* Set the screen dimensions to WIDTH and HEIGHT.  */
 
 extern void set_screen_width_and_height (int width, int height);
 
-/* More generic printf like operations.  Filtered versions may return
-   non-locally on error.  */
+/* Generic stdio-like operations.  */
 
-extern void fputs_filtered (const char *, struct ui_file *);
+extern void gdb_puts (const char *, struct ui_file *);
 
-extern void fputs_unfiltered (const char *, struct ui_file *);
+extern void gdb_puts (const std::string &s, ui_file *stream);
 
-extern int fputc_filtered (int c, struct ui_file *);
+extern void gdb_putc (int c, struct ui_file *);
 
-extern int fputc_unfiltered (int c, struct ui_file *);
+extern void gdb_putc (int c);
 
-extern int putchar_filtered (int c);
+extern void gdb_puts (const char *);
 
-extern int putchar_unfiltered (int c);
+extern void puts_tabular (char *string, int width, int right);
 
-extern void puts_filtered (const char *);
+/* Generic printf-like operations.  As an extension over plain
+   printf, these support some GDB-specific format specifiers.
+   Particularly useful here are the styling formatters: '%p[', '%p]'
+   and '%ps'.  See ui_out::message for details.  */
 
-extern void puts_unfiltered (const char *);
+extern void gdb_vprintf (const char *, va_list) ATTRIBUTE_PRINTF (1, 0);
 
-extern void puts_filtered_tabular (char *string, int width, int right);
-
-extern void puts_debug (char *prefix, char *string, char *suffix);
-
-extern void vprintf_filtered (const char *, va_list) ATTRIBUTE_PRINTF (1, 0);
-
-extern void vfprintf_filtered (struct ui_file *, const char *, va_list)
+extern void gdb_vprintf (struct ui_file *, const char *, va_list)
   ATTRIBUTE_PRINTF (2, 0);
 
-extern void fprintf_filtered (struct ui_file *, const char *, ...)
+extern void gdb_printf (struct ui_file *, const char *, ...)
   ATTRIBUTE_PRINTF (2, 3);
 
-extern void fprintfi_filtered (int, struct ui_file *, const char *, ...)
-  ATTRIBUTE_PRINTF (3, 4);
-
-extern void printf_filtered (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
-
-extern void printfi_filtered (int, const char *, ...) ATTRIBUTE_PRINTF (2, 3);
-
-extern void vprintf_unfiltered (const char *, va_list) ATTRIBUTE_PRINTF (1, 0);
-
-extern void vfprintf_unfiltered (struct ui_file *, const char *, va_list)
-  ATTRIBUTE_PRINTF (2, 0);
-
-extern void fprintf_unfiltered (struct ui_file *, const char *, ...)
-  ATTRIBUTE_PRINTF (2, 3);
+extern void gdb_printf (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
 
 extern void printf_unfiltered (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
 
 extern void print_spaces (int, struct ui_file *);
 
-extern void print_spaces_filtered (int, struct ui_file *);
-
-extern char *n_spaces (int);
-
-extern void fputstr_filtered (const char *str, int quotr,
-			      struct ui_file * stream);
-
-extern void fputstr_unfiltered (const char *str, int quotr,
-				struct ui_file * stream);
-
-extern void fputstrn_filtered (const char *str, int n, int quotr,
-			       struct ui_file * stream);
-
-typedef int (*do_fputc_ftype) (int c, ui_file *stream);
-
-extern void fputstrn_unfiltered (const char *str, int n, int quotr,
-				 do_fputc_ftype do_fputc,
-				 struct ui_file * stream);
+extern const char *n_spaces (int);
 
 /* Return nonzero if filtered printing is initialized.  */
 extern int filtered_printing_initialized (void);
 
-/* Like fprintf_filtered, but styles the output according to STYLE,
+/* Like gdb_printf, but styles the output according to STYLE,
    when appropriate.  */
 
 extern void fprintf_styled (struct ui_file *stream,
@@ -431,30 +243,18 @@ extern void fprintf_styled (struct ui_file *stream,
 			    ...)
   ATTRIBUTE_PRINTF (3, 4);
 
-/* Like fputs_filtered, but styles the output according to STYLE, when
+/* Like gdb_puts, but styles the output according to STYLE, when
    appropriate.  */
 
 extern void fputs_styled (const char *linebuffer,
 			  const ui_file_style &style,
 			  struct ui_file *stream);
 
-/* Reset the terminal style to the default, if needed.  */
+/* Like fputs_styled, but uses highlight_style to highlight the
+   parts of STR that match HIGHLIGHT.  */
 
-extern void reset_terminal_style (struct ui_file *stream);
-
-/* Return true if ANSI escapes can be used on STREAM.  */
-
-extern bool can_emit_style_escape (struct ui_file *stream);
-
-/* Display the host ADDR on STREAM formatted as ``0x%x''.  */
-extern void gdb_print_host_address_1 (const void *addr, struct ui_file *stream);
-
-/* Wrapper that avoids adding a pointless cast to all callers.  */
-#define gdb_print_host_address(ADDR, STREAM) \
-  gdb_print_host_address_1 ((const void *) ADDR, STREAM)
-
-/* Return the address only having significant bits.  */
-extern CORE_ADDR address_significant (gdbarch *gdbarch, CORE_ADDR addr);
+extern void fputs_highlighted (const char *str, const compiled_regex &highlight,
+			       struct ui_file *stream);
 
 /* Convert CORE_ADDR to string in platform-specific manner.
    This is usually formatted similar to 0x%lx.  */
@@ -466,21 +266,20 @@ extern const char *paddress (struct gdbarch *gdbarch, CORE_ADDR addr);
 extern const char *print_core_address (struct gdbarch *gdbarch,
 				       CORE_ADDR address);
 
-/* Callback hash_f and eq_f for htab_create_alloc or htab_create_alloc_ex.  */
-extern hashval_t core_addr_hash (const void *ap);
-extern int core_addr_eq (const void *ap, const void *bp);
-
 extern CORE_ADDR string_to_core_addr (const char *my_string);
 
-extern void fprintf_symbol_filtered (struct ui_file *, const char *,
-				     enum language, int);
-
-extern void throw_perror_with_name (enum errors errcode, const char *string)
-  ATTRIBUTE_NORETURN;
+extern void fprintf_symbol (struct ui_file *, const char *,
+			    enum language, int);
 
 extern void perror_warning_with_name (const char *string);
 
-extern void print_sys_errmsg (const char *, int);
+/* Issue a warning formatted as '<filename>: <explanation>', where
+   <filename> is FILENAME with filename styling applied.  As such, don't
+   pass anything more than a filename in this string.  The <explanation>
+   is a string returned from calling safe_strerror(SAVED_ERRNO).  */
+
+extern void warning_filename_and_errno (const char *filename,
+					int saved_errno);
 
 /* Warnings and error messages.  */
 
@@ -489,8 +288,6 @@ extern void (*deprecated_error_begin_hook) (void);
 /* Message to be printed before the warning message, when a warning occurs.  */
 
 extern const char *warning_pre_print;
-
-extern void error_stream (const string_file &) ATTRIBUTE_NORETURN;
 
 extern void demangler_vwarning (const char *file, int line,
 			       const char *, va_list ap)
@@ -501,11 +298,6 @@ extern void demangler_warning (const char *file, int line,
 
 
 /* Misc. utilities.  */
-
-/* Allocation and deallocation functions for the libiberty hash table
-   which use obstacks.  */
-void *hashtab_obstack_allocate (void *data, size_t size, size_t count);
-void dummy_obstack_deallocate (void *object, void *data);
 
 #ifdef HAVE_WAITPID
 extern pid_t wait_to_die_with_timeout (pid_t pid, int *status, int timeout);
@@ -537,11 +329,6 @@ extern void warn_cant_dump_core (const char *reason);
 
 extern void dump_core (void);
 
-/* Return the hex string form of LENGTH bytes of DATA.
-   Space for the result is malloc'd, caller must free.  */
-
-extern char *make_hex_string (const gdb_byte *data, size_t length);
-
 /* Copy NBITS bits from SOURCE to DEST starting at the given bit
    offsets.  Use the bit order as specified by BITS_BIG_ENDIAN.
    Source and destination buffers must not overlap.  */
@@ -550,4 +337,153 @@ extern void copy_bitwise (gdb_byte *dest, ULONGEST dest_offset,
 			  const gdb_byte *source, ULONGEST source_offset,
 			  ULONGEST nbits, int bits_big_endian);
 
-#endif /* UTILS_H */
+/* When readline decides that the terminal cannot auto-wrap lines, it reduces
+   the width of the reported screen width by 1.  This variable indicates
+   whether that's the case or not, allowing us to add it back where
+   necessary.  See _rl_term_autowrap in readline/terminal.c.  */
+
+extern int readline_hidden_cols;
+
+/* Assign VAL to LVAL, and set CHANGED to true if the assignment changed
+   LVAL.  */
+
+template<typename T>
+void
+assign_set_if_changed (T &lval, const T &val, bool &changed)
+{
+  if (lval == val)
+    return;
+
+  lval = val;
+  changed = true;
+}
+
+/* Assign VAL to LVAL, and return true if the assignment changed LVAL.  */
+
+template<typename T>
+bool
+assign_return_if_changed (T &lval, const T &val)
+{
+  if (lval == val)
+    return false;
+
+  lval = val;
+  return true;
+}
+
+/* ARG is an argument string as passed to a GDB command which is expected
+   to contain a single, possibly quoted, filename argument.  Extract the
+   filename and return it as a string.  If the filename is quoted then the
+   quotes will have been removed.  If the filename is not quoted then any
+   escaping within the filename will have been removed.
+
+   If there is any content in ARG after the filename then an error will be
+   thrown complaining about the extra content.
+
+   If there is no filename in ARG, or if ARG is nullptr, then an empty
+   string will be returned.  */
+
+extern std::string extract_single_filename_arg (const char *arg);
+
+/* A class that can be used to intercept warnings.  A class is used
+   here, rather than a gdb::function_view because it proved difficult
+   to use a function view in conjunction with ATTRIBUTE_PRINTF in a
+   way that would satisfy all compilers on all systems.  And, even
+   though gdb only ever uses deferred_warnings here, a virtual
+   function is used to help Insight.  */
+struct warning_hook_handler_type
+{
+  virtual void warn (const char *format, va_list args) ATTRIBUTE_PRINTF (2, 0)
+    = 0;
+};
+
+typedef warning_hook_handler_type *warning_hook_handler;
+
+/* Set the thread-local warning hook, and restore the old value when
+   finished.  */
+class scoped_restore_warning_hook
+{
+public:
+  explicit scoped_restore_warning_hook (warning_hook_handler new_handler);
+
+  ~scoped_restore_warning_hook ();
+
+private:
+  scoped_restore_warning_hook (const scoped_restore_warning_hook &other)
+    = delete;
+  scoped_restore_warning_hook &operator= (const scoped_restore_warning_hook &)
+    = delete;
+
+  warning_hook_handler m_save;
+};
+
+/* Return the current warning handler.  */
+extern warning_hook_handler get_warning_hook_handler ();
+
+/* In some cases GDB needs to try several different solutions to a problem,
+   if any of the solutions work then as far as the user is concerned the
+   problem is solved, and GDB should continue without warnings.  However,
+   if none of the solutions work then GDB should emit any warnings that
+   occurred while trying each possible solution.
+
+   One example of this is locating separate debug info.  There are several
+   different approaches for this; following the .gnu_debuglink, a build-id
+   based lookup, or using debuginfod.  If any works, and debug info is
+   located, then the user doesn't want to see warnings from the earlier
+   approaches that were tried and failed.
+
+   However, GDB should emit all the warnings using separate calls to
+   warning -- this ensures that each warning is formatted on its own line,
+   and that any styling is emitted correctly.
+
+   This class helps with deferring warnings.  Warnings can be added to an
+   instance of this class with the 'warn' function, and all warnings can be
+   emitted with a single call to 'emit'.  */
+
+struct deferred_warnings final : public warning_hook_handler_type
+{
+  deferred_warnings ()
+    : m_can_style (gdb_stderr->can_emit_style_escape ())
+  {
+  }
+
+  /* Add a warning to the list of deferred warnings.  */
+  void warn (const char *format, ...) ATTRIBUTE_PRINTF (2, 3)
+  {
+    va_list args;
+    va_start (args, format);
+    this->warn (format, args);
+    va_end (args);
+  }
+
+  /* A variant of 'warn' so that this object can be used as a warning
+     hook; see scoped_restore_warning_hook.  Note that no locking is
+     done, so users have to be careful to only install this into a
+     single thread at a time.  */
+  void warn (const char *format, va_list args) override
+    ATTRIBUTE_PRINTF (2, 0)
+  {
+    string_file msg (m_can_style);
+    msg.vprintf (format, args);
+    m_warnings.emplace_back (std::move (msg));
+  }
+
+  /* Emit all warnings.  */
+  void emit () const
+  {
+    for (const auto &w : m_warnings)
+      warning ("%s", w.c_str ());
+  }
+
+private:
+
+  /* True if gdb_stderr supports styling at the moment this object is
+     constructed.  This is done just once so that objects of this type
+     can be used off the main thread.  */
+  bool m_can_style;
+
+  /* The list of all deferred warnings.  */
+  std::vector<string_file> m_warnings;
+};
+
+#endif /* GDB_UTILS_H */

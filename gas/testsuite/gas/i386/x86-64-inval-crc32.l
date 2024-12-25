@@ -3,8 +3,8 @@
 .*:7: Error: .*
 .*:8: Error: .*
 .*:9: Error: .*
-.*:10: Error: .*
-.*:11: Error: .*
+.*:10: Warning: .*
+.*:11: Warning: .*
 .*:12: Error: .*
 .*:13: Error: .*
 .*:14: Error: .*
@@ -15,8 +15,8 @@
 .*:19: Error: .*
 .*:20: Error: .*
 .*:21: Error: .*
-.*:24: Error: .*
-.*:25: Error: .*
+.*:22: Error: .*
+.*:23: Error: .*
 .*:26: Error: .*
 .*:27: Error: .*
 .*:28: Error: .*
@@ -26,6 +26,8 @@
 .*:32: Error: .*
 .*:33: Error: .*
 .*:34: Error: .*
+.*:35: Error: .*
+.*:36: Error: .*
 GAS LISTING .*
 
 
@@ -38,8 +40,12 @@ GAS LISTING .*
 [ 	]*7[ 	]+crc32w \(%rsi\), %ax
 [ 	]*8[ 	]+crc32 \(%rsi\), %al
 [ 	]*9[ 	]+crc32 \(%rsi\), %ax
-[ 	]*10[ 	]+crc32 \(%rsi\), %eax
-[ 	]*11[ 	]+crc32 \(%rsi\), %rax
+[ 	]*10[ 	]+\?\?\?\? F20F38F1[ 	]+crc32 \(%rsi\), %eax
+\*\*\*\*  Warning: .* `crc32'
+[ 	]*10[ 	]+06
+[ 	]*11[ 	]+\?\?\?\? F2480F38[ 	]+crc32 \(%rsi\), %rax
+\*\*\*\*  Warning: .* `crc32'
+[ 	]*11[ 	]+F106
 [ 	]*12[ 	]+crc32  %al, %al
 [ 	]*13[ 	]+crc32b  %al, %al
 [ 	]*14[ 	]+crc32  %ax, %ax
@@ -48,18 +54,22 @@ GAS LISTING .*
 [ 	]*17[ 	]+crc32  %eax, %rax
 [ 	]*18[ 	]+crc32l  %rax, %eax
 [ 	]*19[ 	]+crc32l  %eax, %rax
-[ 	]*20[ 	]+crc32q  %eax, %rax
-[ 	]*21[ 	]+crc32q  %rax, %eax
-[ 	]*22[ 	]+
-[ 	]*23[ 	]+\.intel_syntax noprefix
-[ 	]*24[ 	]+crc32  al,byte ptr \[rsi\]
-[ 	]*25[ 	]+crc32  ax, word ptr \[rsi\]
-[ 	]*26[ 	]+crc32  rax,word ptr \[rsi\]
-[ 	]*27[ 	]+crc32  rax,dword ptr \[rsi\]
-[ 	]*28[ 	]+crc32  al,\[rsi\]
-[ 	]*29[ 	]+crc32  ax,\[rsi\]
-[ 	]*30[ 	]+crc32  eax,\[rsi\]
-[ 	]*31[ 	]+crc32  rax,\[rsi\]
-[ 	]*32[ 	]+crc32  al,al
-[ 	]*33[ 	]+crc32  ax, ax
-[ 	]*34[ 	]+crc32  rax,eax
+[ 	]*[0-9]+[ 	]+crc32q  %al, %rax
+[ 	]*[0-9]+[ 	]+crc32q  %ax, %rax
+[ 	]*[0-9]+[ 	]+crc32q  %eax, %rax
+[ 	]*[0-9]+[ 	]+crc32q  %rax, %eax
+[ 	]*[0-9]+[ 	]+
+[ 	]*[0-9]+[ 	]+\.intel_syntax noprefix
+[ 	]*[0-9]+[ 	]+crc32  al,byte ptr \[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  ax, word ptr \[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  rax,word ptr \[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  rax,dword ptr \[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  al,\[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  ax,\[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  eax,\[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  rax,\[rsi\]
+[ 	]*[0-9]+[ 	]+crc32  al,al
+[ 	]*[0-9]+[ 	]+crc32  ax, ax
+[ 	]*[0-9]+[ 	]+crc32  rax,eax
+[ 	]*[0-9]+[ 	]*
+#pass

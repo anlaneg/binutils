@@ -1,4 +1,4 @@
-# Copyright 2008-2019 Free Software Foundation, Inc.
+# Copyright 2008-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,18 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-if { ![support_displaced_stepping] } { 
-    unsupported "displaced stepping"
-    return -1
-}
+require support_displaced_stepping
 
 load_lib mi-support.exp
 set MIFLAGS "-i=mi"
-
-gdb_exit
-if {[mi_gdb_start]} {
-    continue
-}
 
 #
 # Start here
@@ -36,15 +28,16 @@ if {[gdb_compile_pthreads "$srcdir/$subdir/$srcfile" $binfile executable $option
     return -1
 }
 
-mi_gdb_reinitialize_dir $srcdir/$subdir
-mi_gdb_load $binfile
+save_vars { GDBFLAGS } {
+    append GDBFLAGS " -ex \"set non-stop on\""
+    mi_clean_restart $binfile
+}
 
-mi_gdb_test "-gdb-set non-stop 1" ".*"
 mi_gdb_test "-gdb-set mi-async 1" ".*"
 mi_detect_async
 
-if { [mi_run_to_main] < 0 } {
-    continue
+if { [mi_runto_main] < 0 } {
+    return
 }
 
 # Keep this in sync with THREADS in the $srcfile.
@@ -57,7 +50,7 @@ set bkpt_line [gdb_get_line_number "set breakpoint here"]
 
 mi_create_breakpoint "$srcfile:$bkpt_line" \
     "breakpoint at thread_function" \
-    -number 2 -function thread_function
+    -number 2 -func thread_function
 
 mi_send_resuming_command "exec-continue --all" "resume all"
 for {set i 0} {$i < $nthreads} {incr i} {
@@ -80,9 +73,10 @@ mi_gdb_test "-thread-select 5" "\\^done.*" "select thread 5"
 mi_delete_breakpoints
 
 # Recreate the same breakpoint, but this time, specific to thread 5.
-mi_gdb_test "234-break-insert -p 5 $srcfile:$bkpt_line" \
-    "234\\^done,bkpt=\{number=\"3\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\",addr=\".*\",func=\"thread_function\",file=\".*\",fullname=\".*\",line=\".*\",thread-groups=\\\[\".*\"\\\],thread=\"5\",thread=\"5\",times=\"0\",original-location=\".*\"\}" \
-    "thread specific breakpoint at thread_function" 
+mi_create_breakpoint "-p 5 $srcfile:$bkpt_line" \
+    "thread specific breakpoint at thread_function" \
+    -number "3" -type "breakpoint" -disp "keep" -enabled "y" \
+    -func "thread_function" -line "$bkpt_line" -thread "5" -times "0"
 
 # Resume all threads.  Only thread 5 should report a stop.
 
@@ -119,8 +113,17 @@ mi_check_thread_states \
 # gdb_test_multiple (or an MI equivalent)
 
 mi_gdb_test "102-break-delete" "102\\^done.*"
-mi_gdb_test "print done = 1" { = 1"}
-mi_gdb_test "103-exec-continue --all" "\[^\n\]*\r\n$running_re"
+set re [list \
+	    [string_list_to_regexp ~ {"} $] \
+	    $decimal \
+	    [string_list_to_regexp " = 1" \\ n {"} \r\n ^ done]]
+set re [join $re ""]
+mi_gdb_test "print done = 1" $re
+
+# Command exec-continue --all attempts to resume all threads, but only
+# thread 5 was stopped, so only that one is reported as running.
+set running_re "\\*running,thread-id=\"5\""
+mi_gdb_test "103-exec-continue --all" "\[^\n\]*\r\n$running_re" \
 
 gdb_expect {
     -re "\\*stopped,reason=\"exited-normally\"" {

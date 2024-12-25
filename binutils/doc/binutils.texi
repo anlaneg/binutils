@@ -10,7 +10,7 @@
 
 @copying
 @c man begin COPYRIGHT
-Copyright @copyright{} 1991-2019 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2024 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3
@@ -118,7 +118,7 @@ Demangle encoded C++ symbols (on MS-DOS, this program is named
 @code{cxxfilt})
 
 @item addr2line
-Convert addresses into file names and line numbers
+Convert addresses or symbol+offset into file names and line numbers
 
 @item windres
 Manipulate Windows resources
@@ -146,7 +146,7 @@ in the section entitled ``GNU Free Documentation License''.
 * strip::                       Discard symbols
 * c++filt::			Filter to demangle encoded C++ symbols
 * cxxfilt: c++filt.             MS-DOS name for c++filt
-* addr2line::			Convert addresses to file and line
+* addr2line::			Convert addresses or symbol+offset to file and line
 * windmc::			Generator for Windows message resources
 * windres::			Manipulate Windows resources
 * dlltool::			Create files needed to build and use DLLs
@@ -154,6 +154,7 @@ in the section entitled ``GNU Free Documentation License''.
 * elfedit::                     Update ELF header and property of ELF files
 * Common Options::              Command-line options for all utilities
 * Selecting the Target System:: How these utilities determine the target
+* debuginfod::                  Using binutils with debuginfod
 * Reporting Bugs::              Reporting Bugs
 * GNU Free Documentation License::  GNU Free Documentation License
 * Binutils Index::              Binutils Index
@@ -169,7 +170,7 @@ in the section entitled ``GNU Free Documentation License''.
 @c man title ar create, modify, and extract from archives
 
 @smallexample
-ar [-]@var{p}[@var{mod}] [@option{--plugin} @var{name}] [@option{--target} @var{bfdname}] [@var{relpos}] [@var{count}] @var{archive} [@var{member}@dots{}]
+ar [-]@var{p}[@var{mod}] [@option{--plugin} @var{name}] [@option{--target} @var{bfdname}] [@option{--output} @var{dirname}] [@option{--record-libdeps} @var{libdeps}] [@var{relpos}] [@var{count}] @var{archive} [@var{member}@dots{}]
 ar -M [ <mri-script ]
 @end smallexample
 
@@ -195,7 +196,9 @@ characters (typical of formats related to coff).
 @cindex libraries
 @command{ar} is considered a binary utility because archives of this sort
 are most often used as @dfn{libraries} holding commonly needed
-subroutines.
+subroutines.  Since libraries often will depend on other libraries,
+@command{ar} can also record the dependencies of a library when the
+@option{--record-libdeps} option is specified.
 
 @cindex symbol index
 @command{ar} creates an index to the symbols defined in relocatable
@@ -253,7 +256,7 @@ program.
 
 @smallexample
 @c man begin SYNOPSIS ar
-ar [@option{-X32_64}] [@option{-}]@var{p}[@var{mod}] [@option{--plugin} @var{name}] [@option{--target} @var{bfdname}] [@var{relpos}] [@var{count}] @var{archive} [@var{member}@dots{}]
+ar [@option{-X32_64}] [@option{-}]@var{p}[@var{mod}] [@option{--plugin} @var{name}] [@option{--target} @var{bfdname}] [@option{--output} @var{dirname}] [@option{--record-libdeps} @var{libdeps}] [@option{--thin}] [@var{relpos}] [@var{count}] @var{archive} [@var{member}@dots{}]
 @c man end
 @end smallexample
 
@@ -387,7 +390,12 @@ use the @samp{v} modifier with this operation, to request that
 If you do not specify a @var{member}, all files in the archive
 are extracted.
 
-Files cannot be extracted from a thin archive.
+Files cannot be extracted from a thin archive, and there are
+restrictions on extracting from archives created with @option{P}: The
+paths must not be absolute, may not contain @code{..}, and any
+subdirectories in the paths must exist.  If it is desired to avoid
+these restrictions then used the @option{--output} option to specify
+an output directory.
 @end table
 
 A number of modifiers (@var{mod}) may immediately follow the @var{p}
@@ -442,9 +450,14 @@ member must be present as the @var{relpos} argument, before the
 @var{archive} specification.  (same as @samp{b}).
 
 @item l
-This modifier is accepted but not used.
+@c This modifier was accepted but not used.
 @c whaffor ar l modifier??? presumably compat; with
 @c what???---doc@@cygnus.com, 25jan91
+Specify dependencies of this library.  The dependencies must immediately
+follow this option character, must use the same syntax as the linker
+command line, and must be specified within a single argument.  I.e., if
+multiple items are needed, they must be quoted to form a single command
+line argument.  For example @samp{l "-L/usr/local/lib -lmydep1 -lmydep2"}
 
 @item N
 Uses the @var{count} parameter.  This is used if there are multiple
@@ -463,12 +476,20 @@ Display member offsets inside the archive. Use together with the @samp{t}
 option.
 
 @item P
-Use the full path name when matching names in the archive.  @sc{gnu}
-@command{ar} can not create an archive with a full path name (such archives
-are not POSIX complaint), but other archive creators can.  This option
-will cause @sc{gnu} @command{ar} to match file names using a complete path
-name, which can be convenient when extracting a single file from an
-archive created by another tool.
+Use the full path name when matching or storing names in the archive.
+Archives created with full path names are not POSIX compliant, and
+thus may not work with tools other than up to date @sc{gnu} tools.
+Modifying such archives with @sc{gnu} @command{ar} without using
+@option{P} will remove the full path names unless the archive is a
+thin archive.  Note that @option{P} may be useful when adding files to
+a thin archive since @option{r} without @option{P} ignores the path
+when choosing which element to replace.  Thus
+@smallexample
+ar rcST archive.a subdir/file1 subdir/file2 file1
+@end smallexample
+will result in the first @code{subdir/file1} being replaced with
+@code{file1} from the current directory.  Adding @option{P} will
+prevent this replacement.
 
 @item s
 @cindex writing archive index
@@ -486,10 +507,9 @@ with the linker.  In order to build a symbol table, you must omit the
 @samp{ranlib} on the archive.
 
 @item T
-@cindex creating thin archive
-Make the specified @var{archive} a @emph{thin} archive.  If it already
-exists and is a regular archive, the existing members must be present
-in the same directory as @var{archive}.
+Deprecated alias for @option{--thin}.  @option{T} is not recommended because in
+many ar implementations @option{T} has a different meaning, as specified by
+X/Open System Interface.
 
 @item u
 @cindex updating an archive
@@ -500,6 +520,10 @@ names, use this modifier.  The @samp{u} modifier is allowed only for the
 operation @samp{r} (replace).  In particular, the combination @samp{qu} is
 not allowed, since checking the timestamps would lose any speed
 advantage from the operation @samp{q}.
+
+Note - if an archive has been created in a deterministic manner, eg
+via the use of the @option{D} modifier, then replacement will always
+happen and the @option{u} modifier will be ineffective.
 
 @item U
 @cindex deterministic archives
@@ -533,7 +557,7 @@ and then exits.
 Displays the version information of @command{ar} and then exits.
 
 @item -X32_64
-@command{ar} ignores an initial option spelt @samp{-X32_64}, for
+@command{ar} ignores an initial option spelled @samp{-X32_64}, for
 compatibility with AIX.  The behaviour produced by this option is the
 default for @sc{gnu} @command{ar}.  @command{ar} does not support any
 of the other @samp{-X} options; in particular, it does not support
@@ -568,6 +592,26 @@ The optional command-line switch @option{--target @var{bfdname}}
 specifies that the archive members are in an object code format
 different from your system's default format.  See
 @xref{Target Selection}, for more information.
+
+@item --output @var{dirname}
+The @option{--output} option can be used to specify a path to a
+directory into which archive members should be extracted.  If this
+option is not specified then the current directory will be used.
+
+Note - although the presence of this option does imply a @option{x} 
+extraction operation that option must still be included on the command
+line.
+
+@item --record-libdeps @var{libdeps}
+The @option{--record-libdeps} option is identical to the @option{l} modifier,
+just handled in long form.
+
+@item --thin
+@cindex creating thin archive
+Make the specified @var{archive} a @emph{thin} archive.  If it already
+exists and is a regular archive, the existing members must be present
+in the same directory as @var{archive}.
+
 @end table
 @c man end
 
@@ -758,21 +802,39 @@ The @sc{gnu} linker @command{ld} is now described in a separate manual.
 
 @smallexample
 @c man begin SYNOPSIS nm
-nm [@option{-A}|@option{-o}|@option{--print-file-name}] [@option{-a}|@option{--debug-syms}]
-   [@option{-B}|@option{--format=bsd}] [@option{-C}|@option{--demangle}[=@var{style}]]
-   [@option{-D}|@option{--dynamic}] [@option{-f}@var{format}|@option{--format=}@var{format}]
-   [@option{-g}|@option{--extern-only}] [@option{-h}|@option{--help}]
+nm [@option{-A}|@option{-o}|@option{--print-file-name}]
+   [@option{-a}|@option{--debug-syms}]
+   [@option{-B}|@option{--format=bsd}]
+   [@option{-C}|@option{--demangle}[=@var{style}]]
+   [@option{-D}|@option{--dynamic}]
+   [@option{-f}@var{format}|@option{--format=}@var{format}]
+   [@option{-g}|@option{--extern-only}]
+   [@option{-h}|@option{--help}]
+   [@option{--ifunc-chars=@var{CHARS}}]
+   [@option{-j}|@option{--format=just-symbols}]
    [@option{-l}|@option{--line-numbers}] [@option{--inlines}]
    [@option{-n}|@option{-v}|@option{--numeric-sort}]
-   [@option{-P}|@option{--portability}] [@option{-p}|@option{--no-sort}]
-   [@option{-r}|@option{--reverse-sort}] [@option{-S}|@option{--print-size}]
-   [@option{-s}|@option{--print-armap}] [@option{-t} @var{radix}|@option{--radix=}@var{radix}]
-   [@option{-u}|@option{--undefined-only}] [@option{-V}|@option{--version}]
-   [@option{-X 32_64}] [@option{--defined-only}] [@option{--no-demangle}]
-   [@option{--plugin} @var{name}]
+   [@option{-P}|@option{--portability}]
+   [@option{-p}|@option{--no-sort}]
+   [@option{-r}|@option{--reverse-sort}]
+   [@option{-S}|@option{--print-size}]
+   [@option{-s}|@option{--print-armap}]
+   [@option{-t} @var{radix}|@option{--radix=}@var{radix}]
+   [@option{-u}|@option{--undefined-only}]
+   [@option{-U}|@option{--defined-only}]
+   [@option{-V}|@option{--version}]
+   [@option{-W}|@option{--no-weak}]
+   [@option{-X 32_64}]
+   [@option{--no-demangle}]
    [@option{--no-recurse-limit}|@option{--recurse-limit}]]
-   [@option{--size-sort}] [@option{--special-syms}]
-   [@option{--synthetic}] [@option{--with-symbol-versions}] [@option{--target=}@var{bfdname}]
+   [@option{--plugin} @var{name}]
+   [@option{--size-sort}]
+   [@option{--special-syms}]
+   [@option{--synthetic}]
+   [@option{--target=}@var{bfdname}]
+   [@option{--unicode=}@var{method}]
+   [@option{--with-symbol-versions}]
+   [@option{--without-symbol-versions}]
    [@var{objfile}@dots{}]
 @c man end
 @end smallexample
@@ -810,6 +872,7 @@ contains zero-initialized or uninitialized data, although the exact
 behavior is system dependent.
 
 @item C
+@itemx c
 The symbol is common.  Common symbols are uninitialized data.  When
 linking, multiple common symbols may appear with the same name.  If the
 symbol is defined anywhere, the common symbols are treated as undefined
@@ -818,6 +881,8 @@ references.
 For more details on common symbols, see the discussion of
 --warn-common in @ref{Options,,Linker options,ld.info,The GNU linker}.
 @end ifclear
+The lower case @var{c} character is used when the symbol is in a
+special section for small commons.
 
 @item D
 @itemx d
@@ -831,12 +896,21 @@ such as a global int variable as opposed to a large global array.
 
 @item i
 For PE format files this indicates that the symbol is in a section
-specific to the implementation of DLLs.  For ELF format files this
-indicates that the symbol is an indirect function.  This is a GNU
-extension to the standard set of ELF symbol types.  It indicates a
-symbol which if referenced by a relocation does not evaluate to its
-address, but instead must be invoked at runtime.  The runtime
-execution will then return the value to be used in the relocation.
+specific to the implementation of DLLs.
+
+For ELF format files this indicates that the symbol is an indirect
+function.  This is a GNU extension to the standard set of ELF symbol
+types.  It indicates a symbol which if referenced by a relocation does
+not evaluate to its address, but instead must be invoked at runtime.
+The runtime execution will then return the value to be used in the
+relocation.
+
+Note - the actual symbols display for GNU indirect symbols is
+controlled by the @option{--ifunc-chars} command line option.  If this
+option has been provided then the first character in the string will
+be used for global indirect function symbols.  If the string contains
+a second character then that will be used for local indirect function
+symbols.
 
 @item I
 The symbol is an indirect reference to another symbol.
@@ -844,8 +918,11 @@ The symbol is an indirect reference to another symbol.
 @item N
 The symbol is a debugging symbol.
 
+@item n
+The symbol is in a non-data, non-code, non-debug read-only section.
+
 @item p
-The symbols is in a stack unwind section.
+The symbol is in a stack unwind section.
 
 @item R
 @itemx r
@@ -897,7 +974,13 @@ The symbol type is unknown, or object file format specific.
 @end table
 
 @item
-The symbol name.
+The symbol name.  If a symbol has version information associated with it,
+then the version information is displayed as well.  If the versioned
+symbol is undefined or hidden from linker, the version string is displayed
+as a suffix to the symbol name, preceded by an @@ character.  For example
+@samp{foo@@VER_1}.  If the version is the default version to be used when
+resolving unversioned references to the symbol, then it is displayed as a
+suffix preceded by two @@ characters.  For example @samp{foo@@@@VER_2}.
 @end itemize
 
 @c man end
@@ -947,7 +1030,7 @@ Do not demangle low-level symbol names.  This is the default.
 @itemx --no-recursion-limit
 Enables or disables a limit on the amount of recursion performed
 whilst demangling strings.  Since the name mangling formats allow for
-an inifinite level of recursion it is possible to create strings whose
+an infinite level of recursion it is possible to create strings whose
 decoding will exhaust the amount of stack space available on the host
 machine, triggering a memory fault.  The limit tries to prevent this
 from happening by restricting recursion to 2048 levels of nesting.
@@ -969,7 +1052,7 @@ libraries.
 @cindex @command{nm} format
 @cindex @command{nm} compatibility
 Use the output format @var{format}, which can be @code{bsd},
-@code{sysv}, or @code{posix}.  The default is @code{bsd}.
+@code{sysv}, @code{posix} or @code{just-symbols}.  The default is @code{bsd}.
 Only the first character of @var{format} is significant; it can be
 either upper or lower case.
 
@@ -981,6 +1064,18 @@ Display only external symbols.
 @item -h
 @itemx --help
 Show a summary of the options to @command{nm} and exit.
+
+@item --ifunc-chars=@var{CHARS}
+When display GNU indirect function symbols @command{nm} will default
+to using the @code{i} character for both local indirect functions and
+global indirect functions.  The @option{--ifunc-chars} option allows
+the user to specify a string containing one or two characters. The
+first character will be used for global indirect function symbols and
+the second character, if present, will be used for local indirect
+function symbols.
+
+@item j
+The same as @option{--format=just-symbols}.
 
 @item -l
 @itemx --line-numbers
@@ -1047,6 +1142,14 @@ Use @var{radix} as the radix for printing the symbol values.  It must be
 @cindex external symbols
 @cindex undefined symbols
 Display only undefined symbols (those external to each object file).
+By default both defined and undefined symbols are displayed.
+
+@item -U
+@itemx --defined-only
+@cindex external symbols
+@cindex undefined symbols
+Display only defined symbols for each object file.
+By default both defined and undefined symbols are displayed.
 
 @item -V
 @itemx --version
@@ -1057,11 +1160,6 @@ This option is ignored for compatibility with the AIX version of
 @command{nm}.  It takes one parameter which must be the string
 @option{32_64}.  The default mode of AIX @command{nm} corresponds
 to @option{-X 32}, which is not supported by @sc{gnu} @command{nm}.
-
-@item --defined-only
-@cindex external symbols
-@cindex undefined symbols
-Display only defined symbols for each object file.
 
 @item --plugin @var{name}
 @cindex plugins
@@ -1091,6 +1189,9 @@ with the next higher value.  If the @code{bsd} output format is used
 the size of the symbol is printed, rather than the value, and
 @samp{-S} must be used in order both size and value to be printed.
 
+Note - this option does not work if @option{--undefined-only} has been
+enabled as undefined symbols have no size.
+
 @item --special-syms
 Display symbols which have a target-specific special meaning.  These
 symbols are usually used by the target for some special processing and
@@ -1103,13 +1204,33 @@ Include synthetic symbols in the output.  These are special symbols
 created by the linker for various purposes.  They are not shown by
 default since they are not part of the binary's original source code.
 
+@item --unicode=@var{[default|invalid|locale|escape|hex|highlight]}
+Controls the display of UTF-8 encoded multibyte characters in strings.
+The default (@option{--unicode=default}) is to give them no special
+treatment.  The @option{--unicode=locale} option displays the sequence
+in the current locale, which may or may not support them.  The options
+@option{--unicode=hex} and @option{--unicode=invalid} display them as
+hex byte sequences enclosed by either angle brackets or curly braces.
+
+The @option{--unicode=escape} option displays them as escape sequences
+(@var{\uxxxx}) and the @option{--unicode=highlight} option displays
+them as escape sequences highlighted in red (if supported by the
+output device).  The colouring is intended to draw attention to the
+presence of unicode sequences where they might not be expected.
+
+@item -W
+@itemx --no-weak
+Do not display weak symbols.
+
 @item --with-symbol-versions
-Enables the display of symbol version information if any exists.  The
-version string is displayed as a suffix to the symbol name, preceeded by
-an @@ character.  For example @samp{foo@@VER_1}.  If the version is
+@item --without-symbol-versions
+Enables or disables the display of symbol version information.  The
+version string is displayed as a suffix to the symbol name, preceded
+by an @@ character.  For example @samp{foo@@VER_1}.  If the version is
 the default version to be used when resolving unversioned references
-to the symbol then it is displayed as a suffix preceeded by two @@
-characters.  For example @samp{foo@@@@VER_2}.
+to the symbol then it is displayed as a suffix preceded by two @@
+characters.  For example @samp{foo@@@@VER_2}.  By default, symbol
+version information is displayed.
 
 @item --target=@var{bfdname}
 @cindex object code format
@@ -1141,6 +1262,8 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{-g}|@option{--strip-debug}]
         [@option{--strip-unneeded}]
         [@option{-K} @var{symbolname}|@option{--keep-symbol=}@var{symbolname}]
+        [@option{--keep-file-symbols}]
+        [@option{--keep-section-symbols}]
         [@option{-N} @var{symbolname}|@option{--strip-symbol=}@var{symbolname}]
         [@option{--strip-unneeded-symbol=}@var{symbolname}]
         [@option{-G} @var{symbolname}|@option{--keep-global-symbol=}@var{symbolname}]
@@ -1157,7 +1280,9 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{--interleave-width=}@var{width}]
         [@option{-j} @var{sectionpattern}|@option{--only-section=}@var{sectionpattern}]
         [@option{-R} @var{sectionpattern}|@option{--remove-section=}@var{sectionpattern}]
+        [@option{--keep-section=}@var{sectionpattern}]
         [@option{--remove-relocations=}@var{sectionpattern}]
+        [@option{--strip-section-headers}]
         [@option{-p}|@option{--preserve-dates}]
         [@option{-D}|@option{--enable-deterministic-archives}]
         [@option{-U}|@option{--disable-deterministic-archives}]
@@ -1172,6 +1297,7 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{--change-section-vma} @var{sectionpattern}@{=,+,-@}@var{val}]
         [@option{--change-warnings}] [@option{--no-change-warnings}]
         [@option{--set-section-flags} @var{sectionpattern}=@var{flags}]
+        [@option{--set-section-alignment} @var{sectionpattern}=@var{align}]
         [@option{--add-section} @var{sectionname}=@var{filename}]
         [@option{--dump-section} @var{sectionname}=@var{filename}]
         [@option{--update-section} @var{sectionname}=@var{filename}]
@@ -1195,7 +1321,6 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{--prefix-sections=}@var{string}]
         [@option{--prefix-alloc-sections=}@var{string}]
         [@option{--add-gnu-debuglink=}@var{path-to-file}]
-        [@option{--keep-file-symbols}]
         [@option{--only-keep-debug}]
         [@option{--strip-dwo}]
         [@option{--extract-dwo}]
@@ -1205,16 +1330,17 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{--pure}]
         [@option{--impure}]
         [@option{--file-alignment=}@var{num}]
-        [@option{--heap=}@var{size}]
+        [@option{--heap=}@var{reserve}[,@var{commit}]]
         [@option{--image-base=}@var{address}]
         [@option{--section-alignment=}@var{num}]
-        [@option{--stack=}@var{size}]
+        [@option{--stack=}@var{reserve}[,@var{commit}]]
         [@option{--subsystem=}@var{which}:@var{major}.@var{minor}]
         [@option{--compress-debug-sections}]
         [@option{--decompress-debug-sections}]
         [@option{--elf-stt-common=@var{val}}]
         [@option{--merge-notes}]
         [@option{--no-merge-notes}]
+        [@option{--verilog-data-width=@var{val}}]
         [@option{-v}|@option{--verbose}]
         [@option{-V}|@option{--version}]
         [@option{--help}] [@option{--info}]
@@ -1314,7 +1440,7 @@ otherwise copy it.  For example:
   --only-section=.text.* --only-section=!.text.foo
 @end smallexample
 
-will copy all sectinos maching '.text.*' but not the section
+will copy all sectinos matching '.text.*' but not the section
 '.text.foo'.
 
 @item -R @var{sectionpattern}
@@ -1337,6 +1463,10 @@ would otherwise remove it.  For example:
 
 will remove all sections matching the pattern '.text.*', but will not
 remove the section '.text.foo'.
+
+@item --keep-section=@var{sectionpattern}
+When removing sections from the output file, keep sections that match
+@var{sectionpattern}.
 
 @item --remove-relocations=@var{sectionpattern}
 Remove non-dynamic relocations from the output file for any section
@@ -1369,16 +1499,23 @@ will remove all relocations for sections matching the pattern
 '.text.*', but will not remove relocations for the section
 '.text.foo'.
 
+@item --strip-section-headers
+Strip section header   This option is specific to ELF files.
+Implies @option{--strip-all} and @option{--merge-notes}.
+
 @item -S
 @itemx --strip-all
 Do not copy relocation and symbol information from the source file.
+Also deletes debug sections.
 
 @item -g
 @itemx --strip-debug
 Do not copy debugging symbols or sections from the source file.
 
 @item --strip-unneeded
-Strip all symbols that are not needed for relocation processing.
+Remove all symbols that are not needed for relocation processing in
+addition to debugging symbols and sections stripped by
+@option{--strip-debug}.
 
 @item -K @var{symbolname}
 @itemx --keep-symbol=@var{symbolname}
@@ -1493,6 +1630,11 @@ commands.  If the input was '12345678' then the outputs would be
 Set the access and modification dates of the output file to be the same
 as those of the input file.
 
+This option also copies the date stored in a PE format file's header,
+unless the SOURCE_DATE_EPOCH environment variable is defined.  If it
+is defined then this variable will be used as the date stored in the
+header, interpreted as the number of seconds since the Unix epoch.
+
 @item -D
 @itemx --enable-deterministic-archives
 @cindex deterministic archives
@@ -1534,14 +1676,16 @@ done by increasing the size of the last section.  The extra space is
 filled in with the value specified by @option{--gap-fill} (default zero).
 
 @item --set-start @var{val}
-Set the start address of the new file to @var{val}.  Not all object file
-formats support setting the start address.
+Set the start address (also known as the entry address) of the new
+file to @var{val}.  Not all object file formats support setting the
+start address.
 
 @item --change-start @var{incr}
 @itemx --adjust-start @var{incr}
 @cindex changing start address
-Change the start address by adding @var{incr}.  Not all object file
-formats support setting the start address.
+Change the start address (also known as the entry address) by adding
+@var{incr}.  Not all object file formats support setting the start
+address.
 
 @item --change-addresses @var{incr}
 @itemx --adjust-vma @var{incr}
@@ -1593,6 +1737,10 @@ above.  If @var{sectionpattern} does not match any sections in the
 input file, a warning will be issued, unless
 @option{--no-change-warnings} is used.
 
+Note - changing the VMA of sections in a fully linked binary can be
+dangerous since there may be code that expects the sections to be
+located at their old address.
+
 @item --change-warnings
 @itemx --adjust-warnings
 If @option{--change-section-address} or @option{--change-section-lma} or
@@ -1610,11 +1758,26 @@ Set the flags for any sections matching @var{sectionpattern}.  The
 @var{flags} argument is a comma separated string of flag names.  The
 recognized names are @samp{alloc}, @samp{contents}, @samp{load},
 @samp{noload}, @samp{readonly}, @samp{code}, @samp{data}, @samp{rom},
-@samp{share}, and @samp{debug}.  You can set the @samp{contents} flag
-for a section which does not have contents, but it is not meaningful
-to clear the @samp{contents} flag of a section which does have
-contents--just remove the section instead.  Not all flags are
-meaningful for all object file formats.
+@samp{exclude}, @samp{share}, @samp{debug}, and @samp{large}.
+You can set the @samp{contents} flag for a section which does not have
+contents, but it is not meaningful to clear the @samp{contents} flag of a
+section which does have contents--just remove the section instead.  Not all
+flags are meaningful for all object file formats.  In particular the
+@samp{share} flag is only meaningful for COFF format files and not for ELF
+format files.  The ELF x86-64 specific flag @samp{large} corresponds to
+SHF_X86_64_LARGE.
+
+@item --set-section-alignment @var{sectionpattern}=@var{align}
+Set the alignment for any sections matching @var{sectionpattern}.
+@var{align} specifies the alignment in bytes and must be a power of
+two, i.e. 1, 2, 4, 8@dots{}.
+
+Note - setting a section's alignment will not automatically align its
+LMA or VMA addresses.  If those need to be changed as well then the
+@option{--change-section-lma} and/or @option{--change-section-vma}
+options should be used.  Also note that changing VMAs can cause
+problems in fully linked binaries where there may be code that expects
+the contents of the sections to be located at their old address.
 
 @item --add-section @var{sectionname}=@var{filename}
 Add a new section named @var{sectionname} while copying the file.  The
@@ -1665,7 +1828,8 @@ Rename a section from @var{oldname} to @var{newname}, optionally
 changing the section's flags to @var{flags} in the process.  This has
 the advantage over using a linker script to perform the rename in that
 the output stays as an object file and does not become a linked
-executable.
+executable.  This option accepts the same set of flags as the
+@option{--set-section-flags} option.
 
 This option is particularly helpful when the input format is binary,
 since this will always create a section called .data.  If for example,
@@ -1858,7 +2022,7 @@ like this:
 @smallexample
  objcopy --add-gnu-debuglink=foo.debug
 @end smallexample
- 
+
 At debug time the debugger will attempt to look for the separate debug
 info file in a set of known locations.  The exact set of these
 locations varies depending upon the distribution being used, but it
@@ -1877,6 +2041,11 @@ called .debug
 As long as the debug info file has been installed into one of these
 locations before the debugger is run everything should work
 correctly.
+
+@item --keep-section-symbols
+When stripping a file, perhaps with @option{--strip-debug} or
+@option{--strip-unneeded}, retain any symbols specifying section names,
+which would otherwise get stripped.
 
 @item --keep-file-symbols
 When stripping a file, perhaps with @option{--strip-debug} or
@@ -1971,9 +2140,20 @@ for dlls.
 [This option is specific to PE targets.]
 
 @item --section-alignment @var{num}
-Sets the section alignment.  Sections in memory will always begin at
-addresses which are a multiple of this number.  Defaults to 0x1000.
 [This option is specific to PE targets.]
+
+Sets the section alignment field in the PE header - if one is present
+in the binary.  Sections in memory will always begin at addresses
+which are a multiple of this number.  Defaults to 0x1000.
+
+Note - this option will also set the alignment field in each section's
+flags.
+
+Note - if a section's LMA or VMA addresses are no longer aligned, and
+those addresses have not been set via the @option{--set-section-lma} or
+@option{--set-section-vma} options, and the file has been fully
+relocated then a warning message will be issued.  It will then be up
+to the user to decide if the LMA and VMA need updating.
 
 @item --stack @var{reserve}
 @itemx --stack @var{reserve},@var{commit}
@@ -2015,21 +2195,23 @@ ELF ABI.  Note - if compression would actually make a section
 @itemx --compress-debug-sections=zlib
 @itemx --compress-debug-sections=zlib-gnu
 @itemx --compress-debug-sections=zlib-gabi
+@itemx --compress-debug-sections=zstd
 For ELF files, these options control how DWARF debug sections are
 compressed.  @option{--compress-debug-sections=none} is equivalent
 to @option{--decompress-debug-sections}.
 @option{--compress-debug-sections=zlib} and
 @option{--compress-debug-sections=zlib-gabi} are equivalent to
 @option{--compress-debug-sections}.
-@option{--compress-debug-sections=zlib-gnu} compresses DWARF debug
-sections using zlib.  The debug sections are renamed to begin with
-@samp{.zdebug} instead of @samp{.debug}.  Note - if compression would
-actually make a section @emph{larger}, then it is not compressed nor
-renamed.
+@option{--compress-debug-sections=zlib-gnu} compresses DWARF debug sections
+using the obsoleted zlib-gnu format.  The debug sections are renamed to begin
+with @samp{.zdebug}.
+@option{--compress-debug-sections=zstd} compresses DWARF debug
+sections using zstd.  Note - if compression would actually make a section
+@emph{larger}, then it is not compressed nor renamed.
 
 @item --decompress-debug-sections
-Decompress DWARF debug sections using zlib.  The original section
-names of the compressed sections are restored.
+Decompress DWARF debug sections.  For a @samp{.zdebug} section, the original
+name is restored.
 
 @item --elf-stt-common=yes
 @itemx --elf-stt-common=no
@@ -2047,6 +2229,11 @@ SHT_NOTE type sections by removing duplicate notes.
 @item -V
 @itemx --version
 Show the version number of @command{objcopy}.
+
+@item --verilog-data-width=@var{bytes}
+For Verilog output, this options controls the number of bytes
+converted for each output data element.  The input target controls the
+endianness of the conversion.
 
 @item -v
 @itemx --verbose
@@ -2074,7 +2261,7 @@ ld(1), objdump(1), and the Info entries for @file{binutils}.
 @cindex object file information
 @kindex objdump
 
-@c man title objdump display information from object files.
+@c man title objdump display information from object files
 
 @smallexample
 @c man begin SYNOPSIS objdump
@@ -2095,6 +2282,7 @@ objdump [@option{-a}|@option{--archive-headers}]
         [@option{-j} @var{section}|@option{--section=}@var{section}]
         [@option{-l}|@option{--line-numbers}]
         [@option{-S}|@option{--source}]
+        [@option{--source-comment}[=@var{text}]]
         [@option{-m} @var{machine}|@option{--architecture=}@var{machine}]
         [@option{-M} @var{options}|@option{--disassembler-options=}@var{options}]
         [@option{-p}|@option{--private-headers}]
@@ -2102,8 +2290,16 @@ objdump [@option{-a}|@option{--archive-headers}]
         [@option{-r}|@option{--reloc}]
         [@option{-R}|@option{--dynamic-reloc}]
         [@option{-s}|@option{--full-contents}]
-        [@option{-W[lLiaprmfFsoRtUuTgAckK]}|
-         @option{--dwarf}[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links,=follow-links]]
+        [@option{-Z}|@option{--decompress}]
+        [@option{-W[lLiaprmfFsoORtUuTgAck]}|
+         @option{--dwarf}[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=str-offsets,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links]]
+        [@option{-WK}|@option{--dwarf=follow-links}]
+        [@option{-WN}|@option{--dwarf=no-follow-links}]
+        [@option{-wD}|@option{--dwarf=use-debuginfod}]
+        [@option{-wE}|@option{--dwarf=do-not-use-debuginfod}]
+        [@option{-L}|@option{--process-links}]
+        [@option{--ctf=}@var{section}]
+        [@option{--sframe=}@var{section}]
         [@option{-G}|@option{--stabs}]
         [@option{-t}|@option{--syms}]
         [@option{-T}|@option{--dynamic-syms}]
@@ -2111,16 +2307,22 @@ objdump [@option{-a}|@option{--archive-headers}]
         [@option{-w}|@option{--wide}]
         [@option{--start-address=}@var{address}]
         [@option{--stop-address=}@var{address}]
+        [@option{--no-addresses}]
         [@option{--prefix-addresses}]
         [@option{--[no-]show-raw-insn}]
         [@option{--adjust-vma=}@var{offset}]
+        [@option{--show-all-symbols}]
         [@option{--dwarf-depth=@var{n}}]
         [@option{--dwarf-start=@var{n}}]
+        [@option{--ctf-parent=}@var{section}]
         [@option{--no-recurse-limit}|@option{--recurse-limit}]
         [@option{--special-syms}]
         [@option{--prefix=}@var{prefix}]
         [@option{--prefix-strip=}@var{level}]
         [@option{--insn-width=}@var{width}]
+        [@option{--visualize-jumps[=color|=extended-color|=off]}
+        [@option{--disassembler-color=[off|terminal|on|extended]}
+        [@option{-U} @var{method}] [@option{--unicode=}@var{method}]
         [@option{-V}|@option{--version}]
         [@option{-H}|@option{--help}]
         @var{objfile}@dots{}
@@ -2199,7 +2401,7 @@ for more information on demangling.
 @itemx --no-recursion-limit
 Enables or disables a limit on the amount of recursion performed
 whilst demangling strings.  Since the name mangling formats allow for
-an inifinite level of recursion it is possible to create strings whose
+an infinite level of recursion it is possible to create strings whose
 decoding will exhaust the amount of stack space available on the host
 machine, triggering a memory fault.  The limit tries to prevent this
 from happening by restricting recursion to 2048 levels of nesting.
@@ -2213,7 +2415,7 @@ possible and any bug reports about such an event will be rejected.
 @itemx --debugging
 Display debugging information.  This attempts to parse STABS
 debugging format information stored in the file and print it out using
-a C like syntax.  If no STABS debuging was found this option
+a C like syntax.  If no STABS debugging was found this option
 falls back on the @option{-W} option to print any DWARF information in
 the file.
 
@@ -2236,10 +2438,15 @@ will stop at the end of the function, otherwise it will stop when the
 next symbol is encountered.  If there are no matches for @var{symbol}
 then nothing will be displayed.
 
+Note if the @option{--dwarf=follow-links} option is enabled
+then any symbol tables in linked debug info files will be read in and
+used when disassembling.
+
 @item -D
 @itemx --disassemble-all
-Like @option{-d}, but disassemble the contents of all sections, not just
-those expected to contain instructions.
+Like @option{-d}, but disassemble the contents of all non-empty
+non-bss sections, not just those expected to contain instructions.
+@option{-j} may be used to select specific sections.
 
 This option also has a subtle effect on the disassembly of
 instructions in code sections.  When option @option{-d} is in effect
@@ -2253,6 +2460,15 @@ is stored in code sections.
 If the target is an ARM architecture this switch also has the effect
 of forcing the disassembler to decode pieces of data found in code
 sections as if they were instructions.
+
+Note if the @option{--dwarf=follow-links} option is enabled
+then any symbol tables in linked debug info files will be read in and
+used when disassembling.
+
+@item --no-addresses
+When disassembling, don't print addresses on each line or for symbols
+and relocation offsets.  In combination with @option{--no-show-raw-insn}
+this may be useful for comparing compiler output.
 
 @item --prefix-addresses
 When disassembling, print the complete address on each line.  This is
@@ -2324,7 +2540,15 @@ for specification with @option{-b} or @option{-m}.
 @item -j @var{name}
 @itemx --section=@var{name}
 @cindex section information
-Display information only for section @var{name}.
+Display information for section @var{name}.  This option may be
+specified multiple times.
+
+@item -L
+@itemx --process-links
+Display the contents of non-debug sections found in separate debuginfo
+files that are linked to the main file.  This option automatically
+implies the @option{-WK} option, and only sections requested by other
+command line options will be displayed.
 
 @item -l
 @itemx --line-numbers
@@ -2341,6 +2565,12 @@ Specify the architecture to use when disassembling object files.  This
 can be useful when disassembling object files which do not describe
 architecture information, such as S-records.  You can list the available
 architectures with the @option{-i} option.
+
+For most architectures it is possible to supply an architecture
+name and a machine name, separated by a colon.  For example
+@samp{foo:bar} would refer to the @samp{bar} machine type in the
+@samp{foo} architecture.  This can be helpful if objdump has been
+configured to support multiple architectures.
 
 If the target is an ARM architecture then this switch has an
 additional effect.  It restricts the disassembly to only those
@@ -2369,7 +2599,7 @@ hexadecimal using @option{hex}.  By default, the short immediates are
 printed using the decimal representation, while the long immediate
 values are printed as hexadecimal.
 
-@option{cpu=...} allows to enforce a particular ISA when disassembling
+@option{cpu=...} allows one to enforce a particular ISA when disassembling
 instructions, overriding the @option{-m} value or whatever is in the ELF file.
 This might be useful to select ARC EM or HS ISA, because architecture is same
 for those and disassembler relies on private ELF header data to decide if code
@@ -2403,8 +2633,7 @@ option or whether instruction notes should be generated as comments in the
 disasssembly using @option{-M notes}.
 
 For the x86, some of the options duplicate functions of the @option{-m}
-switch, but allow finer grained control.  Multiple selections from the
-following may be specified as a comma separated string.
+switch, but allow finer grained control.
 @table @code
 @item x86-64
 @itemx i386
@@ -2430,13 +2659,15 @@ Note: @code{intel-mnemonic} implies @code{intel} and
 @itemx addr16
 @itemx data32
 @itemx data16
-Specify the default address size and operand size.  These four options
+Specify the default address size and operand size.  These five options
 will be overridden if @code{x86-64}, @code{i386} or @code{i8086}
 appear later in the option string.
 
 @item suffix
-When in AT&T mode, instructs the disassembler to print a mnemonic
-suffix even when the suffix could be inferred by the operands.
+When in AT&T mode and also for a limited set of instructions when in Intel
+mode, instructs the disassembler to print a mnemonic suffix even when the
+suffix could be inferred by the operands or, for certain instructions, the
+execution mode's defaults.
 @end table
 
 For PowerPC, the @option{-M} argument @option{raw} selects
@@ -2448,20 +2679,22 @@ rather than @code{li}.  All of the @option{-m} arguments for
 @option{601}, @option{603}, @option{604}, @option{620}, @option{7400},
 @option{7410}, @option{7450}, @option{7455}, @option{750cl},
 @option{821}, @option{850}, @option{860}, @option{a2}, @option{booke},
-@option{booke32}, @option{cell}, @option{com}, @option{e200z4},
+@option{booke32}, @option{cell}, @option{com}, @option{e200z2}, @option{e200z4},
 @option{e300}, @option{e500}, @option{e500mc}, @option{e500mc64},
 @option{e500x2}, @option{e5500}, @option{e6500}, @option{efs},
 @option{power4}, @option{power5}, @option{power6}, @option{power7},
-@option{power8}, @option{power9}, @option{ppc}, @option{ppc32},
-@option{ppc64}, @option{ppc64bridge}, @option{ppcps}, @option{pwr},
-@option{pwr2}, @option{pwr4}, @option{pwr5}, @option{pwr5x},
-@option{pwr6}, @option{pwr7}, @option{pwr8}, @option{pwr9},
-@option{pwrx}, @option{titan}, and @option{vle}.
+@option{power8}, @option{power9}, @option{power10}, @option{power11},
+@option{ppc}, @option{ppc32}, @option{ppc64}, @option{ppc64bridge},
+@option{ppcps}, @option{pwr}, @option{pwr2}, @option{pwr4}, @option{pwr5},
+@option{pwr5x}, @option{pwr6}, @option{pwr7}, @option{pwr8}, @option{pwr9},
+@option{pwr10}, @option{pwr11}, @option{pwrx}, @option{titan}, @option{vle},
+and @option{future}.
 @option{32} and @option{64} modify the default or a prior CPU
 selection, disabling and enabling 64-bit insns respectively.  In
-addition, @option{altivec}, @option{any}, @option{htm}, @option{vsx},
-and @option{spe} add capabilities to a previous @emph{or later} CPU
-selection.  @option{any} will disassemble any opcode known to
+addition, @option{altivec}, @option{any}, @option{lsp}, @option{htm},
+@option{vsx}, @option{spe} and  @option{spe2} add capabilities to a
+previous @emph{or later} CPU selection.
+@option{any} will disassemble any opcode known to
 binutils, but in cases where an opcode has two different meanings or
 different arguments, you may not see the disassembly you expect.
 If you disassemble without giving a CPU selection, a default will be
@@ -2559,6 +2792,12 @@ For XCOFF, the available options are:
 @item ldinfo
 @end table
 
+For PE, the available options are:
+@table @code
+@item header
+@item sections
+@end table
+
 Not all object formats support this option.  In particular the ELF
 format does not use it.
 
@@ -2582,8 +2821,12 @@ disassembly.
 @itemx --full-contents
 @cindex sections, full contents
 @cindex object file sections
-Display the full contents of any sections requested.  By default all
-non-empty sections are displayed.
+Display the full contents of sections, often used in combination with
+@option{-j} to request specific sections.  By default all non-empty
+non-bss sections are displayed.  By default any compressed section
+will be displayed in its compressed form.  In order to see the
+contents in a decompressed form add the @option{-Z} option to the
+command line.
 
 @item -S
 @itemx --source
@@ -2591,6 +2834,19 @@ non-empty sections are displayed.
 @cindex disassembly, with source
 Display source code intermixed with disassembly, if possible.  Implies
 @option{-d}.
+
+@item --show-all-symbols
+When disassembling, show all the symbols that match a given address,
+not just the first one.
+
+@item --source-comment[=@var{txt}]
+@cindex source disassembly
+@cindex disassembly, with source
+Like the @option{-S} option, but all source code lines are displayed
+with a prefix of @var{txt}.  Typically @var{txt} will be a comment
+string which can be used to distinguish the assembler code from the
+source code.  If @var{txt} is not provided then a default string of
+@var{``# ``} (hash followed by a space), will be used.
 
 @item --prefix=@var{prefix}
 @cindex Add prefix to absolute paths
@@ -2616,12 +2872,48 @@ This is the default when @option{--prefix-addresses} is used.
 Display @var{width} bytes on a single line when disassembling
 instructions.
 
-@item -W[lLiaprmfFsoRtUuTgAckK]
-@itemx --dwarf[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links,=follow-links]
+@item --visualize-jumps[=color|=extended-color|=off]
+Visualize jumps that stay inside a function by drawing ASCII art between
+the start and target addresses.  The optional @option{=color} argument
+adds color to the output using simple terminal colors.  Alternatively
+the @option{=extended-color} argument will add color using 8bit
+colors, but these might not work on all terminals.
+
+If it is necessary to disable the @option{visualize-jumps} option
+after it has previously been enabled then use
+@option{visualize-jumps=off}.
+
+@item --disassembler-color=off
+@itemx --disassembler-color=terminal
+@itemx --disassembler-color=on|color|colour
+@itemx --disassembler-color=extened|extended-color|extened-colour
+Enables or disables the use of colored syntax highlighting in
+disassembly output.  The default behaviour is determined via a
+configure time option.  Note, not all architectures support colored
+syntax highlighting, and depending upon the terminal used, colored
+output may not actually be legible.
+
+The @option{on} argument adds colors using simple terminal colors.
+
+The @option{terminal} argument does the same, but only if the output
+device is a terminal.
+
+The @option{extended-color} argument is similar to the @option{on}
+argument, but it uses 8-bit colors.  These may not work on all
+terminals.
+
+The @option{off} argument disables colored disassembly.
+
+@item -W[lLiaprmfFsoORtUuTgAckK]
+@itemx --dwarf[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=str-offsets,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links,=follow-links]
 @include debug.options.texi
 
 @item --dwarf-check
 Enable additional checks for consistency of Dwarf information.
+
+@include ctf.options.texi
+
+@include sframe.options.texi
 
 @item -G
 @itemx --stabs
@@ -2665,7 +2957,7 @@ where the number inside the square brackets is the number of the entry
 in the symbol table, the @var{sec} number is the section number, the
 @var{fl} value are the symbol's flag bits, the @var{ty} number is the
 symbol's type, the @var{scl} number is the symbol's storage class and
-the @var{nx} value is the number of auxilary entries associated with
+the @var{nx} value is the number of auxiliary entries associated with
 the symbol.  The last two fields are the symbol's value and its name.
 
 The other common output format, usually seen with ELF based files,
@@ -2676,7 +2968,7 @@ looks like this:
 00000000 g       .text  00000000 fred
 @end smallexample
 
-Here the first number is the symbol's value (sometimes refered to as
+Here the first number is the symbol's value (sometimes referred to as
 its address).  The next field is actually a set of characters and
 spaces indicating the flag bits that are set on the symbol.  These
 characters are described below.  Next is the section with which the
@@ -2752,6 +3044,21 @@ When displaying symbols include those which the target considers to be
 special in some way and which would not normally be of interest to the
 user.
 
+@item -U @var{[d|i|l|e|x|h]}
+@itemx --unicode=@var{[default|invalid|locale|escape|hex|highlight]}
+Controls the display of UTF-8 encoded multibyte characters in strings.
+The default (@option{--unicode=default}) is to give them no special
+treatment.  The @option{--unicode=locale} option displays the sequence
+in the current locale, which may or may not support them.  The options
+@option{--unicode=hex} and @option{--unicode=invalid} display them as
+hex byte sequences enclosed by either angle brackets or curly braces.
+
+The @option{--unicode=escape} option displays them as escape sequences
+(@var{\uxxxx}) and the @option{--unicode=highlight} option displays
+them as escape sequences highlighted in red (if supported by the
+output device).  The colouring is intended to draw attention to the
+presence of unicode sequences where they might not be expected.
+
 @item -V
 @itemx --version
 Print the version number of @command{objdump} and exit.
@@ -2775,6 +3082,15 @@ Also do not truncate symbol names when they are displayed.
 Normally the disassembly output will skip blocks of zeroes.  This
 option directs the disassembler to disassemble those blocks, just like
 any other data.
+
+@item -Z
+@itemx --decompress
+@cindex sections, full contents
+@cindex object file sections
+@cindex compressed section contents
+The @option{-Z} option is meant to be used in conunction with the
+@option{-s} option.  It instructs @command{objdump} to decompress any
+compressed sections before displaying their contents.
 @end table
 
 @c man end
@@ -2792,7 +3108,7 @@ nm(1), readelf(1), and the Info entries for @file{binutils}.
 @cindex archive contents
 @cindex symbol index
 
-@c man title ranlib generate index to archive.
+@c man title ranlib generate an index to an archive
 
 @smallexample
 @c man begin SYNOPSIS ranlib
@@ -2873,7 +3189,7 @@ ar(1), nm(1), and the Info entries for @file{binutils}.
 @kindex size
 @cindex section sizes
 
-@c man title size list section sizes and total size.
+@c man title size list section sizes and total size of binary files
 
 @smallexample
 @c man begin SYNOPSIS size
@@ -2883,19 +3199,20 @@ size [@option{-A}|@option{-B}|@option{-G}|@option{--format=}@var{compatibility}]
      [@option{--common}]
      [@option{-t}|@option{--totals}]
      [@option{--target=}@var{bfdname}] [@option{-V}|@option{--version}]
+     [@option{-f}]
      [@var{objfile}@dots{}]
 @c man end
 @end smallexample
 
 @c man begin DESCRIPTION size
 
-The @sc{gnu} @command{size} utility lists the section sizes---and the total
-size---for each of the object or archive files @var{objfile} in its
-argument list.  By default, one line of output is generated for each
-object file or each module in an archive.
+The @sc{gnu} @command{size} utility lists the section sizes and the total
+size for each of the binary files @var{objfile} on its argument list.
+By default, one line of output is generated for each file or each
+module if the file is an archive.
 
-@var{objfile}@dots{} are the object files to be examined.
-If none are specified, the file @code{a.out} will be used.
+@var{objfile}@dots{} are the files to be examined.  If none are
+specified, the file @code{a.out} will be used instead.
 
 @c man end
 
@@ -2969,6 +3286,9 @@ Total         388688
 @end smallexample
 
 @item --help
+@itemx -h
+@itemx -H
+@item -?
 Show a summary of acceptable arguments and options.
 
 @item -d
@@ -3000,9 +3320,15 @@ Specify that the object-code format for @var{objfile} is
 automatically recognize many formats.
 @xref{Target Selection}, for more information.
 
+@item -v
 @item -V
 @itemx --version
 Display the version number of @command{size}.
+
+@item -f
+Ignored.  This option is used by other versions of the @command{size}
+program, but it is not supported by the GNU Binutils version.
+
 @end table
 
 @c man end
@@ -3020,7 +3346,7 @@ ar(1), objdump(1), readelf(1), and the Info entries for @file{binutils}.
 @cindex printing strings
 @cindex strings, printing
 
-@c man title strings print the strings of printable characters in files.
+@c man title strings print the sequences of printable characters in files
 
 @smallexample
 @c man begin SYNOPSIS strings
@@ -3028,10 +3354,11 @@ strings [@option{-afovV}] [@option{-}@var{min-len}]
         [@option{-n} @var{min-len}] [@option{--bytes=}@var{min-len}]
         [@option{-t} @var{radix}] [@option{--radix=}@var{radix}]
         [@option{-e} @var{encoding}] [@option{--encoding=}@var{encoding}]
+        [@option{-U} @var{method}] [@option{--unicode=}@var{method}]
         [@option{-}] [@option{--all}] [@option{--print-file-name}]
         [@option{-T} @var{bfdname}] [@option{--target=}@var{bfdname}]
         [@option{-w}] [@option{--include-all-whitespace}]
-        [@option{-s}] [@option{--output-separator}@var{sep_string}]
+        [@option{-s}] [@option{--output-separator} @var{sep_string}]
         [@option{--help}] [@option{--version}] @var{file}@dots{}
 @c man end
 @end smallexample
@@ -3046,13 +3373,13 @@ unprintable character.
 Depending upon how the strings program was configured it will default
 to either displaying all the printable sequences that it can find in
 each file, or only those sequences that are in loadable, initialized
-data sections.  If the file type in unrecognizable, or if strings is
+data sections.  If the file type is unrecognizable, or if strings is
 reading from stdin then it will always display all of the printable
 sequences that it can find.
 
 For backwards compatibility any file that occurs after a command-line
 option of just @option{-} will also be scanned in full, regardless of
-the presence of any @option{-d} option. 
+the presence of any @option{-d} option.
 
 @command{strings} is mainly useful for determining the contents of
 non-text files.
@@ -3095,8 +3422,13 @@ Print a summary of the program usage on the standard output and exit.
 @item -@var{min-len}
 @itemx -n @var{min-len}
 @itemx --bytes=@var{min-len}
-Print sequences of characters that are at least @var{min-len} characters
-long, instead of the default 4.
+Print sequences of displayable characters that are at least
+@var{min-len} characters long.  If not specified a default minimum
+length of 4 is used.  The distinction between displayable and
+non-displayable characters depends upon the setting of the 
+@option{-e} and @option{-U} options.  Sequences are always terminated
+at control characters such as new-line and carriage-return, but not
+the tab character.
 
 @item -o
 Like @samp{-t o}.  Some other versions of @command{strings} have @option{-o}
@@ -3113,11 +3445,33 @@ octal, @samp{x} for hexadecimal, or @samp{d} for decimal.
 @itemx --encoding=@var{encoding}
 Select the character encoding of the strings that are to be found.
 Possible values for @var{encoding} are: @samp{s} = single-7-bit-byte
-characters (ASCII, ISO 8859, etc., default), @samp{S} =
+characters (default), @samp{S} =
 single-8-bit-byte characters, @samp{b} = 16-bit bigendian, @samp{l} =
 16-bit littleendian, @samp{B} = 32-bit bigendian, @samp{L} = 32-bit
 littleendian.  Useful for finding wide character strings. (@samp{l}
 and @samp{b} apply to, for example, Unicode UTF-16/UCS-2 encodings).
+
+@item -U @var{[d|i|l|e|x|h]}
+@itemx --unicode=@var{[default|invalid|locale|escape|hex|highlight]}
+Controls the display of UTF-8 encoded multibyte characters in strings.
+The default (@option{--unicode=default}) is to give them no special
+treatment, and instead rely upon the setting of the
+@option{--encoding} option.  The other values for this option
+automatically enable @option{--encoding=S}.
+
+The @option{--unicode=invalid} option treats them as non-graphic
+characters and hence not part of a valid string.  All the remaining
+options treat them as valid string characters.
+
+The @option{--unicode=locale} option displays them in the current
+locale, which may or may not support UTF-8 encoding.  The
+@option{--unicode=hex} option displays them as hex byte sequences
+enclosed between @var{<>} characters.  The @option{--unicode=escape}
+option displays them as escape sequences (@var{\uxxxx}) and the
+@option{--unicode=highlight} option displays them as escape sequences
+highlighted in red (if supported by the output device).  The colouring
+is intended to draw attention to the presence of unicode sequences
+where they might not be expected.
 
 @item -T @var{bfdname}
 @itemx --target=@var{bfdname}
@@ -3162,7 +3516,7 @@ and the Info entries for @file{binutils}.
 @cindex discarding symbols
 @cindex symbols, discarding
 
-@c man title strip Discard symbols from object files.
+@c man title strip discard symbols and other data from object files
 
 @smallexample
 @c man begin SYNOPSIS strip
@@ -3178,10 +3532,13 @@ strip [@option{-F} @var{bfdname} |@option{--target=}@var{bfdname}]
       [@option{-w}|@option{--wildcard}]
       [@option{-x}|@option{--discard-all}] [@option{-X} |@option{--discard-locals}]
       [@option{-R} @var{sectionname} |@option{--remove-section=}@var{sectionname}]
+      [@option{--keep-section=}@var{sectionpattern}]
       [@option{--remove-relocations=}@var{sectionpattern}]
+      [@option{--strip-section-headers}]
       [@option{-o} @var{file}] [@option{-p}|@option{--preserve-dates}]
       [@option{-D}|@option{--enable-deterministic-archives}]
       [@option{-U}|@option{--disable-deterministic-archives}]
+      [@option{--keep-section-symbols}]
       [@option{--keep-file-symbols}]
       [@option{--only-keep-debug}]
       [@option{-v} |@option{--verbose}] [@option{-V}|@option{--version}]
@@ -3248,6 +3605,10 @@ would otherwise remove it.  For example:
 will remove all sections matching the pattern '.text.*', but will not
 remove the section '.text.foo'.
 
+@item --keep-section=@var{sectionpattern}
+When removing sections from the output file, keep sections that match
+@var{sectionpattern}.
+
 @item --remove-relocations=@var{sectionpattern}
 Remove relocations from the output file for any section matching
 @var{sectionpattern}.  This option may be given more than once.  Note
@@ -3276,6 +3637,10 @@ will remove all relocations for sections matching the pattern
 '.text.*', but will not remove relocations for the section
 '.text.foo'.
 
+@item --strip-section-headers
+Strip section headers.  This option is specific to ELF files.  Implies
+@option{--strip-all} and @option{--merge-notes}.
+
 @item -s
 @itemx --strip-all
 Remove all symbols.
@@ -3293,7 +3658,9 @@ See the description of this option in the @command{objcopy} section
 for more information.
 
 @item --strip-unneeded
-Remove all symbols that are not needed for relocation processing.
+Remove all symbols that are not needed for relocation processing in
+addition to debugging symbols and sections stripped by
+@option{--strip-debug}.
 
 @item -K @var{symbolname}
 @itemx --keep-symbol=@var{symbolname}
@@ -3305,7 +3672,7 @@ normally be stripped.  This option may be given more than once.
 @itemx --no-merge-notes
 For ELF files, attempt (or do not attempt) to reduce the size of any
 SHT_NOTE type sections by removing duplicate notes.  The default is to
-attempt this reduction.
+attempt this reduction unless stripping debug or DWO information.
 
 @item -N @var{symbolname}
 @itemx --strip-symbol=@var{symbolname}
@@ -3370,6 +3737,11 @@ Remove non-global symbols.
 @itemx --discard-locals
 Remove compiler-generated local symbols.
 (These usually start with @samp{L} or @samp{.}.)
+
+@item --keep-section-symbols
+When stripping a file, perhaps with @option{--strip-debug} or
+@option{--strip-unneeded}, retain any symbols specifying section names,
+which would otherwise get stripped.
 
 @item --keep-file-symbols
 When stripping a file, perhaps with @option{--strip-debug} or
@@ -3452,7 +3824,7 @@ the Info entries for @file{binutils}.
 @kindex c++filt
 @cindex demangling C++ symbols
 
-@c man title cxxfilt Demangle C++ and Java symbols.
+@c man title cxxfilt demangle C++ and Java symbols
 
 @smallexample
 @c man begin SYNOPSIS cxxfilt
@@ -3575,7 +3947,7 @@ output.
 @itemx --no-recursion-limit
 Enables or disables a limit on the amount of recursion performed
 whilst demangling strings.  Since the name mangling formats allow for
-an inifinite level of recursion it is possible to create strings whose
+an infinite level of recursion it is possible to create strings whose
 decoding will exhaust the amount of stack space available on the host
 machine, triggering a memory fault.  The limit tries to prevent this
 from happening by restricting recursion to 2048 levels of nesting.
@@ -3655,7 +4027,7 @@ c++filt @var{option} @var{symbol}
 @kindex addr2line
 @cindex address to file name and line number
 
-@c man title addr2line convert addresses into file names and line numbers.
+@c man title addr2line convert addresses or symbol+offset into file names and line numbers
 
 @smallexample
 @c man begin SYNOPSIS addr2line
@@ -3676,8 +4048,8 @@ addr2line [@option{-a}|@option{--addresses}]
 
 @c man begin DESCRIPTION addr2line
 
-@command{addr2line} translates addresses into file names and line numbers.
-Given an address in an executable or an offset in a section of a relocatable
+@command{addr2line} translates addresses or symbol+offset into file names and line numbers.
+Given an address or symbol+offset in an executable or an offset in a section of a relocatable
 object, it uses the debugging information to figure out which file name and
 line number are associated with it.
 
@@ -3687,11 +4059,11 @@ object to use is specified with the @option{-j} option.
 
 @command{addr2line} has two modes of operation.
 
-In the first, hexadecimal addresses are specified on the command line,
+In the first, hexadecimal addresses or symbol+offset are specified on the command line,
 and @command{addr2line} displays the file name and line number for each
 address.
 
-In the second, @command{addr2line} reads hexadecimal addresses from
+In the second, @command{addr2line} reads hexadecimal addresses or symbol+offset from
 standard input, and prints the file name and line number for each
 address on standard output.  In this mode, @command{addr2line} may be used
 in a pipe to convert dynamically chosen addresses.
@@ -3727,6 +4099,10 @@ by the text @samp{(inlined by)}.
 If the file name or function name can not be determined,
 @command{addr2line} will print two question marks in their place.  If the
 line number can not be determined, @command{addr2line} will print 0.
+
+When symbol+offset is used, +offset is optional, except when the symbol
+is ambigious with a hex number. The resolved symbols can be mangled
+or unmangled, except unmangled symbols with + are not allowed.
 
 @c man end
 
@@ -3798,7 +4174,7 @@ prefixed with @samp{(inlined by)}.
 @itemx --no-recursion-limit
 Enables or disables a limit on the amount of recursion performed
 whilst demangling strings.  Since the name mangling formats allow for
-an inifinite level of recursion it is possible to create strings whose
+an infinite level of recursion it is possible to create strings whose
 decoding will exhaust the amount of stack space available on the host
 machine, triggering a memory fault.  The limit tries to prevent this
 from happening by restricting recursion to 2048 levels of nesting.
@@ -3835,7 +4211,7 @@ Info entries for @file{binutils}.
 utilities, since it is only useful for Windows targets.
 @end quotation
 
-@c man title windmc generates Windows message resources.
+@c man title windmc generates Windows message resources
 
 @smallexample
 @c man begin SYNOPSIS windmc
@@ -3996,7 +4372,7 @@ the Info entries for @file{binutils}.
 utilities, since it is only useful for Windows targets.
 @end quotation
 
-@c man title windres manipulate Windows resources.
+@c man title windres manipulate Windows resources
 
 @smallexample
 @c man begin SYNOPSIS windres
@@ -4096,8 +4472,7 @@ format, which is the first one listed by the @option{--help} option.
 @item --preprocessor @var{program}
 When @command{windres} reads an @code{rc} file, it runs it through the C
 preprocessor first.  This option may be used to specify the preprocessor
-to use, including any leading arguments.  The default preprocessor
-argument is @code{gcc -E -xc-header -DRC_INVOKED}.
+to use.  The default preprocessor is @code{gcc}.
 
 @item --preprocessor-arg @var{option}
 When @command{windres} reads an @code{rc} file, it runs it through
@@ -4105,6 +4480,11 @@ the C preprocessor first.  This option may be used to specify additional
 text to be passed to preprocessor on its command line.
 This option can be used multiple times to add multiple options to the
 preprocessor command line.
+If the @option{--preprocessor} option has not been specified then a
+default set of preprocessor arguments will be used, with any
+@option{--preprocessor-arg} options being placed after them on the
+command line.  These default arguments are @code{-E},
+@code{-xc-header} and @code{-DRC_INVOKED}.
 
 @item -I @var{directory}
 @itemx --include-dir @var{directory}
@@ -4202,7 +4582,7 @@ binary utilities, since it is only useful for those targets which
 support DLLs.
 @end quotation
 
-@c man title dlltool Create files needed to build and use DLLs.
+@c man title dlltool create files needed to build and use DLLs
 
 @smallexample
 @c man begin SYNOPSIS dlltool
@@ -4229,6 +4609,7 @@ dlltool [@option{-d}|@option{--input-def} @var{def-file-name}]
         [@option{-v}|@option{--verbose}]
         [@option{-h}|@option{--help}] [@option{-V}|@option{--version}]
         [@option{--no-leading-underscore}] [@option{--leading-underscore}]
+        [@option{--deterministic-libraries}] [@option{--non-deterministic-libraries}]
         [object-file @dots{}]
 @c man end
 @end smallexample
@@ -4347,6 +4728,14 @@ Specifies the name of the library file to be created by dlltool.
 @item -y @var{filename}
 @itemx --output-delaylib @var{filename}
 Specifies the name of the delay-import library file to be created by dlltool.
+
+@item --deterministic-libraries
+@itemx --non-deterministic-libraries
+When creating output libraries in response to either the
+@option{--output-lib} or @option{--output-delaylib} options either use
+the value of zero for any timestamps, user ids and group ids created
+(@option{--deterministic-libraries}) or the actual timestamps, user
+ids and group ids (@option{--non-deterministic-libraries}).
 
 @item --export-all-symbols
 Treat all global and weak defined symbols found in the input object
@@ -4593,7 +4982,7 @@ The Info pages for @file{binutils}.
 @cindex ELF file information
 @kindex readelf
 
-@c man title readelf Displays information about ELF files.
+@c man title readelf display information about ELF files
 
 @smallexample
 @c man begin SYNOPSIS readelf
@@ -4605,7 +4994,13 @@ readelf [@option{-a}|@option{--all}]
         [@option{-t}|@option{--section-details}]
         [@option{-e}|@option{--headers}]
         [@option{-s}|@option{--syms}|@option{--symbols}]
-        [@option{--dyn-syms}]
+        [@option{--dyn-syms}|@option{--lto-syms}]
+        [@option{--sym-base=[0|8|10|16]}]
+        [@option{--demangle@var{=style}}|@option{--no-demangle}]
+        [@option{--quiet}]
+        [@option{--recurse-limit}|@option{--no-recurse-limit}]
+        [@option{-U} @var{method}|@option{--unicode=}@var{method}]
+        [@option{-X}|@option{--extra-sym-info}|@option{--no-extra-sym-info}]
         [@option{-n}|@option{--notes}]
         [@option{-r}|@option{--relocs}]
         [@option{-u}|@option{--unwind}]
@@ -4613,18 +5008,31 @@ readelf [@option{-a}|@option{--all}]
         [@option{-V}|@option{--version-info}]
         [@option{-A}|@option{--arch-specific}]
         [@option{-D}|@option{--use-dynamic}]
+        [@option{-L}|@option{--lint}|@option{--enable-checks}]
         [@option{-x} <number or name>|@option{--hex-dump=}<number or name>]
         [@option{-p} <number or name>|@option{--string-dump=}<number or name>]
         [@option{-R} <number or name>|@option{--relocated-dump=}<number or name>]
+        [@option{-j} <number or name>|@option{--display-section=}<number or name>]
         [@option{-z}|@option{--decompress}]
         [@option{-c}|@option{--archive-index}]
-        [@option{-w[lLiaprmfFsoRtUuTgAckK]}|
-         @option{--debug-dump}[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links,=follow-links]]
+        [@option{-w[lLiaprmfFsoORtUuTgAck]}|
+         @option{--debug-dump}[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=str-offsets,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links]]
+        [@option{-wK}|@option{--debug-dump=follow-links}]
+        [@option{-wN}|@option{--debug-dump=no-follow-links}]
+        [@option{-wD}|@option{--debug-dump=use-debuginfod}]
+        [@option{-wE}|@option{--debug-dump=do-not-use-debuginfod}]
+        [@option{-P}|@option{--process-links}]
         [@option{--dwarf-depth=@var{n}}]
         [@option{--dwarf-start=@var{n}}]
+        [@option{--ctf=}@var{section}]
+        [@option{--ctf-parent=}@var{section}]
+        [@option{--ctf-symbols=}@var{section}]
+        [@option{--ctf-strings=}@var{section}]
+        [@option{--sframe=}@var{section}]
         [@option{-I}|@option{--histogram}]
         [@option{-v}|@option{--version}]
         [@option{-W}|@option{--wide}]
+        [@option{-T}|@option{--silent-truncation}]
         [@option{-H}|@option{--help}]
         @var{elffile}@dots{}
 @c man end
@@ -4678,6 +5086,10 @@ file.
 Displays the information contained in the file's segment headers, if it
 has any.
 
+@item --quiet
+@cindex quiet
+Suppress "no symbols" diagnostic.
+
 @item -S
 @itemx --sections
 @itemx --section-headers
@@ -4703,10 +5115,10 @@ Displays the detailed section information. Implies @option{-S}.
 Displays the entries in symbol table section of the file, if it has one.
 If a symbol has version information associated with it then this is
 displayed as well.  The version string is displayed as a suffix to the
-symbol name, preceeded by an @@ character.  For example
+symbol name, preceded by an @@ character.  For example
 @samp{foo@@VER_1}.  If the version is the default version to be used
 when resolving unversioned references to the symbol then it is
-displayed as a suffix preceeded by two @@ characters.  For example
+displayed as a suffix preceded by two @@ characters.  For example
 @samp{foo@@@@VER_2}.
 
 @item --dyn-syms
@@ -4714,6 +5126,86 @@ displayed as a suffix preceeded by two @@ characters.  For example
 Displays the entries in dynamic symbol table section of the file, if it
 has one.  The output format is the same as the format used by the
 @option{--syms} option.
+
+@item --lto-syms
+@cindex LTO symbol table
+Displays the contents of any LTO symbol tables in the file.
+
+@item --sym-base=[0|8|10|16]
+@cindex symbol table size base
+Forces the size field of the symbol table to use the given base.  Any
+unrecognized options will be treated as @samp{0}.  @option{--sym-base=0}
+represents the default and legacy behaviour.  This will output sizes as decimal
+for numbers less than 100000.  For sizes 100000 and greater hexadecimal notation
+will be used with a 0x prefix.
+@option{--sym-base=8} will give the symbol sizes in octal.
+@option{--sym-base=10} will always give the symbol sizes in decimal.
+@option{--sym-base=16} will always give the symbol sizes in hexadecimal with a
+0x prefix.
+
+@item -C
+@itemx --demangle[=@var{style}]
+@cindex demangling in nm
+Decode (@dfn{demangle}) low-level symbol names into user-level names.
+This makes C++ function names readable.  Different compilers have
+different mangling styles.  The optional demangling style argument can
+be used to choose an appropriate demangling style for your
+compiler. @xref{c++filt}, for more information on demangling.
+
+@item --no-demangle
+Do not demangle low-level symbol names.  This is the default.
+
+@item --recurse-limit
+@itemx --no-recurse-limit
+@itemx --recursion-limit
+@itemx --no-recursion-limit
+Enables or disables a limit on the amount of recursion performed
+whilst demangling strings.  Since the name mangling formats allow for
+an infinite level of recursion it is possible to create strings whose
+decoding will exhaust the amount of stack space available on the host
+machine, triggering a memory fault.  The limit tries to prevent this
+from happening by restricting recursion to 2048 levels of nesting.
+
+The default is for this limit to be enabled, but disabling it may be
+necessary in order to demangle truly complicated names.  Note however
+that if the recursion limit is disabled then stack exhaustion is
+possible and any bug reports about such an event will be rejected.
+
+@item -U @var{[d|i|l|e|x|h]}
+@itemx --unicode=[default|invalid|locale|escape|hex|highlight]
+Controls the display of non-ASCII characters in identifier names.
+The default (@option{--unicode=locale} or @option{--unicode=default}) is
+to treat them as multibyte characters and display them in the current
+locale.  All other versions of this option treat the bytes as UTF-8
+encoded values and attempt to interpret them.  If they cannot be
+interpreted or if the @option{--unicode=invalid} option is used then
+they are displayed as a sequence of hex bytes, encloses in curly
+parethesis characters.
+
+Using the @option{--unicode=escape} option will display the characters
+as as unicode escape sequences (@var{\uxxxx}).  Using the
+@option{--unicode=hex} will display the characters as hex byte
+sequences enclosed between angle brackets.
+
+Using the @option{--unicode=highlight} will display the characters as 
+unicode escape sequences but it will also highlighted them in red,
+assuming that colouring is supported by the output device.  The
+colouring is intended to draw attention to the presence of unicode
+sequences when they might not be expected.
+
+@item -X
+@itemx --extra-sym-info
+When displaying details of symbols, include extra information not
+normally presented.  Currently this just adds the name of the section
+referenced by the symbol's index field, if there is one.  In the
+future more information may be displayed when this option is enabled.
+
+Enabling this option effectively enables the @option{--wide} option as
+well, at least when displaying symbol information.
+
+@item --no-extra-sym-info
+Disables the effect of the @option{--extra-sym-info} option.  This
+is the default.
 
 @item -e
 @itemx --headers
@@ -4765,11 +5257,22 @@ symbol table sections.
 When displaying relocations, this option makes @command{readelf}
 display the dynamic relocations rather than the static relocations.
 
+@item -L
+@itemx --lint
+@itemx --enable-checks
+Displays warning messages about possible problems with the file(s)
+being examined.  If used on its own then all of the contents of the
+file(s) will be examined.  If used with one of the dumping options
+then the warning messages will only be produced for the things being
+displayed.
+
 @item -x <number or name>
 @itemx --hex-dump=<number or name>
 Displays the contents of the indicated section as a hexadecimal bytes.
 A number identifies a particular section by index in the section table;
 any other string identifies all sections with that name in the object file.
+This option can be repeated multiple times on the command line in
+order to request multiple hex dumps.
 
 @item -R <number or name>
 @itemx --relocated-dump=<number or name>
@@ -4778,12 +5281,31 @@ bytes.  A number identifies a particular section by index in the
 section table; any other string identifies all sections with that name
 in the object file.  The contents of the section will be relocated
 before they are displayed.
+This option can be repeated multiple times on the command line in
+order to request multiple relocated dumps.
 
 @item -p <number or name>
 @itemx --string-dump=<number or name>
 Displays the contents of the indicated section as printable strings.
 A number identifies a particular section by index in the section table;
 any other string identifies all sections with that name in the object file.
+This option can be repeated multiple times on the command line in
+order to request multiple string dumps.
+
+@item -j <number or name>
+@itemx --display-section
+Displays the contents of the indicated section according to its
+section header type.  Sections containing relocations will be
+displayed as if the @option{--relocations} option had been used,
+sections contains symbols will be displayed as if the @option{--syms}
+option had been used and so on.
+
+A number identifies a particular section by index in the section
+table; any other string identifies all sections with that name in the
+input file(s).
+
+This option can be repeated multiple times on the command line in
+order to request multiple section dumps.
 
 @item -z
 @itemx --decompress
@@ -4798,9 +5320,26 @@ Displays the file symbol index information contained in the header part
 of binary archives.  Performs the same function as the @option{t}
 command to @command{ar}, but without using the BFD library.  @xref{ar}.
 
-@item -w[lLiaprmfFsoRtUuTgAckK]
-@itemx --debug-dump[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links,=follow-links]
+@item -w[lLiaprmfFsOoRtUuTgAckK]
+@itemx --debug-dump[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=str-offsets,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links,=follow-links]
 @include debug.options.texi
+
+@item -P
+@itemx --process-links
+Display the contents of non-debug sections found in separate debuginfo
+files that are linked to the main file.  This option automatically
+implies the @option{-wK} option, and only sections requested by other
+command line options will be displayed.
+
+@include ctf.options.texi
+@item --ctf-symbols=@var{section}
+@item --ctf-strings=@var{section}
+Specify the name of another section from which the CTF file can inherit
+strings and symbols.  By default, the @code{.symtab} and its linked
+string table are used.
+
+If either of @option{--ctf-symbols} or @option{--ctf-strings} is specified, the
+other must be specified as well.
 
 @item -I
 @itemx --histogram
@@ -4818,6 +5357,15 @@ Don't break output lines to fit into 80 columns. By default
 64-bit ELF files, so that they fit into 80 columns. This option causes
 @command{readelf} to print each section header resp. each segment one a
 single line, which is far more readable on terminals wider than 80 columns.
+
+@item -T
+@itemx --silent-truncation
+Normally when readelf is displaying a symbol name, and it has to
+truncate the name to fit into an 80 column display, it will add a
+suffix of @code{[...]} to the name.  This command line option
+disables this behaviour, allowing 5 more characters of the name to be
+displayed and restoring the old behaviour of readelf (prior to release
+2.35).
 
 @item -H
 @itemx --help
@@ -4839,16 +5387,18 @@ objdump(1), and the Info entries for @file{binutils}.
 @cindex Update ELF header
 @kindex elfedit
 
-@c man title elfedit Update ELF header and program property of ELF files.
+@c man title elfedit update ELF header and program property of ELF files
 
 @smallexample
 @c man begin SYNOPSIS elfedit
 elfedit [@option{--input-mach=}@var{machine}]
         [@option{--input-type=}@var{type}]
         [@option{--input-osabi=}@var{osabi}]
+        [@option{--input-abiversion=}@var{version}]
         @option{--output-mach=}@var{machine}
         @option{--output-type=}@var{type}
         @option{--output-osabi=}@var{osabi}
+        @option{--output-abiversion=}@var{version}
         @option{--enable-x86-feature=}@var{feature}
         @option{--disable-x86-feature=}@var{feature}
         [@option{-v}|@option{--version}]
@@ -4873,6 +5423,7 @@ should be updated.
 The long and short forms of options, shown here as alternatives, are
 equivalent. At least one of the @option{--output-mach},
 @option{--output-type}, @option{--output-osabi},
+@option{--output-abiversion},
 @option{--enable-x86-feature} and @option{--disable-x86-feature}
 options must be given.
 
@@ -4914,10 +5465,20 @@ The supported ELF OSABIs are, @var{none}, @var{HPUX}, @var{NetBSD},
 Change the ELF OSABI in the ELF header to @var{osabi}.  The
 supported ELF OSABI are the same as @option{--input-osabi}.
 
+@item --input-abiversion=@var{version}
+Set the matching input ELF file ABIVERSION to @var{version}.
+@var{version} must be between 0 and 255.  If @option{--input-abiversion}
+isn't specified, it will match any ELF ABIVERSIONs.
+
+@item --output-abiversion=@var{version}
+Change the ELF ABIVERSION in the ELF header to @var{version}.
+@var{version} must be between 0 and 255.
+
 @item --enable-x86-feature=@var{feature}
 Set the @var{feature} bit in program property in @var{exec} or @var{dyn}
 ELF files with machine types of @var{i386} or @var{x86-64}.  The
-supported features are, @var{ibt} and @var{shstk}.
+supported features are, @var{ibt}, @var{shstk}, @var{lam_u48} and
+@var{lam_u57}.
 
 @item --disable-x86-feature=@var{feature}
 Clear the @var{feature} bit in program property in @var{exec} or
@@ -5115,6 +5676,28 @@ Ways to specify:
 @item
 deduced from the input file
 @end enumerate
+
+@node debuginfod
+@chapter debuginfod
+@cindex separate debug files
+
+debuginfod is a web service that indexes ELF/DWARF debugging resources
+by build-id and serves them over HTTP.  For more information see:
+@emph{https://sourceware.org/elfutils/Debuginfod.html}
+
+Binutils can be built with the debuginfod client library
+@code{libdebuginfod} using the @option{--with-debuginfod} configure option.
+This option is enabled by default if @code{libdebuginfod} is installed
+and found at configure time. This allows @command{objdump} and
+@command{readelf} to automatically query debuginfod servers for
+separate debug files when the files are otherwise not found.
+
+debuginfod is packaged with elfutils, starting with version 0.178.
+You can get the latest version from `https://sourceware.org/elfutils/'.
+
+The DWARF info dumping tools (@command{readelf} and @command{objdump})
+have options to control when they should access the debuginfod
+servers.  By default this access is enabled.
 
 @node Reporting Bugs
 @chapter Reporting Bugs

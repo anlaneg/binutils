@@ -14,8 +14,11 @@ foo:
 	bctg	%r9,4095(%r5,%r10)
 	bctgr	%r9,%r6
 	brctg	%r9,.
+	jctg	%r6,.
 	brxhg	%r9,%r6,.
+	jxhg	%r6,%r9,.
 	brxlg	%r9,%r6,.
+	jxleg	%r6,%r9,.
 	bxhg	%r9,%r6,4095(%r5)
 	bxleg	%r9,%r6,4095(%r5)
 	cdgbr	%f9,%r6
@@ -76,6 +79,7 @@ foo:
 	llihl	%r9,65535
 	llilh	%r9,65535
 	llill	%r9,65535
+	llghi	%r9,65535
 	lmd	%r9,%r6,4095(%r5),4095(%r10)
 	lmg	%r9,%r6,4095(%r5)
 	lmh	%r9,%r6,4095(%r5)
@@ -140,3 +144,9 @@ foo:
 	tracg	%r9,%r6,4095(%r5)
 	xg	%r9,4095(%r5,%r10)
 	xgr	%r9,%r6
+	brasl	%r6,.
+	jasl	%r6,.
+	brasl	%r6,.-0x100000000
+	jasl	%r6,.-0x100000000
+	brasl	%r6,.+0xfffffffe
+	jasl	%r6,.+0xfffffffe

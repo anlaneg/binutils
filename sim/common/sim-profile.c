@@ -1,5 +1,5 @@
 /* Default profiling support.
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -17,23 +17,20 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "ansidecl.h"
+
 #include "sim-main.h"
 #include "sim-io.h"
 #include "sim-options.h"
 #include "sim-assert.h"
-
-#ifdef HAVE_STDLIB_H
-#include <stdlib.h>
-#endif
-
-#ifdef HAVE_STRING_H
-#include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-#include <ctype.h>
 
 #if !WITH_PROFILE_PC_P
 static unsigned int _profile_stub;
@@ -463,7 +460,7 @@ profile_option_handler (SIM_DESC sd,
 
 /* Profiling output hooks.  */
 
-static void
+static void ATTRIBUTE_PRINTF (3, 0)
 profile_vprintf (SIM_DESC sd, sim_cpu *cpu, const char *fmt, va_list ap)
 {
   FILE *fp = PROFILE_FILE (CPU_PROFILE_DATA (cpu));
@@ -475,7 +472,7 @@ profile_vprintf (SIM_DESC sd, sim_cpu *cpu, const char *fmt, va_list ap)
     sim_io_evprintf (sd, fmt, ap);
 }
 
-__attribute__ ((format (printf, 3, 4)))
+ATTRIBUTE_PRINTF (3, 4)
 static void
 profile_printf (SIM_DESC sd, sim_cpu *cpu, const char *fmt, ...)
 {
@@ -563,7 +560,7 @@ profile_pc_init (SIM_DESC sd)
 		    {
 		      /* nr_buckets = (full-address-range / 2) / (bucket_size / 2) */
 		      PROFILE_PC_NR_BUCKETS (data) =
-			((1 << sizeof (sim_cia) * (8 - 1))
+			((1ULL << sizeof (sim_cia) * (8 - 1))
 			 / (PROFILE_PC_BUCKET_SIZE (data) / 2));
 		    }
 		  else
@@ -582,7 +579,7 @@ profile_pc_init (SIM_DESC sd)
 	    {
 	      if (PROFILE_PC_END (data) == 0)
 		/* bucket_size = (full-address-range / 2) / (nr_buckets / 2) */
-		bucket_size = ((1 << ((sizeof (sim_cia) * 8) - 1))
+		bucket_size = ((1ULL << ((sizeof (sim_cia) * 8) - 1))
 			       / (PROFILE_PC_NR_BUCKETS (data) / 2));
 	      else
 		bucket_size = ((PROFILE_PC_END (data)
@@ -614,7 +611,7 @@ profile_pc_init (SIM_DESC sd)
 }
 
 static void
-profile_print_pc (sim_cpu *cpu, int verbose)
+profile_print_pc (sim_cpu *cpu, bool verbose)
 {
   SIM_DESC sd = CPU_STATE (cpu);
   PROFILE_DATA *profile = CPU_PROFILE_DATA (cpu);
@@ -696,7 +693,7 @@ profile_print_pc (sim_cpu *cpu, int verbose)
       {
 	int ok;
 	/* FIXME: what if the target has a 64 bit PC? */
-	unsigned32 header[3];
+	uint32_t header[3];
 	unsigned loop;
 	if (PROFILE_PC_END (profile) != 0)
 	  {
@@ -721,7 +718,7 @@ profile_print_pc (sim_cpu *cpu, int verbose)
 	     ok && (loop < PROFILE_PC_NR_BUCKETS (profile));
 	     loop++)
 	  {
-	    signed16 sample;
+	    int16_t sample;
 	    if (PROFILE_PC_COUNT (profile) [loop] >= 0xffff)
 	      sample = 0xffff;
 	    else
@@ -761,7 +758,7 @@ profile_insn_init (SIM_DESC sd)
 }
 
 static void
-profile_print_insn (sim_cpu *cpu, int verbose)
+profile_print_insn (sim_cpu *cpu, bool verbose)
 {
   unsigned int i, n, total, max_val, max_name_len;
   SIM_DESC sd = CPU_STATE (cpu);
@@ -834,7 +831,7 @@ profile_print_insn (sim_cpu *cpu, int verbose)
 #if WITH_PROFILE_MEMORY_P
 
 static void
-profile_print_memory (sim_cpu *cpu, int verbose)
+profile_print_memory (sim_cpu *cpu, bool verbose)
 {
   unsigned int i, n;
   unsigned int total_read, total_write;
@@ -908,7 +905,7 @@ profile_print_memory (sim_cpu *cpu, int verbose)
 #if WITH_PROFILE_CORE_P
 
 static void
-profile_print_core (sim_cpu *cpu, int verbose)
+profile_print_core (sim_cpu *cpu, bool verbose)
 {
   unsigned int total;
   unsigned int max_val;
@@ -965,7 +962,7 @@ profile_print_core (sim_cpu *cpu, int verbose)
 #if WITH_PROFILE_MODEL_P
 
 static void
-profile_print_model (sim_cpu *cpu, int verbose)
+profile_print_model (sim_cpu *cpu, bool verbose)
 {
   SIM_DESC sd = CPU_STATE (cpu);
   PROFILE_DATA *data = CPU_PROFILE_DATA (cpu);
@@ -1113,7 +1110,7 @@ profile_print_addr_ranges (sim_cpu *cpu)
    section titles.  */
 
 static void
-profile_info (SIM_DESC sd, int verbose)
+profile_info (SIM_DESC sd, bool verbose)
 {
   int i,c;
   int print_title_p = 0;
@@ -1158,7 +1155,7 @@ profile_info (SIM_DESC sd, int verbose)
 #if WITH_PROFILE_MODEL_P
 	      || PROFILE_FLAGS (data) [PROFILE_MODEL_IDX]
 #endif
-#if WITH_PROFILE_SCACHE_P && WITH_SCACHE
+#if WITH_PROFILE_SCACHE_P && WITH_SCACHE && defined(CGEN_ARCH)
 	      || PROFILE_FLAGS (data) [PROFILE_SCACHE_IDX]
 #endif
 #if WITH_PROFILE_PC_P
@@ -1196,7 +1193,7 @@ profile_info (SIM_DESC sd, int verbose)
 	profile_print_model (cpu, verbose);
 #endif
 
-#if WITH_PROFILE_SCACHE_P && WITH_SCACHE
+#if WITH_PROFILE_SCACHE_P && WITH_SCACHE && defined(CGEN_ARCH)
       if (PROFILE_FLAGS (data) [PROFILE_SCACHE_IDX])
 	scache_print_profile (cpu, verbose);
 #endif
@@ -1222,10 +1219,12 @@ profile_info (SIM_DESC sd, int verbose)
 
 }
 
-/* Install profiling support in the simulator.  */
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+SIM_RC sim_install_profile (SIM_DESC sd);
 
+/* Install profiling support in the simulator.  */
 SIM_RC
-profile_install (SIM_DESC sd)
+sim_install_profile (SIM_DESC sd)
 {
   int i;
 

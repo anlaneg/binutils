@@ -1,6 +1,6 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 2013-2019 Free Software Foundation, Inc.
+# Copyright 2013-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,9 +21,7 @@ load_lib gdbserver-support.exp
 
 standard_testfile
 
-if { [skip_gdbserver_tests] } {
-    return 0
-}
+require allow_gdbserver_tests
 
 if { [istarget *-*-mingw*]
      || [istarget *-*-cygwin*] } {
@@ -31,8 +29,16 @@ if { [istarget *-*-mingw*]
     return -1
 }
 
-if { [prepare_for_testing "failed to prepare" $testfile $srcfile debug] } {
-    return -1
+save_vars { GDBFLAGS } {
+    # If GDB and GDBserver are both running locally, set the sysroot to avoid
+    # reading files via the remote protocol.
+    if { ![is_remote host] && ![is_remote target] } {
+	set GDBFLAGS "$GDBFLAGS -ex \"set sysroot\""
+    }
+
+    if { [prepare_for_testing "failed to prepare" $testfile $srcfile debug] } {
+	return -1
+    }
 }
 
 # Make sure we're disconnected, in case we're testing with an

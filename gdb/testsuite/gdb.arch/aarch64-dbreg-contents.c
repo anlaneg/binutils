@@ -9,13 +9,17 @@
   freely.  */
 
 #define _GNU_SOURCE 1
+#include <stdlib.h>
+#include <unistd.h>
 #include <sys/ptrace.h>
+#include <asm/ptrace.h>
 #include <assert.h>
 #include <sys/wait.h>
 #include <stddef.h>
 #include <errno.h>
 #include <sys/uio.h>
 #include <elf.h>
+#include <error.h>
 
 static pid_t child;
 
@@ -26,8 +30,6 @@ cleanup (void)
     kill (child, SIGKILL);
   child = 0;
 }
-
-#define SET_WATCHPOINT set_watchpoint
 
 /* Macros to extract fields from the hardware debug information word.  */
 #define AARCH64_DEBUG_NUM_SLOTS(x) ((x) & 0xff)
@@ -52,7 +54,7 @@ set_watchpoint (pid_t pid, volatile void *addr, unsigned len_mask)
   errno = 0;
   l = ptrace (PTRACE_GETREGSET, pid, NT_ARM_HW_WATCH, &iov);
   assert (l == 0);
-  assert (AARCH64_DEBUG_ARCH (dreg_state.dbg_info) == AARCH64_DEBUG_ARCH_V8);
+  assert (AARCH64_DEBUG_ARCH (dreg_state.dbg_info) >= AARCH64_DEBUG_ARCH_V8);
   assert (AARCH64_DEBUG_NUM_SLOTS (dreg_state.dbg_info) >= 1);
 
   assert (!DR_CONTROL_ENABLED (dreg_state.dbg_regs[0].ctrl));
@@ -64,7 +66,7 @@ set_watchpoint (pid_t pid, volatile void *addr, unsigned len_mask)
   assert (DR_CONTROL_LENGTH (dreg_state.dbg_regs[0].ctrl) == len_mask);
 
   dreg_state.dbg_regs[0].ctrl |= 2 << 3; // write
-  dreg_state.dbg_regs[0].ctrl |= 2 << 1; // GDB: ???: enabled at el0
+  dreg_state.dbg_regs[0].ctrl |= 2 << 1; // enabled at el0
   dreg_state.dbg_regs[0].addr = (uintptr_t) addr;
 
   iov.iov_base = &dreg_state;
@@ -110,7 +112,7 @@ main (void)
   /* Add a watchpoint to check.
      Restart the child. It will write to check.
      Check child has stopped on the watchpoint.  */
-  SET_WATCHPOINT (child, &check, 0x02);
+  set_watchpoint (child, &check, 0x02);
 
   errno = 0;
   l = ptrace (PTRACE_CONT, child, 0l, 0l);
@@ -128,6 +130,5 @@ main (void)
     }
   assert (WSTOPSIG (status) == SIGTRAP);
 
-  cleanup ();
   return 0;
 }

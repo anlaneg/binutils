@@ -1,5 +1,5 @@
 /* MI Command Set - varobj commands.
-   Copyright (C) 2000-2019 Free Software Foundation, Inc.
+   Copyright (C) 2000-2024 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -18,7 +18,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "mi-cmds.h"
 #include "mi-main.h"
 #include "ui-out.h"
@@ -30,10 +29,8 @@
 #include "mi-getopt.h"
 #include "gdbthread.h"
 #include "mi-parse.h"
-#include "common/gdb_optional.h"
+#include <optional>
 #include "inferior.h"
-
-extern unsigned int varobjdebug;		/* defined in varobj.c.  */
 
 static void varobj_update_one (struct varobj *var,
 			       enum print_values print_values,
@@ -58,46 +55,46 @@ print_varobj (struct varobj *var, enum print_values print_values,
     {
       std::string exp = varobj_get_expression (var);
 
-      uiout->field_string ("exp", exp.c_str ());
+      uiout->field_string ("exp", exp);
     }
-  uiout->field_int ("numchild", varobj_get_num_children (var));
+  uiout->field_signed ("numchild", varobj_get_num_children (var));
   
   if (mi_print_value_p (var, print_values))
     {
       std::string val = varobj_get_value (var);
 
-      uiout->field_string ("value", val.c_str ());
+      uiout->field_string ("value", val);
     }
 
   std::string type = varobj_get_type (var);
   if (!type.empty ())
-    uiout->field_string ("type", type.c_str ());
+    uiout->field_string ("type", type);
 
   thread_id = varobj_get_thread_id (var);
   if (thread_id > 0)
-    uiout->field_int ("thread-id", thread_id);
+    uiout->field_signed ("thread-id", thread_id);
 
   if (varobj_get_frozen (var))
-    uiout->field_int ("frozen", 1);
+    uiout->field_signed ("frozen", 1);
 
   gdb::unique_xmalloc_ptr<char> display_hint = varobj_get_display_hint (var);
   if (display_hint)
     uiout->field_string ("displayhint", display_hint.get ());
 
   if (varobj_is_dynamic_p (var))
-    uiout->field_int ("dynamic", 1);
+    uiout->field_signed ("dynamic", 1);
 }
 
 /* VAROBJ operations */
 
 void
-mi_cmd_var_create (const char *command, char **argv, int argc)
+mi_cmd_var_create (const char *command, const char *const *argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
   CORE_ADDR frameaddr = 0;
   struct varobj *var;
-  char *frame;
-  char *expr;
+  const char *frame;
+  const char *expr;
   enum varobj_type var_type;
 
   if (argc != 3)
@@ -127,9 +124,9 @@ mi_cmd_var_create (const char *command, char **argv, int argc)
     }
 
   if (varobjdebug)
-    fprintf_unfiltered (gdb_stdlog,
-			"Name=\"%s\", Frame=\"%s\" (%s), Expression=\"%s\"\n",
-			name, frame, hex_string (frameaddr), expr);
+    gdb_printf (gdb_stdlog,
+		"Name=\"%s\", Frame=\"%s\" (%s), Expression=\"%s\"\n",
+		name, frame, hex_string (frameaddr), expr);
 
   var = varobj_create (name, expr, frameaddr, var_type);
 
@@ -138,13 +135,13 @@ mi_cmd_var_create (const char *command, char **argv, int argc)
 
   print_varobj (var, PRINT_ALL_VALUES, 0 /* don't print expression */);
 
-  uiout->field_int ("has_more", varobj_has_more (var, 0));
+  uiout->field_signed ("has_more", varobj_has_more (var, 0));
 }
 
 void
-mi_cmd_var_delete (const char *command, char **argv, int argc)
+mi_cmd_var_delete (const char *command, const char *const *argv, int argc)
 {
-  char *name;
+  const char *name;
   struct varobj *var;
   int numdel;
   int children_only_p = 0;
@@ -183,7 +180,7 @@ mi_cmd_var_delete (const char *command, char **argv, int argc)
 
   numdel = varobj_delete (var, children_only_p);
 
-  uiout->field_int ("ndeleted", numdel);
+  uiout->field_signed ("ndeleted", numdel);
 }
 
 /* Parse a string argument into a format value.  */
@@ -216,7 +213,7 @@ mi_parse_format (const char *arg)
 }
 
 void
-mi_cmd_var_set_format (const char *command, char **argv, int argc)
+mi_cmd_var_set_format (const char *command, const char *const *argv, int argc)
 {
   enum varobj_display_formats format;
   struct varobj *var;
@@ -238,16 +235,17 @@ mi_cmd_var_set_format (const char *command, char **argv, int argc)
  
   /* Report the value in the new format.  */
   std::string val = varobj_get_value (var);
-  uiout->field_string ("value", val.c_str ());
+  uiout->field_string ("value", val);
 }
 
 void
-mi_cmd_var_set_visualizer (const char *command, char **argv, int argc)
+mi_cmd_var_set_visualizer (const char *command, const char *const *argv,
+			   int argc)
 {
   struct varobj *var;
 
   if (argc != 2)
-    error (_("Usage: NAME VISUALIZER_FUNCTION."));
+    error (_("-var-set-visualizer: Usage: NAME VISUALIZER_FUNCTION."));
 
   var = varobj_get_handle (argv[0]);
 
@@ -258,13 +256,13 @@ mi_cmd_var_set_visualizer (const char *command, char **argv, int argc)
 }
 
 void
-mi_cmd_var_set_frozen (const char *command, char **argv, int argc)
+mi_cmd_var_set_frozen (const char *command, const char *const *argv, int argc)
 {
   struct varobj *var;
   bool frozen;
 
   if (argc != 2)
-    error (_("-var-set-format: Usage: NAME FROZEN_FLAG."));
+    error (_("-var-set-frozen: Usage: NAME FROZEN_FLAG."));
 
   var = varobj_get_handle (argv[0]);
 
@@ -283,7 +281,7 @@ mi_cmd_var_set_frozen (const char *command, char **argv, int argc)
 }
 
 void
-mi_cmd_var_show_format (const char *command, char **argv, int argc)
+mi_cmd_var_show_format (const char *command, const char *const *argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
   enum varobj_display_formats format;
@@ -302,7 +300,8 @@ mi_cmd_var_show_format (const char *command, char **argv, int argc)
 }
 
 void
-mi_cmd_var_info_num_children (const char *command, char **argv, int argc)
+mi_cmd_var_info_num_children (const char *command, const char *const *argv,
+			      int argc)
 {
   struct ui_out *uiout = current_uiout;
   struct varobj *var;
@@ -313,7 +312,7 @@ mi_cmd_var_info_num_children (const char *command, char **argv, int argc)
   /* Get varobj handle, if a valid var obj name was specified.  */
   var = varobj_get_handle (argv[0]);
 
-  uiout->field_int ("numchild", varobj_get_num_children (var));
+  uiout->field_signed ("numchild", varobj_get_num_children (var));
 }
 
 /* Return 1 if given the argument PRINT_VALUES we should display
@@ -337,19 +336,33 @@ mi_print_value_p (struct varobj *var, enum print_values print_values)
   if (type == NULL)
     return 1;
   else
-    {
-      type = check_typedef (type);
+    return mi_simple_type_p (type);
+}
 
-      /* For PRINT_SIMPLE_VALUES, only print the value if it has a type
-	 and that type is not a compound type.  */
-      return (TYPE_CODE (type) != TYPE_CODE_ARRAY
-	      && TYPE_CODE (type) != TYPE_CODE_STRUCT
-	      && TYPE_CODE (type) != TYPE_CODE_UNION);
+/* See mi-cmds.h.  */
+
+bool
+mi_simple_type_p (struct type *type)
+{
+  type = check_typedef (type);
+
+  if (TYPE_IS_REFERENCE (type))
+    type = check_typedef (type->target_type ());
+
+  switch (type->code ())
+    {
+    case TYPE_CODE_ARRAY:
+    case TYPE_CODE_STRUCT:
+    case TYPE_CODE_UNION:
+      return false;
+    default:
+      return true;
     }
 }
 
 void
-mi_cmd_var_list_children (const char *command, char **argv, int argc)
+mi_cmd_var_list_children (const char *command, const char *const *argv,
+			  int argc)
 {
   struct ui_out *uiout = current_uiout;
   struct varobj *var;  
@@ -380,7 +393,7 @@ mi_cmd_var_list_children (const char *command, char **argv, int argc)
   const std::vector<varobj *> &children
     = varobj_list_children (var, &from, &to);
 
-  uiout->field_int ("numchild", to - from);
+  uiout->field_signed ("numchild", to - from);
   if (argc == 2 || argc == 4)
     print_values = mi_parse_print_values (argv[0]);
   else
@@ -392,15 +405,7 @@ mi_cmd_var_list_children (const char *command, char **argv, int argc)
 
   if (from < to)
     {
-      /* For historical reasons this might emit a list or a tuple, so
-	 we construct one or the other.  */
-      gdb::optional<ui_out_emit_tuple> tuple_emitter;
-      gdb::optional<ui_out_emit_list> list_emitter;
-
-      if (mi_version (uiout) == 1)
-	tuple_emitter.emplace (uiout, "children");
-      else
-	list_emitter.emplace (uiout, "children");
+      ui_out_emit_list list_emitter (uiout, "children");
       for (int ix = from; ix < to && ix < children.size (); ix++)
 	{
 	  ui_out_emit_tuple child_emitter (uiout, "child");
@@ -409,11 +414,11 @@ mi_cmd_var_list_children (const char *command, char **argv, int argc)
 	}
     }
 
-  uiout->field_int ("has_more", varobj_has_more (var, to));
+  uiout->field_signed ("has_more", varobj_has_more (var, to));
 }
 
 void
-mi_cmd_var_info_type (const char *command, char **argv, int argc)
+mi_cmd_var_info_type (const char *command, const char *const *argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
   struct varobj *var;
@@ -425,17 +430,18 @@ mi_cmd_var_info_type (const char *command, char **argv, int argc)
   var = varobj_get_handle (argv[0]);
 
   std::string type_name = varobj_get_type (var);
-  uiout->field_string ("type", type_name.c_str ());
+  uiout->field_string ("type", type_name);
 }
 
 void
-mi_cmd_var_info_path_expression (const char *command, char **argv, int argc)
+mi_cmd_var_info_path_expression (const char *command, const char *const *argv,
+				 int argc)
 {
   struct ui_out *uiout = current_uiout;
   struct varobj *var;
 
   if (argc != 1)
-    error (_("Usage: NAME."));
+    error (_("-var-info-path-expression: Usage: NAME."));
 
   /* Get varobj handle, if a valid var obj name was specified.  */
   var = varobj_get_handle (argv[0]);
@@ -446,7 +452,8 @@ mi_cmd_var_info_path_expression (const char *command, char **argv, int argc)
 }
 
 void
-mi_cmd_var_info_expression (const char *command, char **argv, int argc)
+mi_cmd_var_info_expression (const char *command, const char *const *argv,
+			    int argc)
 {
   struct ui_out *uiout = current_uiout;
   const struct language_defn *lang;
@@ -460,14 +467,15 @@ mi_cmd_var_info_expression (const char *command, char **argv, int argc)
 
   lang = varobj_get_language (var);
 
-  uiout->field_string ("lang", lang->la_natural_name);
+  uiout->field_string ("lang", lang->natural_name ());
 
   std::string exp = varobj_get_expression (var);
-  uiout->field_string ("exp", exp.c_str ());
+  uiout->field_string ("exp", exp);
 }
 
 void
-mi_cmd_var_show_attributes (const char *command, char **argv, int argc)
+mi_cmd_var_show_attributes (const char *command, const char *const *argv,
+			    int argc)
 {
   struct ui_out *uiout = current_uiout;
   int attr;
@@ -491,7 +499,8 @@ mi_cmd_var_show_attributes (const char *command, char **argv, int argc)
 }
 
 void
-mi_cmd_var_evaluate_expression (const char *command, char **argv, int argc)
+mi_cmd_var_evaluate_expression (const char *command, const char *const *argv,
+				int argc)
 {
   struct ui_out *uiout = current_uiout;
   struct varobj *var;
@@ -499,7 +508,7 @@ mi_cmd_var_evaluate_expression (const char *command, char **argv, int argc)
   enum varobj_display_formats format;
   int formatFound;
   int oind;
-  char *oarg;
+  const char *oarg;
     
   enum opt
   {
@@ -547,18 +556,18 @@ mi_cmd_var_evaluate_expression (const char *command, char **argv, int argc)
     {
       std::string val = varobj_get_formatted_value (var, format);
 
-      uiout->field_string ("value", val.c_str ());
+      uiout->field_string ("value", val);
     }
   else
     {
       std::string val = varobj_get_value (var);
 
-      uiout->field_string ("value", val.c_str ());
+      uiout->field_string ("value", val);
     }
 }
 
 void
-mi_cmd_var_assign (const char *command, char **argv, int argc)
+mi_cmd_var_assign (const char *command, const char *const *argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
   struct varobj *var;
@@ -584,23 +593,15 @@ mi_cmd_var_assign (const char *command, char **argv, int argc)
 	     "expression to variable object"));
 
   std::string val = varobj_get_value (var);
-  uiout->field_string ("value", val.c_str ());
+  uiout->field_string ("value", val);
 }
-
-/* Type used for parameters passing to mi_cmd_var_update_iter.  */
-
-struct mi_cmd_var_update
-  {
-    int only_floating;
-    enum print_values print_values;
-  };
 
 /* Helper for mi_cmd_var_update - update each VAR.  */
 
 static void
-mi_cmd_var_update_iter (struct varobj *var, void *data_pointer)
+mi_cmd_var_update_iter (struct varobj *var, bool only_floating,
+			enum print_values print_values)
 {
-  struct mi_cmd_var_update *data = (struct mi_cmd_var_update *) data_pointer;
   bool thread_stopped;
 
   int thread_id = varobj_get_thread_id (var);
@@ -619,15 +620,15 @@ mi_cmd_var_update_iter (struct varobj *var, void *data_pointer)
     }
 
   if (thread_stopped
-      && (!data->only_floating || varobj_floating_p (var)))
-    varobj_update_one (var, data->print_values, false /* implicit */);
+      && (!only_floating || varobj_floating_p (var)))
+    varobj_update_one (var, print_values, false /* implicit */);
 }
 
 void
-mi_cmd_var_update (const char *command, char **argv, int argc)
+mi_cmd_var_update (const char *command, const char *const *argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
-  char *name;
+  const char *name;
   enum print_values print_values;
 
   if (argc != 1 && argc != 2)
@@ -643,31 +644,19 @@ mi_cmd_var_update (const char *command, char **argv, int argc)
   else
     print_values = PRINT_NO_VALUES;
 
-  /* For historical reasons this might emit a list or a tuple, so we
-     construct one or the other.  */
-  gdb::optional<ui_out_emit_tuple> tuple_emitter;
-  gdb::optional<ui_out_emit_list> list_emitter;
-
-  if (mi_version (uiout) <= 1)
-    tuple_emitter.emplace (uiout, "changelist");
-  else
-    list_emitter.emplace (uiout, "changelist");
+  ui_out_emit_list list_emitter (uiout, "changelist");
 
   /* Check if the parameter is a "*", which means that we want to
      update all variables.  */
 
   if ((*name == '*' || *name == '@') && (*(name + 1) == '\0'))
     {
-      struct mi_cmd_var_update data;
-
-      data.only_floating = (*name == '@');
-      data.print_values = print_values;
-
       /* varobj_update_one automatically updates all the children of
 	 VAROBJ.  Therefore update each VAROBJ only once by iterating
 	 only the root VAROBJs.  */
 
-      all_root_varobjs (mi_cmd_var_update_iter, &data);
+      all_root_varobjs ([=] (varobj *var)
+	{ mi_cmd_var_update_iter (var, *name == '0', print_values); });
     }
   else
     {
@@ -692,9 +681,7 @@ varobj_update_one (struct varobj *var, enum print_values print_values,
     {
       int from, to;
 
-      gdb::optional<ui_out_emit_tuple> tuple_emitter;
-      if (mi_version (uiout) > 1)
-	tuple_emitter.emplace (uiout, nullptr);
+      ui_out_emit_tuple tuple_emitter (uiout, nullptr);
       uiout->field_string ("name", varobj_get_objname (r.varobj));
 
       switch (r.status)
@@ -704,16 +691,16 @@ varobj_update_one (struct varobj *var, enum print_values print_values,
 	    {
 	      std::string val = varobj_get_value (r.varobj);
 
-	      uiout->field_string ("value", val.c_str ());
+	      uiout->field_string ("value", val);
 	    }
 	  uiout->field_string ("in_scope", "true");
 	  break;
-        case VAROBJ_NOT_IN_SCOPE:
-          uiout->field_string ("in_scope", "false");
+	case VAROBJ_NOT_IN_SCOPE:
+	  uiout->field_string ("in_scope", "false");
 	  break;
-        case VAROBJ_INVALID:
-          uiout->field_string ("in_scope", "invalid");
- 	  break;
+	case VAROBJ_INVALID:
+	  uiout->field_string ("in_scope", "invalid");
+	  break;
 	}
 
       if (r.status != VAROBJ_INVALID)
@@ -728,12 +715,12 @@ varobj_update_one (struct varobj *var, enum print_values print_values,
 	{
 	  std::string type_name = varobj_get_type (r.varobj);
 
-	  uiout->field_string ("new_type", type_name.c_str ());
+	  uiout->field_string ("new_type", type_name);
 	}
 
       if (r.type_changed || r.children_changed)
-	uiout->field_int ("new_num_children",
-			  varobj_get_num_children (r.varobj));
+	uiout->field_signed ("new_num_children",
+			     varobj_get_num_children (r.varobj));
 
       gdb::unique_xmalloc_ptr<char> display_hint
 	= varobj_get_display_hint (r.varobj);
@@ -741,10 +728,10 @@ varobj_update_one (struct varobj *var, enum print_values print_values,
 	uiout->field_string ("displayhint", display_hint.get ());
 
       if (varobj_is_dynamic_p (r.varobj))
-	uiout->field_int ("dynamic", 1);
+	uiout->field_signed ("dynamic", 1);
 
       varobj_get_child_range (r.varobj, &from, &to);
-      uiout->field_int ("has_more", varobj_has_more (r.varobj, to));
+      uiout->field_signed ("has_more", varobj_has_more (r.varobj, to));
 
       if (!r.newobj.empty ())
 	{
@@ -760,7 +747,8 @@ varobj_update_one (struct varobj *var, enum print_values print_values,
 }
 
 void
-mi_cmd_enable_pretty_printing (const char *command, char **argv, int argc)
+mi_cmd_enable_pretty_printing (const char *command, const char *const *argv,
+			       int argc)
 {
   if (argc != 0)
     error (_("-enable-pretty-printing: no arguments allowed"));
@@ -769,7 +757,8 @@ mi_cmd_enable_pretty_printing (const char *command, char **argv, int argc)
 }
 
 void
-mi_cmd_var_set_update_range (const char *command, char **argv, int argc)
+mi_cmd_var_set_update_range (const char *command, const char *const *argv,
+			     int argc)
 {
   struct varobj *var;
   int from, to;

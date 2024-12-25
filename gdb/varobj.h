@@ -1,5 +1,5 @@
 /* GDB variable objects API.
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -14,12 +14,11 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef VAROBJ_H
-#define VAROBJ_H 1
+#ifndef GDB_VAROBJ_H
+#define GDB_VAROBJ_H
 
 #include "symtab.h"
 #include "gdbtypes.h"
-#include "common/vec.h"
 #include "value.h"
 
 /* Enumeration for the format types */
@@ -234,7 +233,10 @@ extern const struct lang_varobj_ops c_varobj_ops;
 extern const struct lang_varobj_ops cplus_varobj_ops;
 extern const struct lang_varobj_ops ada_varobj_ops;
 
-#define default_varobj_ops c_varobj_ops
+/* Non-zero if we want to see trace of varobj level stuff.  */
+
+extern unsigned int varobjdebug;
+
 /* API functions */
 
 extern struct varobj *varobj_create (const char *objname,
@@ -282,7 +284,7 @@ extern int varobj_get_num_children (struct varobj *var);
    indicating the range of children to return.  If either *FROM or *TO
    is less than zero on entry, then all children will be returned.  On
    return, *FROM and *TO will be updated to indicate the real range
-   that was returned.  The resulting VEC will contain at least the
+   that was returned.  The resulting vector will contain at least the
    children from *FROM to just before *TO; it might contain more
    children, depending on whether any more were available.  */
 extern const std::vector<varobj *> &
@@ -307,13 +309,15 @@ extern std::string varobj_get_value (struct varobj *var);
 
 extern bool varobj_set_value (struct varobj *var, const char *expression);
 
-extern void all_root_varobjs (void (*func) (struct varobj *var, void *data),
-			      void *data);
+extern void all_root_varobjs (gdb::function_view<void (struct varobj *var)>);
 
 extern std::vector<varobj_update_result>
   varobj_update (struct varobj **varp, bool is_explicit);
 
-extern void varobj_invalidate (void);
+/* Try to recreate any global or floating varobj.  This is called after
+   changing symbol files.  */
+
+extern void varobj_re_set (void);
 
 extern bool varobj_editable_p (const struct varobj *var);
 
@@ -351,4 +355,4 @@ extern void varobj_restrict_range (const std::vector<varobj *> &children,
 
 extern bool varobj_default_is_path_expr_parent (const struct varobj *var);
 
-#endif /* VAROBJ_H */
+#endif /* GDB_VAROBJ_H */

@@ -1,6 +1,6 @@
 /* rx.c --- opcode semantics for stand-alone RX simulator.
 
-Copyright (C) 2008-2019 Free Software Foundation, Inc.
+Copyright (C) 2008-2024 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -18,7 +18,9 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,8 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "err.h"
 #include "misc.h"
 
-#ifdef CYCLE_STATS
-static const char * id_names[] = {
+#ifdef WITH_PROFILE
+static const char * const id_names[] = {
   "RXO_unknown",
   "RXO_mov",	/* d = s (signed) */
   "RXO_movbi",	/* d = [s,s2] (signed) */
@@ -140,7 +142,7 @@ static const char * id_names[] = {
   "RXO_sccnd",	/* d = cond(s) ? 1 : 0 */
 };
 
-static const char * optype_names[] = {
+static const char * const optype_names[] = {
   " -  ",
   "#Imm",	/* #addend */
   " Rn ",	/* Rn */
@@ -211,7 +213,7 @@ static int po0;
 
 #else
 #define STATS(x)
-#endif /* CYCLE_STATS */
+#endif /* WITH_PROFILE */
 
 
 #ifdef CYCLE_ACCURATE
@@ -330,7 +332,7 @@ div_cycles(long num, long den)
 
 #endif /* else CYCLE_ACCURATE */
 
-static int size2bytes[] = {
+static const int size2bytes[] = {
   4, 1, 1, 1, 2, 2, 2, 3, 4
 };
 
@@ -339,7 +341,7 @@ typedef struct {
 } RX_Data;
 
 #define rx_abort() _rx_abort(__FILE__, __LINE__)
-static void
+static void ATTRIBUTE_NORETURN
 _rx_abort (const char *file, int line)
 {
   if (strrchr (file, '/'))
@@ -409,7 +411,7 @@ get_op (const RX_Opcode_Decoded *rd, int i)
 
     case RX_Operand_Predec:	/* [-Rn] */
       put_reg (o->reg, get_reg (o->reg) - size2bytes[o->size]);
-      /* fall through */
+      ATTRIBUTE_FALLTHROUGH;
     case RX_Operand_Postinc:	/* [Rn+] */
     case RX_Operand_Zero_Indirect:	/* [Rn + 0] */
     case RX_Operand_Indirect:	/* [Rn + addend] */
@@ -422,7 +424,7 @@ get_op (const RX_Opcode_Decoded *rd, int i)
       if (regs.m2m == M2M_BOTH)
 	{
 	  tprintf("src memory stall\n");
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	  memory_stalls ++;
 #endif
 	  regs.cycle_count ++;
@@ -581,7 +583,7 @@ put_op (const RX_Opcode_Decoded *rd, int i, int v)
 
     case RX_Operand_Predec:	/* [-Rn] */
       put_reg (o->reg, get_reg (o->reg) - size2bytes[o->size]);
-      /* fall through */
+      ATTRIBUTE_FALLTHROUGH;
     case RX_Operand_Postinc:	/* [Rn+] */
     case RX_Operand_Zero_Indirect:	/* [Rn + 0] */
     case RX_Operand_Indirect:	/* [Rn + addend] */
@@ -592,7 +594,7 @@ put_op (const RX_Opcode_Decoded *rd, int i, int v)
 	{
 	  tprintf("dst memory stall\n");
 	  regs.cycle_count ++;
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	  memory_stalls ++;
 #endif
 	  regs.m2m = 0;
@@ -682,7 +684,7 @@ pushpc(int val)
 }
 
 static int
-pop()
+pop (void)
 {
   int rv;
   int rsp = get_reg (sp);
@@ -693,7 +695,7 @@ pop()
 }
 
 static int
-poppc()
+poppc (void)
 {
   int rv;
   int rsp = get_reg (sp);
@@ -752,6 +754,7 @@ typedef union {
   float f;
 } FloatInt;
 
+ATTRIBUTE_UNUSED
 static inline int
 float2int (float f)
 {
@@ -931,7 +934,7 @@ op_is_memory (const RX_Opcode_Decoded *rd, int i)
 #define DO_RETURN(x) { longjmp (decode_jmp_buf, x); }
 
 int
-decode_opcode ()
+decode_opcode (void)
 {
   unsigned int uma=0, umb=0;
   int ma=0, mb=0;
@@ -941,14 +944,14 @@ decode_opcode ()
   unsigned long opcode_pc;
   RX_Data rx_data;
   const RX_Opcode_Decoded *opcode;
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
   unsigned long long prev_cycle_count;
 #endif
 #ifdef CYCLE_ACCURATE
   unsigned int tx;
 #endif
 
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
   prev_cycle_count = regs.cycle_count;
 #endif
 
@@ -986,7 +989,7 @@ decode_opcode ()
 	{
 	  tprintf("1 cycle branch alignment penalty\n");
 	  cycles (branch_alignment_penalty);
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	  branch_alignment_stalls ++;
 #endif
 	}
@@ -1085,7 +1088,7 @@ decode_opcode ()
 	      cycles (3);
 	      branch_alignment_penalty = 1;
 	    }
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	  branch_stalls ++;
 #endif
 #endif
@@ -1114,7 +1117,7 @@ decode_opcode ()
 	      cycles (3);
 	      branch_alignment_penalty = 1;
 	    }
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	  branch_stalls ++;
 #endif
 #endif
@@ -1752,7 +1755,7 @@ decode_opcode ()
 	/* Note: specs say 5, chip says 3.  */
 	if (regs.fast_return && regs.link_register == regs.r_pc)
 	  {
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	    fast_returns ++;
 #endif
 	    tprintf("fast return bonus\n");
@@ -1794,7 +1797,7 @@ decode_opcode ()
       if (regs.fast_return && regs.link_register == regs.r_pc)
 	{
 	  tprintf("fast return bonus\n");
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 	  fast_returns ++;
 #endif
 	  cycles (tx < 3 ? 3 : tx + 1);
@@ -2170,7 +2173,7 @@ decode_opcode ()
   new_rt = -1;
 #endif
 
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
   if (prev_cycle_count == regs.cycle_count)
     {
       printf("Cycle count not updated! id %s\n", id_names[opcode->id]);
@@ -2178,7 +2181,7 @@ decode_opcode ()
     }
 #endif
 
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
   if (running_benchmark)
     {
       int omap = op_lookup (opcode->op[0].type, opcode->op[1].type, opcode->op[2].type);
@@ -2197,7 +2200,7 @@ decode_opcode ()
   return RX_MAKE_STEPPED ();
 }
 
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
 void
 reset_pipeline_stats (void)
 {
@@ -2225,7 +2228,7 @@ halt_pipeline_stats (void)
 void
 pipeline_stats (void)
 {
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
   int i, o1;
   int p, p1;
 #endif
@@ -2240,7 +2243,7 @@ pipeline_stats (void)
   printf ("cycles: %13s\n", comma (regs.cycle_count));
 #endif
 
-#ifdef CYCLE_STATS
+#ifdef WITH_PROFILE
   if (benchmark_start_cycle)
     printf ("bmark:  %13s\n", comma (benchmark_end_cycle - benchmark_start_cycle));
 

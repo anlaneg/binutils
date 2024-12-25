@@ -1,6 +1,6 @@
 /* coff information for Intel 386/486.
    
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,11 +17,7 @@
    Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
    MA 02110-1301, USA.  */
 
-#define L_LNNO_SIZE 2
-#define INCLUDE_COMDAT_FIELDS_IN_AUXENT
-#include "coff/external.h"
-
-#define COFF_PAGE_SIZE	0x1000
+#include "coff/x86.h"
 
 /* Bits for f_flags:
  	F_RELFLG	Relocation info stripped from file
@@ -43,7 +39,17 @@
 
 #define LYNXCOFFMAGIC	0415
 
+/* Used in some .NET DLLs that target a specific OS.  */
+#define I386_APPLE_MAGIC   (I386MAGIC ^ IMAGE_FILE_MACHINE_NATIVE_APPLE_OVERRIDE)
+#define I386_FREEBSD_MAGIC (I386MAGIC ^ IMAGE_FILE_MACHINE_NATIVE_FREEBSD_OVERRIDE)
+#define I386_LINUX_MAGIC   (I386MAGIC ^ IMAGE_FILE_MACHINE_NATIVE_LINUX_OVERRIDE)
+#define I386_NETBSD_MAGIC  (I386MAGIC ^ IMAGE_FILE_MACHINE_NATIVE_NETBSD_OVERRIDE)
+
 #define I386BADMAG(x) (  ((x).f_magic != I386MAGIC) \
+		       && (x).f_magic != I386_APPLE_MAGIC \
+		       && (x).f_magic != I386_FREEBSD_MAGIC \
+		       && (x).f_magic != I386_LINUX_MAGIC \
+		       && (x).f_magic != I386_NETBSD_MAGIC \
 		       && (x).f_magic != I386AIXMAGIC \
 		       && (x).f_magic != I386PTXMAGIC \
 		       && (x).f_magic != LYNXCOFFMAGIC)
@@ -53,22 +59,15 @@
 #define STMAGIC		0401	/* Target shlib.  */
 #define SHMAGIC		0443	/* Host shlib.  */
 
-/* Define some NT default values.  */
-/*  #define NT_IMAGE_BASE        0x400000 moved to internal.h */
-#define NT_SECTION_ALIGNMENT 0x1000
-#define NT_FILE_ALIGNMENT    0x200
-#define NT_DEF_RESERVE       0x100000
-#define NT_DEF_COMMIT        0x1000
+/* i386 Relocations.  */
 
-/* Relocation directives.  */
-
-struct external_reloc
-{
-  char r_vaddr[4];
-  char r_symndx[4];
-  char r_type[2];
-};
-
-#define RELOC struct external_reloc
-#define RELSZ 10
-
+#define R_DIR32		 6
+#define R_IMAGEBASE	 7
+#define R_SECTION	10
+#define R_SECREL32	11
+#define R_RELBYTE	15
+#define R_RELWORD	16
+#define R_RELLONG	17
+#define R_PCRBYTE	18
+#define R_PCRWORD	19
+#define R_PCRLONG	20

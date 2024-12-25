@@ -23,14 +23,7 @@
 
 #include "device_table.h"
 
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
@@ -84,6 +77,8 @@
 
    */
 
+#ifdef HAVE_SYSV_SHM
+
 typedef struct _hw_shm_device {
   unsigned_word physical_address;
   char *shm_address;
@@ -96,7 +91,6 @@ static void
 hw_shm_init_data(device *me)
 {
   hw_shm_device *shm = (hw_shm_device*)device_data(me);
-  const device_unit *d;
   reg_property_spec reg;
   int i;
 
@@ -154,8 +148,6 @@ hw_shm_attach_address_callback(device *me,
 				access_type access,
 				device *client) /*callback/default*/
 {
-  hw_shm_device *shm = (hw_shm_device*)device_data(me);
-
   if (space != 0)
     error("shm_attach_address_callback() invalid address space\n");
 
@@ -231,5 +223,13 @@ const device_descriptor hw_shm_device_descriptor[] = {
   { "shm", hw_shm_create, &hw_shm_callbacks },
   { NULL },
 };
+
+#else
+
+const device_descriptor hw_shm_device_descriptor[] = {
+  { NULL },
+};
+
+#endif /* HAVE_SYSV_SHM */
 
 #endif /* _HW_SHM_C_ */

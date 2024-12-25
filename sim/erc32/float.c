@@ -1,6 +1,6 @@
 /* This file is part of SIS (SPARC instruction simulator)
 
-   Copyright (C) 1995-2019 Free Software Foundation, Inc.
+   Copyright (C) 1995-2024 Free Software Foundation, Inc.
    Contributed by Jiri Gaisler, European Space Agency
 
    This program is free software; you can redistribute it and/or modify
@@ -20,19 +20,21 @@
    FPU.  IEEE trap handling is done as follows:
      1. In the host, all IEEE traps are masked
      2. After each simulated FPU instruction, check if any exception
-        occured by reading the exception bits from the host FPU status
+        occurred by reading the exception bits from the host FPU status
         register (get_accex()).
      3. Propagate any exceptions to the simulated FSR.
      4. Clear host exception bits.
  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "sis.h"
 #include <fenv.h>
 
 /* This routine should return the accrued exceptions */
 int
-get_accex()
+get_accex(void)
 {
     int fexc, accx;
 
@@ -53,15 +55,14 @@ get_accex()
 
 /* How to clear the accrued exceptions */
 void
-clear_accex()
+clear_accex(void)
 {
     feclearexcept (FE_ALL_EXCEPT);
 }
 
 /* How to map SPARC FSR onto the host */
 void
-set_fsr(fsr)
-uint32 fsr;
+set_fsr(uint32_t fsr)
 {
     int fround;
 

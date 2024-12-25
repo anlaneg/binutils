@@ -1,6 +1,6 @@
 /* Target-dependent code for DJGPP/i386.
 
-   Copyright (C) 1988-2019 Free Software Foundation, Inc.
+   Copyright (C) 1988-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,16 +17,15 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "i386-tdep.h"
-#include "common/x86-xstate.h"
+#include "gdbsupport/x86-xstate.h"
 #include "target-descriptions.h"
 #include "osabi.h"
 
 static void
 i386_go32_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   /* DJGPP doesn't have any special frames for signal handlers.  */
   tdep->sigtramp_p = NULL;
@@ -35,7 +34,7 @@ i386_go32_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 
   /* DJGPP does not support the SSE registers.  */
   if (!tdesc_has_registers (info.target_desc))
-    tdep->tdesc = i386_target_description (X86_XSTATE_X87_MASK);
+    tdep->tdesc = i386_target_description (X86_XSTATE_X87_MASK, false);
 
   /* Native compiler is GCC, which uses the SVR4 register numbering
      even in COFF and STABS.  See the comment in i386_gdbarch_init,
@@ -62,6 +61,7 @@ i386_coff_osabi_sniffer (bfd *abfd)
 }
 
 
+void _initialize_i386_go32_tdep ();
 void
 _initialize_i386_go32_tdep ()
 {

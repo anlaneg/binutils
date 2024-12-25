@@ -1,6 +1,6 @@
 /* Generic SDT probe support for GDB.
 
-   Copyright (C) 2012-2019 Free Software Foundation, Inc.
+   Copyright (C) 2012-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,10 +17,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (PROBE_H)
-#define PROBE_H 1
+#ifndef GDB_PROBE_H
+#define GDB_PROBE_H
 
-struct event_location;
+#include "symtab.h"
+
+struct location_spec;
 struct linespec_result;
 
 /* Structure useful for passing the header names in the method
@@ -62,7 +64,7 @@ public:
   virtual bool is_linespec (const char **linespecp) const = 0;
 
   /* Function that should fill PROBES with known probes from OBJFILE.  */
-  virtual void get_probes (std::vector<probe *> *probes,
+  virtual void get_probes (std::vector<std::unique_ptr<probe>> *probes,
 			    struct objfile *objfile) const = 0;
 
   /* Return a pointer to a name identifying the probe type.  This is
@@ -129,7 +131,7 @@ public:
 
   /* Return the number of arguments of the probe.  This function can
      throw an exception.  */
-  virtual unsigned get_argument_count (struct frame_info *frame) = 0;
+  virtual unsigned get_argument_count (struct gdbarch *gdbarch) = 0;
 
   /* Return 1 if the probe interface can evaluate the arguments of
      probe, zero otherwise.  See the comments on
@@ -141,7 +143,7 @@ public:
      corresponding to it.  The argument number is represented N.
      This function can throw an exception.  */
   virtual struct value *evaluate_argument (unsigned n,
-					   struct frame_info *frame) = 0;
+					   const frame_info_ptr &frame) = 0;
 
   /* Compile the Nth argument of the probe to an agent expression.
      The argument number is represented by N.  */
@@ -261,7 +263,7 @@ struct bound_probe
    throws an error.  */
 
 extern std::vector<symtab_and_line> parse_probes
-  (const struct event_location *loc,
+  (const location_spec *locspec,
    struct program_space *pspace,
    struct linespec_result *canon);
 
@@ -272,7 +274,7 @@ extern std::vector<symtab_and_line> parse_probes
 extern struct bound_probe find_probe_by_pc (CORE_ADDR pc);
 
 /* Search OBJFILE for a probe with the given PROVIDER, NAME.  Return a
-   VEC of all probes that were found.  If no matching probe is found,
+   vector of all probes that were found.  If no matching probe is found,
    return an empty vector.  */
 
 extern std::vector<probe *> find_probes_in_objfile (struct objfile *objfile,
@@ -299,7 +301,12 @@ extern struct cmd_list_element **info_probes_cmdlist_get (void);
    probe at that location, or if the probe does not have enough arguments,
    this returns NULL.  */
 
-extern struct value *probe_safe_evaluate_at_pc (struct frame_info *frame,
+extern struct value *probe_safe_evaluate_at_pc (const frame_info_ptr &frame,
 						unsigned n);
 
-#endif /* !defined (PROBE_H) */
+/* Return true if the PROVIDER/NAME probe from OBJFILE_NAME needs to be
+   ignored.  */
+
+bool ignore_probe_p (const char *provider, const char *name,
+		     const char *objfile_name, const char *TYPE);
+#endif /* GDB_PROBE_H */

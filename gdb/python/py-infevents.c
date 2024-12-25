@@ -1,6 +1,6 @@
 /* Python interface to inferior function events.
 
-   Copyright (C) 2013-2019 Free Software Foundation, Inc.
+   Copyright (C) 2013-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "py-event.h"
 
 /* Construct either a gdb.InferiorCallPreEvent or a
@@ -48,7 +47,7 @@ create_inferior_call_event_object (inferior_call_kind flag, ptid_t ptid,
   if (evpy_add_attribute (event.get (), "ptid", ptid_obj.get ()) < 0)
     return NULL;
 
-  gdbpy_ref<> addr_obj (PyLong_FromLongLong (addr));
+  gdbpy_ref<> addr_obj = gdb_py_object_from_ulongest (addr);
   if (addr_obj == NULL)
     return NULL;
 
@@ -62,7 +61,7 @@ create_inferior_call_event_object (inferior_call_kind flag, ptid_t ptid,
    register number. */
 
 static gdbpy_ref<>
-create_register_changed_event_object (struct frame_info *frame, 
+create_register_changed_event_object (const frame_info_ptr &frame,
 				      int regnum)
 {
   gdbpy_ref<> event = create_event_object (&register_changed_event_object_type);
@@ -76,7 +75,7 @@ create_register_changed_event_object (struct frame_info *frame,
   if (evpy_add_attribute (event.get (), "frame", frame_obj.get ()) < 0)
     return NULL;
 
-  gdbpy_ref<> regnum_obj (PyLong_FromLongLong (regnum));
+  gdbpy_ref<> regnum_obj = gdb_py_object_from_longest (regnum);
   if (regnum_obj == NULL)
     return NULL;
 
@@ -97,14 +96,14 @@ create_memory_changed_event_object (CORE_ADDR addr, ssize_t len)
   if (event == NULL)
     return NULL;
 
-  gdbpy_ref<> addr_obj (PyLong_FromLongLong (addr));
+  gdbpy_ref<> addr_obj = gdb_py_object_from_ulongest (addr);
   if (addr_obj == NULL)
     return NULL;
 
   if (evpy_add_attribute (event.get (), "address", addr_obj.get ()) < 0)
     return NULL;
 
-  gdbpy_ref<> len_obj (PyLong_FromLong (len));
+  gdbpy_ref<> len_obj = gdb_py_object_from_longest (len);
   if (len_obj == NULL)
     return NULL;
 
@@ -151,7 +150,7 @@ emit_memory_changed_event (CORE_ADDR addr, ssize_t len)
    will create a new Python register changed event object. */
 
 int
-emit_register_changed_event (struct frame_info* frame, int regnum)
+emit_register_changed_event (const frame_info_ptr &frame, int regnum)
 {
   if (evregpy_no_listeners_p (gdb_py_events.register_changed))
     return 0;

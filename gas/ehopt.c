@@ -1,5 +1,5 @@
 /* ehopt.c--optimize gcc exception frame information.
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
    Written by Ian Lance Taylor <ian@cygnus.com>.
 
    This file is part of GAS, the GNU Assembler.
@@ -94,8 +94,6 @@ struct cie_info
   int z_augmentation;
 };
 
-static int get_cie_info (struct cie_info *);
-
 /* Extract information from the CIE.  */
 
 static int
@@ -103,7 +101,7 @@ get_cie_info (struct cie_info *info)
 {
   fragS *f;
   fixS *fix;
-  int offset;
+  unsigned int offset;
   char CIE_id;
   char augmentation[10];
   int iaug;
@@ -118,7 +116,7 @@ get_cie_info (struct cie_info *info)
 
   /* First make sure that the CIE Identifier Tag is 0/-1.  */
 
-  if (strncmp (segment_name (now_seg), ".debug_frame", 12) == 0)
+  if (startswith (segment_name (now_seg), ".debug_frame"))
     CIE_id = (char)0xff;
   else
     CIE_id = 0;
@@ -238,6 +236,27 @@ enum frame_state
   state_error,
 };
 
+struct frame_data
+{
+  enum frame_state state;
+
+  int cie_info_ok;
+  struct cie_info cie_info;
+
+  symbolS *size_end_sym;
+  fragS *loc4_frag;
+  int loc4_fix;
+
+  int aug_size;
+  int aug_shift;
+};
+
+static struct eh_state
+{
+  struct frame_data eh_data;
+  struct frame_data debug_data;
+} frame;
+
 /* This function is called from emit_expr.  It looks for cases which
    we can optimize.
 
@@ -254,23 +273,6 @@ enum frame_state
 int
 check_eh_frame (expressionS *exp, unsigned int *pnbytes)
 {
-  struct frame_data
-  {
-    enum frame_state state;
-
-    int cie_info_ok;
-    struct cie_info cie_info;
-
-    symbolS *size_end_sym;
-    fragS *loc4_frag;
-    int loc4_fix;
-
-    int aug_size;
-    int aug_shift;
-  };
-
-  static struct frame_data eh_frame_data;
-  static struct frame_data debug_frame_data;
   struct frame_data *d;
 
   /* Don't optimize.  */
@@ -283,11 +285,11 @@ check_eh_frame (expressionS *exp, unsigned int *pnbytes)
 #endif
 
   /* Select the proper section data.  */
-  if (strncmp (segment_name (now_seg), ".eh_frame", 9) == 0
+  if (startswith (segment_name (now_seg), ".eh_frame")
       && segment_name (now_seg)[9] != '_')
-    d = &eh_frame_data;
-  else if (strncmp (segment_name (now_seg), ".debug_frame", 12) == 0)
-    d = &debug_frame_data;
+    d = &frame.eh_data;
+  else if (startswith (segment_name (now_seg), ".debug_frame"))
+    d = &frame.debug_data;
   else
     return 0;
 
@@ -384,7 +386,7 @@ check_eh_frame (expressionS *exp, unsigned int *pnbytes)
 	{
 	  /* This might be a DW_CFA_advance_loc4.  Record the frag and the
 	     position within the frag, so that we can change it later.  */
-	  frag_grow (1);
+	  frag_grow (1 + 4);
 	  d->state = state_saw_loc4;
 	  d->loc4_frag = frag_now;
 	  d->loc4_fix = frag_now_fix ();
@@ -482,7 +484,9 @@ eh_frame_estimate_size_before_relax (fragS *frag)
 
   gas_assert (ca > 0);
   diff /= ca;
-  if (diff < 0x40)
+  if (diff == 0)
+    ret = -1;
+  else if (diff < 0x40)
     ret = 0;
   else if (diff < 0x100)
     ret = 1;
@@ -491,7 +495,7 @@ eh_frame_estimate_size_before_relax (fragS *frag)
   else
     ret = 4;
 
-  frag->fr_subtype = (frag->fr_subtype & ~7) | ret;
+  frag->fr_subtype = (frag->fr_subtype & ~7) | (ret & 7);
 
   return ret;
 }
@@ -506,6 +510,8 @@ eh_frame_relax_frag (fragS *frag)
   int oldsize, newsize;
 
   oldsize = frag->fr_subtype & 7;
+  if (oldsize == 7)
+    oldsize = -1;
   newsize = eh_frame_estimate_size_before_relax (frag);
   return newsize - oldsize;
 }
@@ -548,13 +554,27 @@ eh_frame_convert_frag (fragS *frag)
       md_number_to_chars (frag->fr_literal + frag->fr_fix, diff, 2);
       break;
 
-    default:
+    case 4:
       md_number_to_chars (frag->fr_literal + frag->fr_fix, diff, 4);
       break;
+
+    case 7:
+      gas_assert (diff == 0);
+      frag->fr_fix -= 8;
+      break;
+
+    default:
+      abort ();
     }
 
   frag->fr_fix += frag->fr_subtype & 7;
   frag->fr_type = rs_fill;
   frag->fr_subtype = 0;
   frag->fr_offset = 0;
+}
+
+void
+eh_begin (void)
+{
+  memset (&frame, 0, sizeof (frame));
 }

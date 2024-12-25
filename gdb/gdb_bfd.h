@@ -1,6 +1,6 @@
 /* Definitions for BFD wrappers used by GDB.
 
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,23 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef GDB_BFD_H
-#define GDB_BFD_H
+#ifndef GDB_GDB_BFD_H
+#define GDB_GDB_BFD_H
 
 #include "registry.h"
-#include "common/gdb_ref_ptr.h"
+#include "gdbsupport/byte-vector.h"
+#include "gdbsupport/function-view.h"
+#include "gdbsupport/gdb_ref_ptr.h"
+#include "gdbsupport/iterator-range.h"
+#include "gdbsupport/next-iterator.h"
 
-DECLARE_REGISTRY (bfd);
+/* A registry adaptor for BFD.  This arranges to store the registry in
+   gdb's per-BFD data, which is stored as the bfd_usrdata.  */
+template<>
+struct registry_accessor<bfd>
+{
+  static registry<bfd> *get (bfd *abfd);
+};
 
 /* If supplied a path starting with this sequence, gdb_bfd_open will
    open BFDs using target fileio operations.  */
@@ -34,6 +44,14 @@ DECLARE_REGISTRY (bfd);
    otherwise.  */
 
 int is_target_filename (const char *name);
+
+/* An overload for strings.  */
+
+static inline int
+is_target_filename (const std::string &name)
+{
+  return is_target_filename (name.c_str ());
+}
 
 /* Returns nonzero if the filename associated with ABFD starts with
    TARGET_SYSROOT_PREFIX, zero otherwise.  */
@@ -77,9 +95,12 @@ typedef gdb::ref_ptr<struct bfd, gdb_bfd_ref_policy> gdb_bfd_ref_ptr;
    If the BFD was not accessed using target fileio operations then the
    filename associated with the BFD and accessible with
    bfd_get_filename will not be exactly NAME but rather NAME with
-   TARGET_SYSROOT_PREFIX stripped.  */
+   TARGET_SYSROOT_PREFIX stripped.  If WARN_IF_SLOW is true, print a
+   warning message if the file is being accessed over a link that may
+   be slow.  */
 
-gdb_bfd_ref_ptr gdb_bfd_open (const char *name, const char *target, int fd);
+gdb_bfd_ref_ptr gdb_bfd_open (const char *name, const char *target,
+			      int fd = -1, bool warn_if_slow = true);
 
 /* Mark the CHILD BFD as being a member of PARENT.  Also, increment
    the reference count of CHILD.  Calling this function ensures that
@@ -106,7 +127,7 @@ void gdb_bfd_record_inclusion (bfd *includer, bfd *includee);
 
 /* Try to read or map the contents of the section SECT.  If successful, the
    section data is returned and *SIZE is set to the size of the section data;
-   this may not be the same as the size according to bfd_get_section_size if the
+   this may not be the same as the size according to bfd_section_size if the
    section was compressed.  The returned section data is associated with the BFD
    and will be destroyed when the BFD is destroyed.  There is no other way to
    free it; for temporary uses of section data, see bfd_malloc_and_get_section.
@@ -138,34 +159,41 @@ gdb_bfd_ref_ptr gdb_bfd_openr (const char *, const char *);
 
 gdb_bfd_ref_ptr gdb_bfd_openw (const char *, const char *);
 
-/* A wrapper for bfd_openr_iovec that initializes the gdb-specific
-   reference count.  */
+/* The base class for BFD "iovec" implementations.  This is used by
+   gdb_bfd_openr_iovec and enables better type safety.  */
+
+class gdb_bfd_iovec_base
+{
+protected:
+
+  gdb_bfd_iovec_base () = default;
+
+public:
+
+  virtual ~gdb_bfd_iovec_base () = default;
+
+  /* The "read" callback.  */
+  virtual file_ptr read (bfd *abfd, void *buffer, file_ptr nbytes,
+			 file_ptr offset) = 0;
+
+  /* The "stat" callback.  */
+  virtual int stat (struct bfd *abfd, struct stat *sb) = 0;
+};
+
+/* The type of the function used to open a new iovec-based BFD.  */
+using gdb_iovec_opener_ftype
+     = gdb::function_view<gdb_bfd_iovec_base * (bfd *)>;
+
+/* A type-safe wrapper for bfd_openr_iovec.  */
 
 gdb_bfd_ref_ptr gdb_bfd_openr_iovec (const char *filename, const char *target,
-				     void *(*open_func) (struct bfd *nbfd,
-							 void *open_closure),
-				     void *open_closure,
-				     file_ptr (*pread_func) (struct bfd *nbfd,
-							     void *stream,
-							     void *buf,
-							     file_ptr nbytes,
-							     file_ptr offset),
-				     int (*close_func) (struct bfd *nbfd,
-							void *stream),
-				     int (*stat_func) (struct bfd *abfd,
-						       void *stream,
-						       struct stat *sb));
+				     gdb_iovec_opener_ftype open_fn);
 
 /* A wrapper for bfd_openr_next_archived_file that initializes the
    gdb-specific reference count.  */
 
 gdb_bfd_ref_ptr gdb_bfd_openr_next_archived_file (bfd *archive, bfd *previous);
 
-/* A wrapper for bfd_fdopenr that initializes the gdb-specific
-   reference count.  */
-
-gdb_bfd_ref_ptr gdb_bfd_fdopenr (const char *filename, const char *target,
-				 int fd);
 
 
 
@@ -186,4 +214,64 @@ int gdb_bfd_count_sections (bfd *abfd);
 
 int gdb_bfd_requires_relocations (bfd *abfd);
 
-#endif /* GDB_BFD_H */
+/* Alternative to bfd_get_full_section_contents that returns the section
+   contents in *CONTENTS, instead of an allocated buffer.
+
+   Return true on success, false otherwise.  */
+
+bool gdb_bfd_get_full_section_contents (bfd *abfd, asection *section,
+					gdb::byte_vector *contents);
+
+/* Create and initialize a BFD handle from a target in-memory range.  The
+   BFD starts at ADDR and is SIZE bytes long.  TARGET is the BFD target
+   name as used in bfd_find_target.  */
+
+gdb_bfd_ref_ptr gdb_bfd_open_from_target_memory (CORE_ADDR addr, ULONGEST size,
+						 const char *target);
+
+/* Range adapter for a BFD's sections.
+
+   To be used as:
+
+     for (asection *sect : gdb_bfd_all_sections (bfd))
+       ... use SECT ...
+ */
+
+using gdb_bfd_section_range = next_range<asection>;
+
+static inline gdb_bfd_section_range
+gdb_bfd_sections (bfd *abfd)
+{
+  return gdb_bfd_section_range (abfd->sections);
+}
+
+static inline gdb_bfd_section_range
+gdb_bfd_sections (const gdb_bfd_ref_ptr &abfd)
+{
+  return gdb_bfd_section_range (abfd->sections);
+};
+
+/* A wrapper for bfd_stat that acquires the per-BFD lock on ABFD.  */
+
+extern int gdb_bfd_stat (bfd *abfd, struct stat *sbuf)
+  ATTRIBUTE_WARN_UNUSED_RESULT;
+
+/* A wrapper for bfd_get_mtime that acquires the per-BFD lock on
+   ABFD.  */
+
+extern long gdb_bfd_get_mtime (bfd *abfd)
+  ATTRIBUTE_WARN_UNUSED_RESULT;
+
+/* A wrapper for bfd_errmsg to produce a more helpful error message
+   in the case of bfd_error_file_ambiguously recognized.
+   MATCHING, if non-NULL, is the corresponding argument to
+   bfd_check_format_matches, and will be freed.  */
+
+extern std::string gdb_bfd_errmsg (bfd_error_type error_tag, char **matching);
+
+/* A wrapper for bfd_init that also handles setting up for
+   multi-threading.  */
+
+extern void gdb_bfd_init ();
+
+#endif /* GDB_GDB_BFD_H */

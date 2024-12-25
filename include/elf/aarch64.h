@@ -1,6 +1,6 @@
 /* AArch64 ELF support for BFD.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GNU Binutils.
@@ -27,14 +27,33 @@
 /* Processor specific program header types.  */
 #define PT_AARCH64_ARCHEXT	(PT_LOPROC + 0)
 
+/* MTE memory tag segment type.  */
+#define PT_AARCH64_MEMTAG_MTE     (PT_LOPROC + 0x2)
+
 /* Additional section types.  */
-#define SHT_AARCH64_ATTRIBUTES	0x70000003  /* Section holds attributes.  */
+/* Section holds attributes.  */
+#define SHT_AARCH64_ATTRIBUTES	(SHT_LOPROC + 3)
+/* Special aarch64-specific section for MTE support, as described in:
+   https://github.com/ARM-software/abi-aa/blob/main/pauthabielf64/pauthabielf64.rst#section-types  */
+#define SHT_AARCH64_AUTH_RELR   (SHT_LOPROC + 4)
+/* Special aarch64-specific sections for MTE support, as described in:
+   https://github.com/ARM-software/abi-aa/blob/main/memtagabielf64/memtagabielf64.rst#7section-types  */
+#define SHT_AARCH64_MEMTAG_GLOBALS_STATIC  (SHT_LOPROC + 7)
+#define SHT_AARCH64_MEMTAG_GLOBALS_DYNAMIC (SHT_LOPROC + 8)
 
 /* AArch64-specific values for sh_flags.  */
 #define SHF_ENTRYSECT		0x10000000   /* Section contains an
 						entry point.  */
 #define SHF_COMDEF		0x80000000   /* Section may be multiply defined
 						in the input to a link step.  */
+/* Processor specific dynamic array tags.  */
+#define DT_AARCH64_BTI_PLT	(DT_LOPROC + 1)
+#define DT_AARCH64_PAC_PLT	(DT_LOPROC + 3)
+#define DT_AARCH64_VARIANT_PCS	(DT_LOPROC + 5)
+
+/* AArch64-specific values for st_other.  */
+#define STO_AARCH64_VARIANT_PCS	0x80  /* Symbol may follow different call
+					 convention from the base PCS.  */
 
 /* Relocation types.  */
 
@@ -120,6 +139,10 @@ RELOC_NUMBER (R_AARCH64_P32_JUMP26, 20)
 /* BL:     ((S+A-P) >> 2) & 0x3ffffff.  */
 RELOC_NUMBER (R_AARCH64_P32_CALL26, 21)
 
+/* Group relocations to create a 16 or 32 bit PC-relative offset inline.  */
+RELOC_NUMBER (R_AARCH64_P32_MOVW_PREL_G0, 22)
+RELOC_NUMBER (R_AARCH64_P32_MOVW_PREL_G0_NC, 23)
+RELOC_NUMBER (R_AARCH64_P32_MOVW_PREL_G1, 24)
 
 RELOC_NUMBER (R_AARCH64_P32_GOT_LD_PREL19, 25)
 RELOC_NUMBER (R_AARCH64_P32_ADR_GOT_PAGE, 26)

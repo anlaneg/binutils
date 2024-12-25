@@ -1,18 +1,17 @@
 /* THIS FILE IS GENERATED.  -*- buffer-read-only: t -*- vi:set ro:
   Original: powerpc-405.xml */
 
-#include "defs.h"
 #include "osabi.h"
 #include "target-descriptions.h"
 
-struct target_desc *tdesc_powerpc_405;
+const struct target_desc *tdesc_powerpc_405;
 static void
 initialize_tdesc_powerpc_405 (void)
 {
-  struct target_desc *result = allocate_target_description ();
+  target_desc_up result = allocate_target_description ();
   struct tdesc_feature *feature;
 
-  feature = tdesc_create_feature (result, "org.gnu.gdb.power.core");
+  feature = tdesc_create_feature (result.get (), "org.gnu.gdb.power.core");
   tdesc_create_reg (feature, "r0", 0, 1, NULL, 32, "uint32");
   tdesc_create_reg (feature, "r1", 1, 1, NULL, 32, "uint32");
   tdesc_create_reg (feature, "r2", 2, 1, NULL, 32, "uint32");
@@ -52,7 +51,7 @@ initialize_tdesc_powerpc_405 (void)
   tdesc_create_reg (feature, "ctr", 68, 1, NULL, 32, "uint32");
   tdesc_create_reg (feature, "xer", 69, 1, NULL, 32, "uint32");
 
-  feature = tdesc_create_feature (result, "org.gnu.gdb.power.fpu");
+  feature = tdesc_create_feature (result.get (), "org.gnu.gdb.power.fpu");
   tdesc_create_reg (feature, "f0", 32, 1, NULL, 64, "ieee_double");
   tdesc_create_reg (feature, "f1", 33, 1, NULL, 64, "ieee_double");
   tdesc_create_reg (feature, "f2", 34, 1, NULL, 64, "ieee_double");
@@ -87,7 +86,7 @@ initialize_tdesc_powerpc_405 (void)
   tdesc_create_reg (feature, "f31", 63, 1, NULL, 64, "ieee_double");
   tdesc_create_reg (feature, "fpscr", 70, 1, "float", 32, "int");
 
-  feature = tdesc_create_feature (result, "405");
+  feature = tdesc_create_feature (result.get (), "405");
   tdesc_create_reg (feature, "pvr", 87, 1, NULL, 32, "int");
   tdesc_create_reg (feature, "sprg0", 108, 1, NULL, 32, "int");
   tdesc_create_reg (feature, "sprg1", 109, 1, NULL, 32, "int");
@@ -132,5 +131,5 @@ initialize_tdesc_powerpc_405 (void)
   tdesc_create_reg (feature, "su0r", 160, 1, NULL, 32, "int");
   tdesc_create_reg (feature, "usprg0", 161, 1, NULL, 32, "int");
 
-  tdesc_powerpc_405 = result;
+  tdesc_powerpc_405 = result.release ();
 }

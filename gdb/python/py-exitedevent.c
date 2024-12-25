@@ -1,6 +1,6 @@
 /* Python interface to inferior exit events.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "py-event.h"
 
 static gdbpy_ref<>
@@ -30,7 +29,7 @@ create_exited_event_object (const LONGEST *exit_code, struct inferior *inf)
 
   if (exit_code)
     {
-      gdbpy_ref<> exit_code_obj (PyLong_FromLongLong (*exit_code));
+      gdbpy_ref<> exit_code_obj = gdb_py_object_from_longest (*exit_code);
 
       if (exit_code_obj == NULL)
 	return NULL;

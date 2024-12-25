@@ -14,6 +14,9 @@
     You should have received a copy of the GNU General Public License
     along with this program; if not, see <http://www.gnu.org/licenses/>. */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "armdefs.h"
 #include "armemu.h"
 #include "ansidecl.h"
@@ -385,11 +388,11 @@ ModeToBank (ARMword mode)
 unsigned
 ARMul_NthReg (ARMword instr, unsigned number)
 {
-  unsigned bit, upto;
+  unsigned bit, up_to;
 
-  for (bit = 0, upto = 0; upto <= number; bit ++)
+  for (bit = 0, up_to = 0; up_to <= number; bit ++)
     if (BIT (bit))
-      upto ++;
+      up_to ++;
 
   return (bit - 1);
 }

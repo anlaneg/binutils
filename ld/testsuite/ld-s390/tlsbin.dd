@@ -27,9 +27,9 @@ Disassembly of section .text:
 # __tls_get_addr@plt-.LT1
   +[0-9a-f]+:	[0-9a-f ]+       	.long	0x[0-9a-f]+
 # sG1@tlsgd
-  +[0-9a-f]+:	00 00 00 18       	.long	0x00000018
+  +[0-9a-f]+:	00 00 00 28       	.long	0x00000028
 # sG2@tlsgd
-  +[0-9a-f]+:	00 00 00 10       	.long	0x00000010
+  +[0-9a-f]+:	00 00 00 20       	.long	0x00000020
 # sg1@tlsgd
   +[0-9a-f]+:	ff ff ff 60       	.long	0xffffff60
 # sl1@tlsgd
@@ -49,7 +49,7 @@ Disassembly of section .text:
 # sh2@dtpoff
   +[0-9a-f]+:	ff ff ff a4       	.long	0xffffffa4
 # sG2@gotntpoff
-  +[0-9a-f]+:	00 00 00 10       	.long	0x00000010
+  +[0-9a-f]+:	00 00 00 20       	.long	0x00000020
 # sg1@gotntpoff
   +[0-9a-f]+:	ff ff ff 60       	.long	0xffffff60
 # sl1@gotntpoff
@@ -76,19 +76,19 @@ Disassembly of section .text:
   +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
 # GD -> LE with global variable defined in executable
   +[0-9a-f]+:	58 20 d0 10       	l	%r2,16\(%r13\)
-  +[0-9a-f]+:	47 00 00 00       	nop	0
+  +[0-9a-f]+:	47 00 00 00       	nop
   +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
 # GD -> LE with local variable defined in executable
   +[0-9a-f]+:	58 20 d0 14       	l	%r2,20\(%r13\)
-  +[0-9a-f]+:	47 00 00 00       	nop	0
+  +[0-9a-f]+:	47 00 00 00       	nop
   +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
 # GD -> LE with hidden variable defined in executable
   +[0-9a-f]+:	58 20 d0 18       	l	%r2,24\(%r13\)
-  +[0-9a-f]+:	47 00 00 00       	nop	0
+  +[0-9a-f]+:	47 00 00 00       	nop
   +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
 # LD -> LE
   +[0-9a-f]+:	58 20 d0 1c       	l	%r2,28\(%r13\)
-  +[0-9a-f]+:	47 00 00 00       	nop	0
+  +[0-9a-f]+:	47 00 00 00       	nop
   +[0-9a-f]+:	41 32 90 00       	la	%r3,0\(%r2,%r9\)
   +[0-9a-f]+:	58 40 d0 20       	l	%r4,32\(%r13\)
   +[0-9a-f]+:	41 54 30 00       	la	%r5,0\(%r4,%r3\)
@@ -96,7 +96,7 @@ Disassembly of section .text:
   +[0-9a-f]+:	41 54 30 00       	la	%r5,0\(%r4,%r3\)
 # LD -> LE against hidden variables
   +[0-9a-f]+:	58 20 d0 28       	l	%r2,40\(%r13\)
-  +[0-9a-f]+:	47 00 00 00       	nop	0
+  +[0-9a-f]+:	47 00 00 00       	nop
   +[0-9a-f]+:	41 32 90 00       	la	%r3,0\(%r2,%r9\)
   +[0-9a-f]+:	58 40 d0 2c       	l	%r4,44\(%r13\)
   +[0-9a-f]+:	41 54 30 00       	la	%r5,0\(%r4,%r3\)
@@ -122,17 +122,17 @@ Disassembly of section .text:
   +[0-9a-f]+:	07 00             	nopr
   +[0-9a-f]+:	41 54 90 00       	la	%r5,0\(%r4,%r9\)
 # IE against global var with small got access (no optimization)
-  +[0-9a-f]+:	58 30 c0 04       	l	%r3,4\(%r12\)
+  +[0-9a-f]+:	58 30 c0 14       	l	%r3,20\(%r12\)
   +[0-9a-f]+:	41 33 90 00       	la	%r3,0\(%r3,%r9\)
 # IE against global var defined in exec with small got access
 # (no optimization)
-  +[0-9a-f]+:	58 30 c0 08       	l	%r3,8\(%r12\)
+  +[0-9a-f]+:	58 30 c0 18       	l	%r3,24\(%r12\)
   +[0-9a-f]+:	41 33 90 00       	la	%r3,0\(%r3,%r9\)
 # IE against local var with small got access (no optimization)
-  +[0-9a-f]+:	58 30 c0 00       	l	%r3,0\(%r12\)
+  +[0-9a-f]+:	58 30 c0 10       	l	%r3,16\(%r12\)
   +[0-9a-f]+:	41 33 90 00       	la	%r3,0\(%r3,%r9\)
 # IE against hidden var with small got access (no optimization)
-  +[0-9a-f]+:	58 30 c0 0c       	l	%r3,12\(%r12\)
+  +[0-9a-f]+:	58 30 c0 1c       	l	%r3,28\(%r12\)
   +[0-9a-f]+:	41 33 90 00       	la	%r3,0\(%r3,%r9\)
 # function epilog
   +[0-9a-f]+:	98 6e f0 78       	lm	%r6,%r14,120\(%r15\)
@@ -151,7 +151,7 @@ Disassembly of section .text:
   +[0-9a-f]+:	90 6e f0 18       	stm	%r6,%r14,24\(%r15\)
   +[0-9a-f]+:	a7 d5 00 0c       	bras	%r13,[0-9a-f]+ <_start\+0x1c>
 # sG6@indntpoff
-  +[0-9a-f]+:	00 40 15 54       	.long	0x00401554
+  +[0-9a-f]+:	00 40 15 64       	.long	0x00401564
 # bg6@indntpoff
   +[0-9a-f]+:	ff ff ff d4       	.long	0xffffffd4
 # bl6@indntpoff

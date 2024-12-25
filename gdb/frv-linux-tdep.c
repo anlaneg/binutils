@@ -1,7 +1,7 @@
 /* Target-dependent code for GNU/Linux running on the Fujitsu FR-V,
    for GDB.
 
-   Copyright (C) 2004-2019 Free Software Foundation, Inc.
+   Copyright (C) 2004-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,7 +18,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "gdbcore.h"
 #include "target.h"
 #include "frame.h"
@@ -31,6 +31,7 @@
 #include "frame-unwind.h"
 #include "regset.h"
 #include "linux-tdep.h"
+#include "gdbarch.h"
 
 /* Define the size (in bytes) of an FR-V instruction.  */
 static const int frv_instr_size = 4;
@@ -167,8 +168,8 @@ frv_linux_pc_in_sigtramp (struct gdbarch *gdbarch, CORE_ADDR pc,
       } __attribute__((aligned(8)));  */
 
 static LONGEST
-frv_linux_sigcontext_reg_addr (struct frame_info *this_frame, int regno,
-                               CORE_ADDR *sc_addr_cache_ptr)
+frv_linux_sigcontext_reg_addr (const frame_info_ptr &this_frame, int regno,
+			       CORE_ADDR *sc_addr_cache_ptr)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -199,22 +200,22 @@ frv_linux_sigcontext_reg_addr (struct frame_info *this_frame, int regno,
       else if (tramp_type == RT_SIGTRAMP)
 	{
 	  /* For a realtime sigtramp frame, SP + 12 contains a pointer
- 	     to a ucontext struct.  The ucontext struct contains a
- 	     sigcontext struct starting 24 bytes in.  (The offset of
- 	     uc_mcontext within struct ucontext is derived as follows: 
- 	     stack_t is a 12-byte struct and struct sigcontext is
- 	     8-byte aligned.  This gives an offset of 8 + 12 + 4 (for
- 	     padding) = 24.)  */
+	     to a ucontext struct.  The ucontext struct contains a
+	     sigcontext struct starting 24 bytes in.  (The offset of
+	     uc_mcontext within struct ucontext is derived as follows: 
+	     stack_t is a 12-byte struct and struct sigcontext is
+	     8-byte aligned.  This gives an offset of 8 + 12 + 4 (for
+	     padding) = 24.)  */
 	  if (target_read_memory (sp + 12, buf, sizeof buf) != 0)
 	    {
 	      warning (_("Can't read realtime sigtramp frame."));
 	      return 0;
 	    }
 	  sc_addr = extract_unsigned_integer (buf, sizeof buf, byte_order);
- 	  sc_addr += 24;
+	  sc_addr += 24;
 	}
       else
-	internal_error (__FILE__, __LINE__, _("not a signal trampoline"));
+	internal_error (_("not a signal trampoline"));
 
       if (sc_addr_cache_ptr)
 	*sc_addr_cache_ptr = sc_addr;
@@ -257,7 +258,7 @@ frv_linux_sigcontext_reg_addr (struct frame_info *this_frame, int regno,
 /* Signal trampolines.  */
 
 static struct trad_frame_cache *
-frv_linux_sigtramp_frame_cache (struct frame_info *this_frame,
+frv_linux_sigtramp_frame_cache (const frame_info_ptr &this_frame,
 				void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -296,7 +297,7 @@ frv_linux_sigtramp_frame_cache (struct frame_info *this_frame,
 }
 
 static void
-frv_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
+frv_linux_sigtramp_frame_this_id (const frame_info_ptr &this_frame,
 				  void **this_cache,
 				  struct frame_id *this_id)
 {
@@ -306,7 +307,7 @@ frv_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-frv_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
+frv_linux_sigtramp_frame_prev_register (const frame_info_ptr &this_frame,
 					void **this_cache, int regnum)
 {
   /* Make sure we've initialized the cache.  */
@@ -317,7 +318,7 @@ frv_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
 
 static int
 frv_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
-				  struct frame_info *this_frame,
+				  const frame_info_ptr &this_frame,
 				  void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -333,6 +334,7 @@ frv_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
 
 static const struct frame_unwind frv_linux_sigtramp_frame_unwind =
 {
+  "frv linux sigtramp",
   SIGTRAMP_FRAME,
   default_frame_unwind_stop_reason,
   frv_linux_sigtramp_frame_this_id,
@@ -409,7 +411,7 @@ static const struct regcache_map_entry frv_linux_fpregmap[] =
 
 static void 
 frv_linux_supply_gregset (const struct regset *regset,
-                          struct regcache *regcache,
+			  struct regcache *regcache,
 			  int regnum, const void *gregs, size_t len)
 {
   int regi;
@@ -455,7 +457,7 @@ frv_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 static void
 frv_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* Set the sigtramp frame sniffer.  */
   frame_unwind_append_unwinder (gdbarch, &frv_linux_sigtramp_frame_unwind); 
@@ -480,8 +482,9 @@ frv_linux_elf_osabi_sniffer (bfd *abfd)
     return GDB_OSABI_UNKNOWN;
 }
 
+void _initialize_frv_linux_tdep ();
 void
-_initialize_frv_linux_tdep (void)
+_initialize_frv_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_frv, 0, GDB_OSABI_LINUX,
 			  frv_linux_init_abi);

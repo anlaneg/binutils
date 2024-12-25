@@ -1,6 +1,6 @@
 /* Target-dependent code for the ALPHA architecture, for GDB, the GNU Debugger.
 
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,15 +17,15 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "inferior.h"
 #include "symtab.h"
 #include "value.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbcore.h"
 #include "dis-asm.h"
 #include "symfile.h"
@@ -35,7 +35,6 @@
 #include "reggroups.h"
 #include "arch-utils.h"
 #include "osabi.h"
-#include "block.h"
 #include "infcall.h"
 #include "trad-frame.h"
 
@@ -99,10 +98,7 @@ alpha_register_name (struct gdbarch *gdbarch, int regno)
     "pc",   "",     "unique"
   };
 
-  if (regno < 0)
-    return NULL;
-  if (regno >= ARRAY_SIZE(register_names))
-    return NULL;
+  static_assert (ALPHA_NUM_REGS == ARRAY_SIZE (register_names));
   return register_names[regno];
 }
 
@@ -116,7 +112,7 @@ static int
 alpha_cannot_store_register (struct gdbarch *gdbarch, int regno)
 {
   return (regno == ALPHA_ZERO_REGNUM
-          || strlen (alpha_register_name (gdbarch, regno)) == 0);
+	  || strlen (alpha_register_name (gdbarch, regno)) == 0);
 }
 
 static struct type *
@@ -139,12 +135,11 @@ alpha_register_type (struct gdbarch *gdbarch, int regno)
 
 static int
 alpha_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
-			   struct reggroup *group)
+			   const struct reggroup *group)
 {
   /* Filter out any registers eliminated, but whose regnum is 
      reserved for backward compatibility, e.g. the vfp.  */
-  if (gdbarch_register_name (gdbarch, regnum) == NULL
-      || *gdbarch_register_name (gdbarch, regnum) == '\0')
+  if (*gdbarch_register_name (gdbarch, regnum) == '\0')
     return 0;
 
   if (group == all_reggroup)
@@ -234,11 +229,11 @@ alpha_convert_register_p (struct gdbarch *gdbarch, int regno,
 			  struct type *type)
 {
   return (regno >= ALPHA_FP0_REGNUM && regno < ALPHA_FP0_REGNUM + 31
-	  && TYPE_LENGTH (type) == 4);
+	  && type->length () == 4);
 }
 
 static int
-alpha_register_to_value (struct frame_info *frame, int regnum,
+alpha_register_to_value (const frame_info_ptr &frame, int regnum,
 			 struct type *valtype, gdb_byte *out,
 			int *optimizedp, int *unavailablep)
 {
@@ -246,8 +241,8 @@ alpha_register_to_value (struct frame_info *frame, int regnum,
   struct value *value = get_frame_register_value (frame, regnum);
 
   gdb_assert (value != NULL);
-  *optimizedp = value_optimized_out (value);
-  *unavailablep = !value_entirely_available (value);
+  *optimizedp = value->optimized_out ();
+  *unavailablep = !value->entirely_available ();
 
   if (*optimizedp || *unavailablep)
     {
@@ -257,25 +252,26 @@ alpha_register_to_value (struct frame_info *frame, int regnum,
 
   /* Convert to VALTYPE.  */
 
-  gdb_assert (TYPE_LENGTH (valtype) == 4);
-  alpha_sts (gdbarch, out, value_contents_all (value));
+  gdb_assert (valtype->length () == 4);
+  alpha_sts (gdbarch, out, value->contents_all ().data ());
 
   release_value (value);
   return 1;
 }
 
 static void
-alpha_value_to_register (struct frame_info *frame, int regnum,
+alpha_value_to_register (const frame_info_ptr &frame, int regnum,
 			 struct type *valtype, const gdb_byte *in)
 {
-  gdb_byte out[ALPHA_REGISTER_SIZE];
+  int reg_size = register_size (get_frame_arch (frame), regnum);
+  gdb_assert (valtype->length () == 4);
+  gdb_assert (reg_size <= ALPHA_REGISTER_SIZE);
 
-  gdb_assert (TYPE_LENGTH (valtype) == 4);
-  gdb_assert (register_size (get_frame_arch (frame), regnum)
-	      <= ALPHA_REGISTER_SIZE);
+  gdb_byte out[ALPHA_REGISTER_SIZE];
   alpha_lds (get_frame_arch (frame), out, in);
 
-  put_frame_register (frame, regnum, out);
+  auto out_view = gdb::make_array_view (out, reg_size);
+  put_frame_register (get_next_frame_sentinel_okay (frame), regnum, out_view);
 }
 
 
@@ -324,24 +320,24 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (i = 0, m_arg = alpha_args; i < nargs; i++, m_arg++)
     {
       struct value *arg = args[i];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
 
       /* Cast argument to long if necessary as the compiler does it too.  */
-      switch (TYPE_CODE (arg_type))
+      switch (arg_type->code ())
 	{
 	case TYPE_CODE_INT:
 	case TYPE_CODE_BOOL:
 	case TYPE_CODE_CHAR:
 	case TYPE_CODE_RANGE:
 	case TYPE_CODE_ENUM:
-	  if (TYPE_LENGTH (arg_type) == 4)
+	  if (arg_type->length () == 4)
 	    {
 	      /* 32-bit values must be sign-extended to 64 bits
 		 even if the base data type is unsigned.  */
 	      arg_type = builtin_type (gdbarch)->builtin_int32;
 	      arg = value_cast (arg_type, arg);
 	    }
-	  if (TYPE_LENGTH (arg_type) < ALPHA_REGISTER_SIZE)
+	  if (arg_type->length () < ALPHA_REGISTER_SIZE)
 	    {
 	      arg_type = builtin_type (gdbarch)->builtin_int64;
 	      arg = value_cast (arg_type, arg);
@@ -352,20 +348,20 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	  /* "float" arguments loaded in registers must be passed in
 	     register format, aka "double".  */
 	  if (accumulate_size < sizeof (arg_reg_buffer)
-	      && TYPE_LENGTH (arg_type) == 4)
+	      && arg_type->length () == 4)
 	    {
 	      arg_type = builtin_type (gdbarch)->builtin_double;
 	      arg = value_cast (arg_type, arg);
 	    }
 	  /* Tru64 5.1 has a 128-bit long double, and passes this by
 	     invisible reference.  No one else uses this data type.  */
-	  else if (TYPE_LENGTH (arg_type) == 16)
+	  else if (arg_type->length () == 16)
 	    {
 	      /* Allocate aligned storage.  */
 	      sp = (sp & -16) - 16;
 
 	      /* Write the real data into the stack.  */
-	      write_memory (sp, value_contents (arg), 16);
+	      write_memory (sp, arg->contents ().data (), 16);
 
 	      /* Construct the indirection.  */
 	      arg_type = lookup_pointer_type (arg_type);
@@ -380,13 +376,13 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
 	  /* Tru64 5.1 has a 128-bit long double, and passes this by
 	     invisible reference.  */
-	  if (TYPE_LENGTH (arg_type) == 32)
+	  if (arg_type->length () == 32)
 	    {
 	      /* Allocate aligned storage.  */
 	      sp = (sp & -16) - 16;
 
 	      /* Write the real data into the stack.  */
-	      write_memory (sp, value_contents (arg), 32);
+	      write_memory (sp, arg->contents ().data (), 32);
 
 	      /* Construct the indirection.  */
 	      arg_type = lookup_pointer_type (arg_type);
@@ -397,10 +393,10 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	default:
 	  break;
 	}
-      m_arg->len = TYPE_LENGTH (arg_type);
+      m_arg->len = arg_type->length ();
       m_arg->offset = accumulate_size;
       accumulate_size = (accumulate_size + m_arg->len + 7) & ~7;
-      m_arg->contents = value_contents (arg);
+      m_arg->contents = arg->contents ().data ();
     }
 
   /* Determine required argument register loads, loading an argument register
@@ -478,10 +474,10 @@ alpha_extract_return_value (struct type *valtype, struct regcache *regcache,
   gdb_byte raw_buffer[ALPHA_REGISTER_SIZE];
   ULONGEST l;
 
-  switch (TYPE_CODE (valtype))
+  switch (valtype->code ())
     {
     case TYPE_CODE_FLT:
-      switch (TYPE_LENGTH (valtype))
+      switch (valtype->length ())
 	{
 	case 4:
 	  regcache->cooked_read (ALPHA_FP0_REGNUM, raw_buffer);
@@ -498,13 +494,12 @@ alpha_extract_return_value (struct type *valtype, struct regcache *regcache,
 	  break;
 
 	default:
-	  internal_error (__FILE__, __LINE__,
-			  _("unknown floating point width"));
+	  internal_error (_("unknown floating point width"));
 	}
       break;
 
     case TYPE_CODE_COMPLEX:
-      switch (TYPE_LENGTH (valtype))
+      switch (valtype->length ())
 	{
 	case 8:
 	  /* ??? This isn't correct wrt the ABI, but it's what GCC does.  */
@@ -522,15 +517,14 @@ alpha_extract_return_value (struct type *valtype, struct regcache *regcache,
 	  break;
 
 	default:
-	  internal_error (__FILE__, __LINE__,
-			  _("unknown floating point width"));
+	  internal_error (_("unknown floating point width"));
 	}
       break;
 
     default:
       /* Assume everything else degenerates to an integer.  */
       regcache_cooked_read_unsigned (regcache, ALPHA_V0_REGNUM, &l);
-      store_unsigned_integer (valbuf, TYPE_LENGTH (valtype), byte_order, l);
+      store_unsigned_integer (valbuf, valtype->length (), byte_order, l);
       break;
     }
 }
@@ -546,10 +540,10 @@ alpha_store_return_value (struct type *valtype, struct regcache *regcache,
   gdb_byte raw_buffer[ALPHA_REGISTER_SIZE];
   ULONGEST l;
 
-  switch (TYPE_CODE (valtype))
+  switch (valtype->code ())
     {
     case TYPE_CODE_FLT:
-      switch (TYPE_LENGTH (valtype))
+      switch (valtype->length ())
 	{
 	case 4:
 	  alpha_lds (gdbarch, raw_buffer, valbuf);
@@ -567,13 +561,12 @@ alpha_store_return_value (struct type *valtype, struct regcache *regcache,
 	  error (_("Cannot set a 128-bit long double return value."));
 
 	default:
-	  internal_error (__FILE__, __LINE__,
-			  _("unknown floating point width"));
+	  internal_error (_("unknown floating point width"));
 	}
       break;
 
     case TYPE_CODE_COMPLEX:
-      switch (TYPE_LENGTH (valtype))
+      switch (valtype->length ())
 	{
 	case 8:
 	  /* ??? This isn't correct wrt the ABI, but it's what GCC does.  */
@@ -592,8 +585,7 @@ alpha_store_return_value (struct type *valtype, struct regcache *regcache,
 	  error (_("Cannot set a 128-bit long double return value."));
 
 	default:
-	  internal_error (__FILE__, __LINE__,
-			  _("unknown floating point width"));
+	  internal_error (_("unknown floating point width"));
 	}
       break;
 
@@ -601,7 +593,7 @@ alpha_store_return_value (struct type *valtype, struct regcache *regcache,
       /* Assume everything else degenerates to an integer.  */
       /* 32-bit values must be sign-extended to 64 bits
 	 even if the base data type is unsigned.  */
-      if (TYPE_LENGTH (valtype) == 4)
+      if (valtype->length () == 4)
 	valtype = builtin_type (gdbarch)->builtin_int32;
       l = unpack_long (valtype, valbuf);
       regcache_cooked_write_unsigned (regcache, ALPHA_V0_REGNUM, l);
@@ -614,18 +606,19 @@ alpha_return_value (struct gdbarch *gdbarch, struct value *function,
 		    struct type *type, struct regcache *regcache,
 		    gdb_byte *readbuf, const gdb_byte *writebuf)
 {
-  enum type_code code = TYPE_CODE (type);
+  enum type_code code = type->code ();
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
 
   if ((code == TYPE_CODE_STRUCT
        || code == TYPE_CODE_UNION
        || code == TYPE_CODE_ARRAY)
-      && gdbarch_tdep (gdbarch)->return_in_memory (type))
+      && tdep->return_in_memory (type))
     {
       if (readbuf)
 	{
 	  ULONGEST addr;
 	  regcache_raw_read_unsigned (regcache, ALPHA_V0_REGNUM, &addr);
-	  read_memory (addr, readbuf, TYPE_LENGTH (type));
+	  read_memory (addr, readbuf, type->length ());
 	}
 
       return RETURN_VALUE_ABI_RETURNS_ADDRESS;
@@ -847,10 +840,10 @@ alpha_deal_with_atomic_sequence (struct gdbarch *gdbarch, CORE_ADDR pc)
    into the "pc".  This routine returns true on success.  */
 
 static int
-alpha_get_longjmp_target (struct frame_info *frame, CORE_ADDR *pc)
+alpha_get_longjmp_target (const frame_info_ptr &frame, CORE_ADDR *pc)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   CORE_ADDR jb_addr;
   gdb_byte raw_buffer[ALPHA_REGISTER_SIZE];
@@ -878,11 +871,10 @@ struct alpha_sigtramp_unwind_cache
 };
 
 static struct alpha_sigtramp_unwind_cache *
-alpha_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
+alpha_sigtramp_frame_unwind_cache (const frame_info_ptr &this_frame,
 				   void **this_prologue_cache)
 {
   struct alpha_sigtramp_unwind_cache *info;
-  struct gdbarch_tdep *tdep;
 
   if (*this_prologue_cache)
     return (struct alpha_sigtramp_unwind_cache *) *this_prologue_cache;
@@ -890,7 +882,8 @@ alpha_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
   info = FRAME_OBSTACK_ZALLOC (struct alpha_sigtramp_unwind_cache);
   *this_prologue_cache = info;
 
-  tdep = gdbarch_tdep (get_frame_arch (this_frame));
+  gdbarch *arch = get_frame_arch (this_frame);
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (arch);
   info->sigcontext_addr = tdep->sigcontext_addr (this_frame);
 
   return info;
@@ -903,7 +896,7 @@ static CORE_ADDR
 alpha_sigtramp_register_address (struct gdbarch *gdbarch,
 				 CORE_ADDR sigcontext_addr, int regnum)
 { 
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
 
   if (regnum >= 0 && regnum < 32)
     return sigcontext_addr + tdep->sc_regs_offset + regnum * 8;
@@ -919,12 +912,12 @@ alpha_sigtramp_register_address (struct gdbarch *gdbarch,
    frame.  This will be used to create a new GDB frame struct.  */
 
 static void
-alpha_sigtramp_frame_this_id (struct frame_info *this_frame,
+alpha_sigtramp_frame_this_id (const frame_info_ptr &this_frame,
 			      void **this_prologue_cache,
 			      struct frame_id *this_id)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
   struct alpha_sigtramp_unwind_cache *info
     = alpha_sigtramp_frame_unwind_cache (this_frame, this_prologue_cache);
   CORE_ADDR stack_addr, code_addr;
@@ -961,7 +954,7 @@ alpha_sigtramp_frame_this_id (struct frame_info *this_frame,
 /* Retrieve the value of REGNUM in FRAME.  Don't give up!  */
 
 static struct value *
-alpha_sigtramp_frame_prev_register (struct frame_info *this_frame,
+alpha_sigtramp_frame_prev_register (const frame_info_ptr &this_frame,
 				    void **this_prologue_cache, int regnum)
 {
   struct alpha_sigtramp_unwind_cache *info
@@ -974,7 +967,7 @@ alpha_sigtramp_frame_prev_register (struct frame_info *this_frame,
       addr = alpha_sigtramp_register_address (get_frame_arch (this_frame),
 					      info->sigcontext_addr, regnum);
       if (addr != 0)
-        return frame_unwind_got_memory (this_frame, regnum, addr);
+	return frame_unwind_got_memory (this_frame, regnum, addr);
     }
 
   /* This extra register may actually be in the sigcontext, but our
@@ -986,33 +979,37 @@ alpha_sigtramp_frame_prev_register (struct frame_info *this_frame,
 
 static int
 alpha_sigtramp_frame_sniffer (const struct frame_unwind *self,
-                              struct frame_info *this_frame,
-                              void **this_prologue_cache)
+			      const frame_info_ptr &this_frame,
+			      void **this_prologue_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   CORE_ADDR pc = get_frame_pc (this_frame);
   const char *name;
 
   /* NOTE: cagney/2004-04-30: Do not copy/clone this code.  Instead
-     look at tramp-frame.h and other simplier per-architecture
+     look at tramp-frame.h and other simpler per-architecture
      sigtramp unwinders.  */
 
   /* We shouldn't even bother to try if the OSABI didn't register a
-     sigcontext_addr handler or pc_in_sigtramp hander.  */
-  if (gdbarch_tdep (gdbarch)->sigcontext_addr == NULL)
+     sigcontext_addr handler or pc_in_sigtramp handler.  */
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
+  if (tdep->sigcontext_addr == NULL)
     return 0;
-  if (gdbarch_tdep (gdbarch)->pc_in_sigtramp == NULL)
+
+  if (tdep->pc_in_sigtramp == NULL)
     return 0;
 
   /* Otherwise we should be in a signal frame.  */
   find_pc_partial_function (pc, &name, NULL, NULL);
-  if (gdbarch_tdep (gdbarch)->pc_in_sigtramp (gdbarch, pc, name))
+  if (tdep->pc_in_sigtramp (gdbarch, pc, name))
     return 1;
 
   return 0;
 }
 
-static const struct frame_unwind alpha_sigtramp_frame_unwind = {
+static const struct frame_unwind alpha_sigtramp_frame_unwind =
+{
+  "alpha sigtramp",
   SIGTRAMP_FRAME,
   default_frame_unwind_stop_reason,
   alpha_sigtramp_frame_this_id,
@@ -1036,7 +1033,7 @@ static int heuristic_fence_post = 0;
 static CORE_ADDR
 alpha_heuristic_proc_start (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
   CORE_ADDR last_non_nop = pc;
   CORE_ADDR fence = pc - heuristic_fence_post;
   CORE_ADDR orig_pc = pc;
@@ -1097,7 +1094,7 @@ enclosing function for address %s"), paddress (gdbarch, orig_pc));
 
       if (!blurb_printed)
 	{
-	  printf_filtered (_("\
+	  gdb_printf (_("\
 This warning occurs if you are debugging a function without any symbols\n\
 (for example, in a stripped executable).  In that case, you may wish to\n\
 increase the size of the search with the `set heuristic-fence-post' command.\n\
@@ -1118,7 +1115,7 @@ struct alpha_heuristic_unwind_cache
 { 
   CORE_ADDR vfp;
   CORE_ADDR start_pc;
-  struct trad_frame_saved_reg *saved_regs;
+  trad_frame_saved_reg *saved_regs;
   int return_reg;
 };
 
@@ -1137,16 +1134,16 @@ alpha_heuristic_analyze_probing_loop (struct gdbarch *gdbarch, CORE_ADDR *pc,
 
   /* The following pattern is recognized as a probing loop:
 
-        lda     REG_INDEX,NB_OF_ITERATIONS
-        lda     REG_PROBE,<immediate>(sp)
+	lda     REG_INDEX,NB_OF_ITERATIONS
+	lda     REG_PROBE,<immediate>(sp)
 
      LOOP_START:
-        stq     zero,<immediate>(REG_PROBE)
-        subq    REG_INDEX,0x1,REG_INDEX
-        lda     REG_PROBE,<immediate>(REG_PROBE)
-        bne     REG_INDEX, LOOP_START
+	stq     zero,<immediate>(REG_PROBE)
+	subq    REG_INDEX,0x1,REG_INDEX
+	lda     REG_PROBE,<immediate>(REG_PROBE)
+	bne     REG_INDEX, LOOP_START
  
-        lda     sp,<immediate>(REG_PROBE)
+	lda     sp,<immediate>(REG_PROBE)
 
      If anything different is found, the function returns without
      changing PC and FRAME_SIZE.  Otherwise, PC will point immediately
@@ -1224,7 +1221,7 @@ alpha_heuristic_analyze_probing_loop (struct gdbarch *gdbarch, CORE_ADDR *pc,
 }
 
 static struct alpha_heuristic_unwind_cache *
-alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
+alpha_heuristic_frame_unwind_cache (const frame_info_ptr &this_frame,
 				    void **this_prologue_cache,
 				    CORE_ADDR start_pc)
 {
@@ -1282,15 +1279,15 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
 	    {
 	      reg = (word & 0x03e00000) >> 21;
 
-              /* Ignore this instruction if we have already encountered
-                 an instruction saving the same register earlier in the
-                 function code.  The current instruction does not tell
-                 us where the original value upon function entry is saved.
-                 All it says is that the function we are scanning reused
-                 that register for some computation of its own, and is now
-                 saving its result.  */
-              if (trad_frame_addr_p(info->saved_regs, reg))
-                continue;
+	      /* Ignore this instruction if we have already encountered
+		 an instruction saving the same register earlier in the
+		 function code.  The current instruction does not tell
+		 us where the original value upon function entry is saved.
+		 All it says is that the function we are scanning reused
+		 that register for some computation of its own, and is now
+		 saving its result.  */
+	      if (info->saved_regs[reg].is_addr ())
+		continue;
 
 	      if (reg == 31)
 		continue;
@@ -1305,7 +1302,7 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
 		 pointer or not.  */
 	      /* Hack: temporarily add one, so that the offset is non-zero
 		 and we can tell which registers have save offsets below.  */
-	      info->saved_regs[reg].addr = (word & 0xffff) + 1;
+	      info->saved_regs[reg].set_addr ((word & 0xffff) + 1);
 
 	      /* Starting with OSF/1-3.2C, the system libraries are shipped
 		 without local symbols, but they still contain procedure
@@ -1385,13 +1382,14 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
   /* Convert offsets to absolute addresses.  See above about adding
      one to the offsets to make all detected offsets non-zero.  */
   for (reg = 0; reg < ALPHA_NUM_REGS; ++reg)
-    if (trad_frame_addr_p(info->saved_regs, reg))
-      info->saved_regs[reg].addr += val - 1;
+    if (info->saved_regs[reg].is_addr ())
+      info->saved_regs[reg].set_addr (info->saved_regs[reg].addr ()
+				      + val - 1);
 
   /* The stack pointer of the previous frame is computed by popping
      the current stack frame.  */
-  if (!trad_frame_addr_p (info->saved_regs, ALPHA_SP_REGNUM))
-   trad_frame_set_value (info->saved_regs, ALPHA_SP_REGNUM, info->vfp);
+  if (!info->saved_regs[ALPHA_SP_REGNUM].is_addr ())
+   info->saved_regs[ALPHA_SP_REGNUM].set_value (info->vfp);
 
   return info;
 }
@@ -1400,7 +1398,7 @@ alpha_heuristic_frame_unwind_cache (struct frame_info *this_frame,
    frame.  This will be used to create a new GDB frame struct.  */
 
 static void
-alpha_heuristic_frame_this_id (struct frame_info *this_frame,
+alpha_heuristic_frame_this_id (const frame_info_ptr &this_frame,
 			       void **this_prologue_cache,
 			       struct frame_id *this_id)
 {
@@ -1413,7 +1411,7 @@ alpha_heuristic_frame_this_id (struct frame_info *this_frame,
 /* Retrieve the value of REGNUM in FRAME.  Don't give up!  */
 
 static struct value *
-alpha_heuristic_frame_prev_register (struct frame_info *this_frame,
+alpha_heuristic_frame_prev_register (const frame_info_ptr &this_frame,
 				     void **this_prologue_cache, int regnum)
 {
   struct alpha_heuristic_unwind_cache *info
@@ -1428,7 +1426,9 @@ alpha_heuristic_frame_prev_register (struct frame_info *this_frame,
   return trad_frame_get_prev_register (this_frame, info->saved_regs, regnum);
 }
 
-static const struct frame_unwind alpha_heuristic_frame_unwind = {
+static const struct frame_unwind alpha_heuristic_frame_unwind =
+{
+  "alpha prologue",
   NORMAL_FRAME,
   default_frame_unwind_stop_reason,
   alpha_heuristic_frame_this_id,
@@ -1438,7 +1438,7 @@ static const struct frame_unwind alpha_heuristic_frame_unwind = {
 };
 
 static CORE_ADDR
-alpha_heuristic_frame_base_address (struct frame_info *this_frame,
+alpha_heuristic_frame_base_address (const frame_info_ptr &this_frame,
 				    void **this_prologue_cache)
 {
   struct alpha_heuristic_unwind_cache *info
@@ -1463,29 +1463,6 @@ reinit_frame_cache_sfunc (const char *args,
 {
   reinit_frame_cache ();
 }
-
-
-/* Assuming NEXT_FRAME->prev is a dummy, return the frame ID of that
-   dummy frame.  The frame ID's base needs to match the TOS value
-   saved by save_dummy_frame_tos(), and the PC match the dummy frame's
-   breakpoint.  */
-
-static struct frame_id
-alpha_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  ULONGEST base;
-  base = get_frame_register_unsigned (this_frame, ALPHA_SP_REGNUM);
-  return frame_id_build (base, get_frame_pc (this_frame));
-}
-
-static CORE_ADDR
-alpha_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  ULONGEST pc;
-  pc = frame_unwind_register_unsigned (next_frame, ALPHA_PC_REGNUM);
-  return pc;
-}
-
 
 /* Helper routines for alpha*-nat.c files to move register sets to and
    from core files.  The UNIQUE pointer is allowed to be NULL, as most
@@ -1503,11 +1480,7 @@ alpha_supply_int_regs (struct regcache *regcache, int regno,
       regcache->raw_supply (i, regs + i * 8);
 
   if (regno == ALPHA_ZERO_REGNUM || regno == -1)
-    {
-      const gdb_byte zero[8] = { 0 };
-
-      regcache->raw_supply (ALPHA_ZERO_REGNUM, zero);
-    }
+    regcache->raw_supply_zeroed (ALPHA_ZERO_REGNUM);
 
   if (regno == ALPHA_PC_REGNUM || regno == -1)
     regcache->raw_supply (ALPHA_PC_REGNUM, pc);
@@ -1624,7 +1597,7 @@ alpha_next_pc (struct regcache *regcache, CORE_ADDR pc)
 	  || op == 0x34)	/* BSR */
 	{
  branch_taken:
-          offset = (insn & 0x001fffff);
+	  offset = (insn & 0x001fffff);
 	  if (offset & 0x00100000)
 	    offset  |= 0xffe00000;
 	  offset *= ALPHA_INSN_SIZE;
@@ -1634,14 +1607,14 @@ alpha_next_pc (struct regcache *regcache, CORE_ADDR pc)
       /* Need to determine if branch is taken; read RA.  */
       regno = (insn >> 21) & 0x1f;
       switch (op)
-        {
-          case 0x31:              /* FBEQ */
-          case 0x36:              /* FBGE */
-          case 0x37:              /* FBGT */
-          case 0x33:              /* FBLE */
-          case 0x32:              /* FBLT */
-          case 0x35:              /* FBNE */
-            regno += gdbarch_fp0_regnum (gdbarch);
+	{
+	  case 0x31:              /* FBEQ */
+	  case 0x36:              /* FBGE */
+	  case 0x37:              /* FBGT */
+	  case 0x33:              /* FBLE */
+	  case 0x32:              /* FBLT */
+	  case 0x35:              /* FBNE */
+	    regno += gdbarch_fp0_regnum (gdbarch);
 	}
       
       rav = regcache_raw_get_signed (regcache, regno);
@@ -1681,32 +1654,32 @@ alpha_next_pc (struct regcache *regcache, CORE_ADDR pc)
 	    goto branch_taken;
 	  break;
 
-        /* Floating point branches.  */
-        
-        case 0x31:              /* FBEQ */
-          if (fp_register_zero_p (rav))
-            goto branch_taken;
-          break;
-        case 0x36:              /* FBGE */
-          if (fp_register_sign_bit (rav) == 0 || fp_register_zero_p (rav))
-            goto branch_taken;
-          break;
-        case 0x37:              /* FBGT */
-          if (fp_register_sign_bit (rav) == 0 && ! fp_register_zero_p (rav))
-            goto branch_taken;
-          break;
-        case 0x33:              /* FBLE */
-          if (fp_register_sign_bit (rav) == 1 || fp_register_zero_p (rav))
-            goto branch_taken;
-          break;
-        case 0x32:              /* FBLT */
-          if (fp_register_sign_bit (rav) == 1 && ! fp_register_zero_p (rav))
-            goto branch_taken;
-          break;
-        case 0x35:              /* FBNE */
-          if (! fp_register_zero_p (rav))
-            goto branch_taken;
-          break;
+	/* Floating point branches.  */
+	
+	case 0x31:              /* FBEQ */
+	  if (fp_register_zero_p (rav))
+	    goto branch_taken;
+	  break;
+	case 0x36:              /* FBGE */
+	  if (fp_register_sign_bit (rav) == 0 || fp_register_zero_p (rav))
+	    goto branch_taken;
+	  break;
+	case 0x37:              /* FBGT */
+	  if (fp_register_sign_bit (rav) == 0 && ! fp_register_zero_p (rav))
+	    goto branch_taken;
+	  break;
+	case 0x33:              /* FBLE */
+	  if (fp_register_sign_bit (rav) == 1 || fp_register_zero_p (rav))
+	    goto branch_taken;
+	  break;
+	case 0x32:              /* FBLT */
+	  if (fp_register_sign_bit (rav) == 1 && ! fp_register_zero_p (rav))
+	    goto branch_taken;
+	  break;
+	case 0x35:              /* FBNE */
+	  if (! fp_register_zero_p (rav))
+	    goto branch_taken;
+	  break;
 	}
     }
 
@@ -1742,16 +1715,14 @@ alpha_software_single_step (struct regcache *regcache)
 static struct gdbarch *
 alpha_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch_tdep *tdep;
-  struct gdbarch *gdbarch;
-
   /* Find a candidate among extant architectures.  */
   arches = gdbarch_list_lookup_by_info (arches, &info);
   if (arches != NULL)
     return arches->gdbarch;
 
-  tdep = XCNEW (struct gdbarch_tdep);
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new alpha_gdbarch_tdep));
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
 
   /* Lowest text address.  This is used by heuristic_proc_start()
      to decide when to stop looking.  */
@@ -1807,12 +1778,6 @@ alpha_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   /* Settings for calling functions in the inferior.  */
   set_gdbarch_push_dummy_call (gdbarch, alpha_push_dummy_call);
 
-  /* Methods for saving / extracting a dummy frame's ID.  */
-  set_gdbarch_dummy_id (gdbarch, alpha_dummy_id);
-
-  /* Return the unwound PC value.  */
-  set_gdbarch_unwind_pc (gdbarch, alpha_unwind_pc);
-
   set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
 
@@ -1850,8 +1815,9 @@ alpha_dwarf2_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   frame_base_append_sniffer (gdbarch, dwarf2_frame_base_sniffer);
 }
 
+void _initialize_alpha_tdep ();
 void
-_initialize_alpha_tdep (void)
+_initialize_alpha_tdep ()
 {
 
   gdbarch_register (bfd_arch_alpha, alpha_gdbarch_init, NULL);

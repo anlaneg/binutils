@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2024 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
 
@@ -18,10 +18,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "cp-support.h"
+#include "language.h"
 #include "demangle.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "dictionary.h"
 #include "objfiles.h"
 #include "frame.h"
@@ -34,9 +34,15 @@
 #include "cp-abi.h"
 #include "namespace.h"
 #include <signal.h>
-#include "common/gdb_setjmp.h"
-#include "safe-ctype.h"
-#include "common/selftest.h"
+#include "gdbsupport/gdb_setjmp.h"
+#include "gdbsupport/gdb-safe-ctype.h"
+#include "gdbsupport/selftest.h"
+#include "gdbsupport/gdb-sigmask.h"
+#include <atomic>
+#include "event-top.h"
+#include "run-on-main-thread.h"
+#include "typeprint.h"
+#include "inferior.h"
 
 #define d_left(dc) (dc)->u.s_binary.left
 #define d_right(dc) (dc)->u.s_binary.right
@@ -66,17 +72,15 @@ static void add_symbol_overload_list_qualified
 
 struct cmd_list_element *maint_cplus_cmd_list = NULL;
 
-/* A list of typedefs which should not be substituted by replace_typedefs.  */
-static const char * const ignore_typedefs[] =
-  {
-    "std::istream", "std::iostream", "std::ostream", "std::string"
-  };
-
 static void
   replace_typedefs (struct demangle_parse_info *info,
 		    struct demangle_component *ret_comp,
 		    canonicalization_ftype *finder,
 		    void *data);
+
+static struct demangle_component *
+  gdb_cplus_demangle_v3_components (const char *mangled,
+				    int options, void **mem);
 
 /* A convenience function to copy STRING into OBSTACK, returning a pointer
    to the newly allocated string and saving the number of bytes saved in LEN.
@@ -142,28 +146,20 @@ inspect_type (struct demangle_parse_info *info,
   memcpy (name, ret_comp->u.s_name.s, ret_comp->u.s_name.len);
   name[ret_comp->u.s_name.len] = '\0';
 
-  /* Ignore any typedefs that should not be substituted.  */
-  for (int i = 0; i < ARRAY_SIZE (ignore_typedefs); ++i)
-    {
-      if (strcmp (name, ignore_typedefs[i]) == 0)
-	return 0;
-    }
-
   sym = NULL;
 
-  TRY
+  try
     {
-      sym = lookup_symbol (name, 0, VAR_DOMAIN, 0).symbol;
+      sym = lookup_symbol (name, 0, SEARCH_VFT, 0).symbol;
     }
-  CATCH (except, RETURN_MASK_ALL)
+  catch (const gdb_exception &except)
     {
       return 0;
     }
-  END_CATCH
 
   if (sym != NULL)
     {
-      struct type *otype = SYMBOL_TYPE (sym);
+      struct type *otype = sym->type ();
 
       if (finder != NULL)
 	{
@@ -180,8 +176,8 @@ inspect_type (struct demangle_parse_info *info,
 	}
 
       /* If the type is a typedef or namespace alias, replace it.  */
-      if (TYPE_CODE (otype) == TYPE_CODE_TYPEDEF
-	  || TYPE_CODE (otype) == TYPE_CODE_NAMESPACE)
+      if (otype->code () == TYPE_CODE_TYPEDEF
+	  || otype->code () == TYPE_CODE_NAMESPACE)
 	{
 	  long len;
 	  int is_anon;
@@ -191,26 +187,36 @@ inspect_type (struct demangle_parse_info *info,
 	  /* Get the real type of the typedef.  */
 	  type = check_typedef (otype);
 
-	  /* If the symbol is a namespace and its type name is no different
+	  /* If the symbol name is the same as the original type name,
+	     don't substitute.  That would cause infinite recursion in
+	     symbol lookups, as the typedef symbol is often the first
+	     found symbol in the symbol table.
+
+	     However, this can happen in a number of situations, such as:
+
+	     If the symbol is a namespace and its type name is no different
 	     than the name we looked up, this symbol is not a namespace
-	     alias and does not need to be substituted.  */
-	  if (TYPE_CODE (otype) == TYPE_CODE_NAMESPACE
-	      && strcmp (TYPE_NAME (type), name) == 0)
+	     alias and does not need to be substituted.
+
+	     If the symbol is typedef and its type name is the same
+	     as the symbol's name, e.g., "typedef struct foo foo;".  */
+	  if (type->name () != nullptr
+	      && strcmp (type->name (), name) == 0)
 	    return 0;
 
-	  is_anon = (TYPE_NAME (type) == NULL
-		     && (TYPE_CODE (type) == TYPE_CODE_ENUM
-			 || TYPE_CODE (type) == TYPE_CODE_STRUCT
-			 || TYPE_CODE (type) == TYPE_CODE_UNION));
+	  is_anon = (type->name () == NULL
+		     && (type->code () == TYPE_CODE_ENUM
+			 || type->code () == TYPE_CODE_STRUCT
+			 || type->code () == TYPE_CODE_UNION));
 	  if (is_anon)
 	    {
 	      struct type *last = otype;
 
 	      /* Find the last typedef for the type.  */
-	      while (TYPE_TARGET_TYPE (last) != NULL
-		     && (TYPE_CODE (TYPE_TARGET_TYPE (last))
+	      while (last->target_type () != NULL
+		     && (last->target_type ()->code ()
 			 == TYPE_CODE_TYPEDEF))
-		last = TYPE_TARGET_TYPE (last);
+		last = last->target_type ();
 
 	      /* If there is only one typedef for this anonymous type,
 		 do not substitute it.  */
@@ -223,20 +229,26 @@ inspect_type (struct demangle_parse_info *info,
 	    }
 
 	  string_file buf;
-	  TRY
+	  try
 	    {
-	      type_print (type, "", &buf, -1);
+	      /* Avoid using the current language.  If the language is
+		 C, and TYPE is a struct/class, the printed type is
+		 prefixed with "struct " or "class ", which we don't
+		 want when we're expanding a C++ typedef.  Print using
+		 the type symbol's language to expand a C++ typedef
+		 the C++ way even if the current language is C.  */
+	      const language_defn *lang = language_def (sym->language ());
+	      lang->print_type (type, "", &buf, -1, 0, &type_print_raw_options);
 	    }
 	  /* If type_print threw an exception, there is little point
 	     in continuing, so just bow out gracefully.  */
-	  CATCH (except, RETURN_MASK_ERROR)
+	  catch (const gdb_exception_error &except)
 	    {
 	      return 0;
 	    }
-	  END_CATCH
 
 	  len = buf.size ();
-	  name = (char *) obstack_copy0 (&info->obstack, buf.c_str (), len);
+	  name = obstack_strdup (&info->obstack, buf.string ());
 
 	  /* Turn the result into a new tree.  Note that this
 	     tree will contain pointers into NAME, so NAME cannot
@@ -246,7 +258,7 @@ inspect_type (struct demangle_parse_info *info,
 	  if (i != NULL)
 	    {
 	      /* Merge the two trees.  */
-	      cp_merge_demangle_parse_infos (info, ret_comp, i.get ());
+	      cp_merge_demangle_parse_infos (info, ret_comp, std::move (i));
 
 	      /* Replace any newly introduced typedefs -- but not
 		 if the type is anonymous (that would lead to infinite
@@ -262,12 +274,13 @@ inspect_type (struct demangle_parse_info *info,
 
 		 Canonicalize the name again, and store it in the
 		 current node (RET_COMP).  */
-	      std::string canon = cp_canonicalize_string_no_typedefs (name);
+	      gdb::unique_xmalloc_ptr<char> canon
+		= cp_canonicalize_string_no_typedefs (name);
 
-	      if (!canon.empty ())
+	      if (canon != nullptr)
 		{
 		  /* Copy the canonicalization into the obstack.  */
-		  name = copy_string_to_obstack (&info->obstack, canon.c_str (), &len);
+		  name = copy_string_to_obstack (&info->obstack, canon.get (), &len);
 		}
 
 	      ret_comp->u.s_name.s = name;
@@ -279,6 +292,42 @@ inspect_type (struct demangle_parse_info *info,
     }
 
   return 0;
+}
+
+/* Helper for replace_typedefs_qualified_name to handle
+   DEMANGLE_COMPONENT_TEMPLATE.  TMPL is the template node.  BUF is
+   the buffer that holds the qualified name being built by
+   replace_typedefs_qualified_name.  REPL is the node that will be
+   rewritten as a DEMANGLE_COMPONENT_NAME node holding the 'template
+   plus template arguments' name with typedefs replaced.  */
+
+static bool
+replace_typedefs_template (struct demangle_parse_info *info,
+			   string_file &buf,
+			   struct demangle_component *tmpl,
+			   struct demangle_component *repl,
+			   canonicalization_ftype *finder,
+			   void *data)
+{
+  demangle_component *tmpl_arglist = d_right (tmpl);
+
+  /* Replace typedefs in the template argument list.  */
+  replace_typedefs (info, tmpl_arglist, finder, data);
+
+  /* Convert 'template + replaced template argument list' to a string
+     and replace the REPL node.  */
+  gdb::unique_xmalloc_ptr<char> tmpl_str = cp_comp_to_string (tmpl, 100);
+  if (tmpl_str == nullptr)
+    {
+      /* If something went astray, abort typedef substitutions.  */
+      return false;
+    }
+  buf.puts (tmpl_str.get ());
+
+  repl->type = DEMANGLE_COMPONENT_NAME;
+  repl->u.s_name.s = obstack_strdup (&info->obstack, buf.string ());
+  repl->u.s_name.len = buf.size ();
+  return true;
 }
 
 /* Replace any typedefs appearing in the qualified name
@@ -301,15 +350,36 @@ replace_typedefs_qualified_name (struct demangle_parse_info *info,
      substituted name.  */
   while (comp->type == DEMANGLE_COMPONENT_QUAL_NAME)
     {
+      if (d_left (comp)->type == DEMANGLE_COMPONENT_TEMPLATE)
+	{
+	  /* Convert 'template + replaced template argument list' to a
+	     string and replace the top DEMANGLE_COMPONENT_QUAL_NAME
+	     node.  */
+	  if (!replace_typedefs_template (info, buf,
+					  d_left (comp), d_left (ret_comp),
+					  finder, data))
+	    return;
+
+	  buf.clear ();
+	  d_right (ret_comp) = d_right (comp);
+	  comp = ret_comp;
+
+	  /* Fallback to DEMANGLE_COMPONENT_NAME processing.  We want
+	     to call inspect_type for this template, in case we have a
+	     template alias, like:
+	       template<typename T> using alias = base<int, t>;
+	     in which case we want inspect_type to do a replacement like:
+	       alias<int> -> base<int, int>
+	  */
+	}
+
       if (d_left (comp)->type == DEMANGLE_COMPONENT_NAME)
 	{
 	  struct demangle_component newobj;
 
 	  buf.write (d_left (comp)->u.s_name.s, d_left (comp)->u.s_name.len);
 	  newobj.type = DEMANGLE_COMPONENT_NAME;
-	  newobj.u.s_name.s
-	    = (char *) obstack_copy0 (&info->obstack,
-				      buf.c_str (), buf.size ());
+	  newobj.u.s_name.s = obstack_strdup (&info->obstack, buf.string ());
 	  newobj.u.s_name.len = buf.size ();
 	  if (inspect_type (info, &newobj, finder, data))
 	    {
@@ -359,11 +429,20 @@ replace_typedefs_qualified_name (struct demangle_parse_info *info,
       comp = d_right (comp);
     }
 
-  /* If the next component is DEMANGLE_COMPONENT_NAME, save the qualified
-     name assembled above and append the name given by COMP.  Then use this
-     reassembled name to check for a typedef.  */
+  /* If the next component is DEMANGLE_COMPONENT_TEMPLATE or
+     DEMANGLE_COMPONENT_NAME, save the qualified name assembled above
+     and append the name given by COMP.  Then use this reassembled
+     name to check for a typedef.  */
 
-  if (comp->type == DEMANGLE_COMPONENT_NAME)
+  if (comp->type == DEMANGLE_COMPONENT_TEMPLATE)
+    {
+      /* Replace the top (DEMANGLE_COMPONENT_QUAL_NAME) node with a
+	 DEMANGLE_COMPONENT_NAME node containing the whole name.  */
+      if (!replace_typedefs_template (info, buf, comp, ret_comp, finder, data))
+	return;
+      inspect_type (info, ret_comp, finder, data);
+    }
+  else if (comp->type == DEMANGLE_COMPONENT_NAME)
     {
       buf.write (comp->u.s_name.s, comp->u.s_name.len);
 
@@ -371,9 +450,7 @@ replace_typedefs_qualified_name (struct demangle_parse_info *info,
 	 with a DEMANGLE_COMPONENT_NAME node containing the whole
 	 name.  */
       ret_comp->type = DEMANGLE_COMPONENT_NAME;
-      ret_comp->u.s_name.s
-	= (char *) obstack_copy0 (&info->obstack,
-				  buf.c_str (), buf.size ());
+      ret_comp->u.s_name.s = obstack_strdup (&info->obstack, buf.string ());
       ret_comp->u.s_name.len = buf.size ();
       inspect_type (info, ret_comp, finder, data);
     }
@@ -424,19 +501,18 @@ replace_typedefs (struct demangle_parse_info *info,
 	      struct symbol *sym = NULL;
 
 	      sym = NULL;
-	      TRY
+	      try
 		{
 		  sym = lookup_symbol (local_name.get (), 0,
-				       VAR_DOMAIN, 0).symbol;
+				       SEARCH_VFT, 0).symbol;
 		}
-	      CATCH (except, RETURN_MASK_ALL)
+	      catch (const gdb_exception &except)
 		{
 		}
-	      END_CATCH
 
 	      if (sym != NULL)
 		{
-		  struct type *otype = SYMBOL_TYPE (sym);
+		  struct type *otype = sym->type ();
 		  const char *new_name = (*finder) (otype, data);
 
 		  if (new_name != NULL)
@@ -454,7 +530,7 @@ replace_typedefs (struct demangle_parse_info *info,
 	{
 	case DEMANGLE_COMPONENT_ARGLIST:
 	  check_cv_qualifiers (ret_comp);
-	  /* Fall through */
+	  [[fallthrough]];
 
 	case DEMANGLE_COMPONENT_FUNCTION_TYPE:
 	case DEMANGLE_COMPONENT_TEMPLATE:
@@ -499,16 +575,15 @@ replace_typedefs (struct demangle_parse_info *info,
 
 /* Parse STRING and convert it to canonical form, resolving any
    typedefs.  If parsing fails, or if STRING is already canonical,
-   return the empty string.  Otherwise return the canonical form.  If
+   return nullptr.  Otherwise return the canonical form.  If
    FINDER is not NULL, then type components are passed to FINDER to be
    looked up.  DATA is passed verbatim to FINDER.  */
 
-std::string
+gdb::unique_xmalloc_ptr<char>
 cp_canonicalize_string_full (const char *string,
 			     canonicalization_ftype *finder,
 			     void *data)
 {
-  std::string ret;
   unsigned int estimated_len;
   std::unique_ptr<demangle_parse_info> info;
 
@@ -524,41 +599,42 @@ cp_canonicalize_string_full (const char *string,
 							    estimated_len);
       gdb_assert (us);
 
-      ret = us.get ();
       /* Finally, compare the original string with the computed
 	 name, returning NULL if they are the same.  */
-      if (ret == string)
-	return std::string ();
+      if (strcmp (us.get (), string) == 0)
+	return nullptr;
+
+      return us;
     }
 
-  return ret;
+  return nullptr;
 }
 
 /* Like cp_canonicalize_string_full, but always passes NULL for
    FINDER.  */
 
-std::string
+gdb::unique_xmalloc_ptr<char>
 cp_canonicalize_string_no_typedefs (const char *string)
 {
   return cp_canonicalize_string_full (string, NULL, NULL);
 }
 
 /* Parse STRING and convert it to canonical form.  If parsing fails,
-   or if STRING is already canonical, return the empty string.
+   or if STRING is already canonical, return nullptr.
    Otherwise return the canonical form.  */
 
-std::string
+gdb::unique_xmalloc_ptr<char>
 cp_canonicalize_string (const char *string)
 {
   std::unique_ptr<demangle_parse_info> info;
   unsigned int estimated_len;
 
   if (cp_already_canonical (string))
-    return std::string ();
+    return nullptr;
 
   info = cp_demangled_name_to_comp (string, NULL);
   if (info == NULL)
-    return std::string ();
+    return nullptr;
 
   estimated_len = strlen (string) * 2;
   gdb::unique_xmalloc_ptr<char> us (cp_comp_to_string (info->tree,
@@ -568,15 +644,13 @@ cp_canonicalize_string (const char *string)
     {
       warning (_("internal error: string \"%s\" failed to be canonicalized"),
 	       string);
-      return std::string ();
+      return nullptr;
     }
 
-  std::string ret (us.get ());
+  if (strcmp (us.get (), string) == 0)
+    return nullptr;
 
-  if (ret == string)
-    return std::string ();
-
-  return ret;
+  return us;
 }
 
 /* Convert a mangled name to a demangle_component tree.  *MEMORY is
@@ -587,21 +661,20 @@ cp_canonicalize_string (const char *string)
 
 static std::unique_ptr<demangle_parse_info>
 mangled_name_to_comp (const char *mangled_name, int options,
-		      void **memory, char **demangled_p)
+		      void **memory,
+		      gdb::unique_xmalloc_ptr<char> *demangled_p)
 {
-  char *demangled_name;
-
   /* If it looks like a v3 mangled name, then try to go directly
      to trees.  */
   if (mangled_name[0] == '_' && mangled_name[1] == 'Z')
     {
       struct demangle_component *ret;
 
-      ret = cplus_demangle_v3_components (mangled_name,
-					  options, memory);
+      ret = gdb_cplus_demangle_v3_components (mangled_name,
+					      options, memory);
       if (ret)
 	{
-	  std::unique_ptr<demangle_parse_info> info (new demangle_parse_info);
+	  auto info = std::make_unique<demangle_parse_info> ();
 	  info->tree = ret;
 	  *demangled_p = NULL;
 	  return info;
@@ -610,22 +683,20 @@ mangled_name_to_comp (const char *mangled_name, int options,
 
   /* If it doesn't, or if that failed, then try to demangle the
      name.  */
-  demangled_name = gdb_demangle (mangled_name, options);
+  gdb::unique_xmalloc_ptr<char> demangled_name = gdb_demangle (mangled_name,
+							       options);
   if (demangled_name == NULL)
    return NULL;
   
   /* If we could demangle the name, parse it to build the component
      tree.  */
   std::unique_ptr<demangle_parse_info> info
-    = cp_demangled_name_to_comp (demangled_name, NULL);
+    = cp_demangled_name_to_comp (demangled_name.get (), NULL);
 
   if (info == NULL)
-    {
-      xfree (demangled_name);
-      return NULL;
-    }
+    return NULL;
 
-  *demangled_p = demangled_name;
+  *demangled_p = std::move (demangled_name);
   return info;
 }
 
@@ -635,7 +706,7 @@ char *
 cp_class_name_from_physname (const char *physname)
 {
   void *storage = NULL;
-  char *demangled_name = NULL;
+  gdb::unique_xmalloc_ptr<char> demangled_name;
   gdb::unique_xmalloc_ptr<char> ret;
   struct demangle_component *ret_comp, *prev_comp, *cur_comp;
   std::unique_ptr<demangle_parse_info> info;
@@ -661,8 +732,8 @@ cp_class_name_from_physname (const char *physname)
       case DEMANGLE_COMPONENT_RESTRICT_THIS:
       case DEMANGLE_COMPONENT_VOLATILE_THIS:
       case DEMANGLE_COMPONENT_VENDOR_TYPE_QUAL:
-        ret_comp = d_left (ret_comp);
-        break;
+	ret_comp = d_left (ret_comp);
+	break;
       default:
 	done = 1;
 	break;
@@ -689,8 +760,8 @@ cp_class_name_from_physname (const char *physname)
       case DEMANGLE_COMPONENT_QUAL_NAME:
       case DEMANGLE_COMPONENT_LOCAL_NAME:
 	prev_comp = cur_comp;
-        cur_comp = d_right (cur_comp);
-        break;
+	cur_comp = d_right (cur_comp);
+	break;
       case DEMANGLE_COMPONENT_TEMPLATE:
       case DEMANGLE_COMPONENT_NAME:
       case DEMANGLE_COMPONENT_CTOR:
@@ -715,7 +786,6 @@ cp_class_name_from_physname (const char *physname)
     }
 
   xfree (storage);
-  xfree (demangled_name);
   return ret.release ();
 }
 
@@ -737,11 +807,11 @@ unqualified_name_from_comp (struct demangle_component *comp)
       {
       case DEMANGLE_COMPONENT_QUAL_NAME:
       case DEMANGLE_COMPONENT_LOCAL_NAME:
-        ret_comp = d_right (ret_comp);
-        break;
+	ret_comp = d_right (ret_comp);
+	break;
       case DEMANGLE_COMPONENT_TYPED_NAME:
-        ret_comp = d_left (ret_comp);
-        break;
+	ret_comp = d_left (ret_comp);
+	break;
       case DEMANGLE_COMPONENT_TEMPLATE:
 	gdb_assert (last_template == NULL);
 	last_template = ret_comp;
@@ -754,8 +824,8 @@ unqualified_name_from_comp (struct demangle_component *comp)
       case DEMANGLE_COMPONENT_RESTRICT_THIS:
       case DEMANGLE_COMPONENT_VOLATILE_THIS:
       case DEMANGLE_COMPONENT_VENDOR_TYPE_QUAL:
-        ret_comp = d_left (ret_comp);
-        break;
+	ret_comp = d_left (ret_comp);
+	break;
       case DEMANGLE_COMPONENT_NAME:
       case DEMANGLE_COMPONENT_CTOR:
       case DEMANGLE_COMPONENT_DTOR:
@@ -783,7 +853,7 @@ char *
 method_name_from_physname (const char *physname)
 {
   void *storage = NULL;
-  char *demangled_name = NULL;
+  gdb::unique_xmalloc_ptr<char> demangled_name;
   gdb::unique_xmalloc_ptr<char> ret;
   struct demangle_component *ret_comp;
   std::unique_ptr<demangle_parse_info> info;
@@ -801,7 +871,6 @@ method_name_from_physname (const char *physname)
     ret = cp_comp_to_string (ret_comp, 10);
 
   xfree (storage);
-  xfree (demangled_name);
   return ret.release ();
 }
 
@@ -862,8 +931,8 @@ cp_remove_params_1 (const char *demangled_name, bool require_params)
       case DEMANGLE_COMPONENT_RESTRICT_THIS:
       case DEMANGLE_COMPONENT_VOLATILE_THIS:
       case DEMANGLE_COMPONENT_VENDOR_TYPE_QUAL:
-        ret_comp = d_left (ret_comp);
-        break;
+	ret_comp = d_left (ret_comp);
+	break;
       default:
 	done = true;
 	break;
@@ -901,7 +970,7 @@ cp_remove_params_if_any (const char *demangled_name, bool completion_mode)
      we're completing / matching everything, avoid returning NULL
      which would make callers interpret the result as an error.  */
   if (demangled_name[0] == '\0' && completion_mode)
-    return gdb::unique_xmalloc_ptr<char> (xstrdup (""));
+    return make_unique_xstrdup ("");
 
   gdb::unique_xmalloc_ptr<char> without_params
     = cp_remove_params_1 (demangled_name, false);
@@ -982,7 +1051,7 @@ cp_find_first_component_aux (const char *name, int permissive)
   /* Operator names can show up in unexpected places.  Since these can
      contain parentheses or angle brackets, they can screw up the
      recursion.  But not every string 'operator' is part of an
-     operater name: e.g. you could have a variable 'cooperator'.  So
+     operator name: e.g. you could have a variable 'cooperator'.  So
      this variable tells us whether or not we should treat the string
      'operator' as starting an operator.  */
   int operator_possible = 1;
@@ -1146,18 +1215,17 @@ overload_list_add_symbol (struct symbol *sym,
 {
   /* If there is no type information, we can't do anything, so
      skip.  */
-  if (SYMBOL_TYPE (sym) == NULL)
+  if (sym->type () == NULL)
     return;
 
   /* skip any symbols that we've already considered.  */
   for (symbol *listed_sym : *overload_list)
-    if (strcmp (SYMBOL_LINKAGE_NAME (sym),
-		SYMBOL_LINKAGE_NAME (listed_sym)) == 0)
+    if (strcmp (sym->linkage_name (), listed_sym->linkage_name ()) == 0)
       return;
 
   /* Get the demangled name without parameters */
   gdb::unique_xmalloc_ptr<char> sym_name
-    = cp_remove_params (SYMBOL_NATURAL_NAME (sym));
+    = cp_remove_params (sym->natural_name ());
   if (!sym_name)
     return;
 
@@ -1206,12 +1274,9 @@ add_symbol_overload_list_block (const char *name,
 				const struct block *block,
 				std::vector<symbol *> *overload_list)
 {
-  struct block_iterator iter;
-  struct symbol *sym;
-
   lookup_name_info lookup_name (name, symbol_name_match_type::FULL);
 
-  ALL_BLOCK_SYMBOLS_WITH_NAME (block, lookup_name, iter, sym)
+  for (struct symbol *sym : block_iterator_range (block, &lookup_name))
     overload_list_add_symbol (sym, name, overload_list);
 }
 
@@ -1239,15 +1304,17 @@ add_symbol_overload_list_namespace (const char *func_name,
     }
 
   /* Look in the static block.  */
-  block = block_static_block (get_selected_block (0));
-  if (block)
-    add_symbol_overload_list_block (name, block, overload_list);
+  block = get_selected_block (0);
+  block = block == nullptr ? nullptr : block->static_block ();
+  if (block != nullptr)
+    {
+      add_symbol_overload_list_block (name, block, overload_list);
 
-  /* Look in the global block.  */
-  block = block_global_block (block);
-  if (block)
-    add_symbol_overload_list_block (name, block, overload_list);
-
+      /* Look in the global block.  */
+      block = block->global_block ();
+      if (block)
+	add_symbol_overload_list_block (name, block, overload_list);
+    }
 }
 
 /* Search the namespace of the given type and namespace of and public
@@ -1262,18 +1329,17 @@ add_symbol_overload_list_adl_namespace (struct type *type,
   const char *type_name;
   int i, prefix_len;
 
-  while (TYPE_CODE (type) == TYPE_CODE_PTR
-	 || TYPE_IS_REFERENCE (type)
-         || TYPE_CODE (type) == TYPE_CODE_ARRAY
-         || TYPE_CODE (type) == TYPE_CODE_TYPEDEF)
+  while (type->is_pointer_or_reference ()
+	 || type->code () == TYPE_CODE_ARRAY
+	 || type->code () == TYPE_CODE_TYPEDEF)
     {
-      if (TYPE_CODE (type) == TYPE_CODE_TYPEDEF)
-	type = check_typedef(type);
+      if (type->code () == TYPE_CODE_TYPEDEF)
+	type = check_typedef (type);
       else
-	type = TYPE_TARGET_TYPE (type);
+	type = type->target_type ();
     }
 
-  type_name = TYPE_NAME (type);
+  type_name = type->name ();
 
   if (type_name == NULL)
     return;
@@ -1291,7 +1357,7 @@ add_symbol_overload_list_adl_namespace (struct type *type,
     }
 
   /* Check public base type */
-  if (TYPE_CODE (type) == TYPE_CODE_STRUCT)
+  if (type->code () == TYPE_CODE_STRUCT)
     for (i = 0; i < TYPE_N_BASECLASSES (type); i++)
       {
 	if (BASETYPE_VIA_PUBLIC (type, i))
@@ -1324,7 +1390,6 @@ add_symbol_overload_list_using (const char *func_name,
 				const char *the_namespace,
 				std::vector<symbol *> *overload_list)
 {
-  struct using_direct *current;
   const struct block *block;
 
   /* First, go through the using directives.  If any of them apply,
@@ -1333,21 +1398,19 @@ add_symbol_overload_list_using (const char *func_name,
 
   for (block = get_selected_block (0);
        block != NULL;
-       block = BLOCK_SUPERBLOCK (block))
-    for (current = block_using (block);
-	current != NULL;
-	current = current->next)
+       block = block->superblock ())
+    for (using_direct *current : block->get_using ())
       {
 	/* Prevent recursive calls.  */
 	if (current->searched)
 	  continue;
 
-        /* If this is a namespace alias or imported declaration ignore
+	/* If this is a namespace alias or imported declaration ignore
 	   it.  */
-        if (current->alias != NULL || current->declaration != NULL)
-          continue;
+	if (current->alias != NULL || current->declaration != NULL)
+	  continue;
 
-        if (strcmp (the_namespace, current->import_dest) == 0)
+	if (strcmp (the_namespace, current->import_dest) == 0)
 	  {
 	    /* Mark this import as searched so that the recursive call
 	       does not search it again.  */
@@ -1373,63 +1436,67 @@ static void
 add_symbol_overload_list_qualified (const char *func_name,
 				    std::vector<symbol *> *overload_list)
 {
-  const struct block *b, *surrounding_static_block = 0;
+  const struct block *surrounding_static_block = 0;
 
   /* Look through the partial symtabs for all symbols which begin by
      matching FUNC_NAME.  Make sure we read that symbol table in.  */
 
   for (objfile *objf : current_program_space->objfiles ())
-    {
-      if (objf->sf)
-	objf->sf->qf->expand_symtabs_for_function (objf, func_name);
-    }
+    objf->expand_symtabs_for_function (func_name);
 
   /* Search upwards from currently selected frame (so that we can
      complete on local vars.  */
 
-  for (b = get_selected_block (0); b != NULL; b = BLOCK_SUPERBLOCK (b))
+  for (const block *b = get_selected_block (0);
+       b != nullptr;
+       b = b->superblock ())
     add_symbol_overload_list_block (func_name, b, overload_list);
 
-  surrounding_static_block = block_static_block (get_selected_block (0));
+  surrounding_static_block = get_selected_block (0);
+  surrounding_static_block = (surrounding_static_block == nullptr
+			      ? nullptr
+			      : surrounding_static_block->static_block ());
 
   /* Go through the symtabs and check the externs and statics for
      symbols which match.  */
 
-  for (objfile *objfile : current_program_space->objfiles ())
-    {
-      for (compunit_symtab *cust : objfile->compunits ())
-	{
-	  QUIT;
-	  b = BLOCKVECTOR_BLOCK (COMPUNIT_BLOCKVECTOR (cust), GLOBAL_BLOCK);
-	  add_symbol_overload_list_block (func_name, b, overload_list);
-	}
-    }
+  const block *block = get_selected_block (0);
+  struct objfile *current_objfile = block ? block->objfile () : nullptr;
 
-  for (objfile *objfile : current_program_space->objfiles ())
-    {
-      for (compunit_symtab *cust : objfile->compunits ())
-	{
-	  QUIT;
-	  b = BLOCKVECTOR_BLOCK (COMPUNIT_BLOCKVECTOR (cust), STATIC_BLOCK);
-	  /* Don't do this block twice.  */
-	  if (b == surrounding_static_block)
-	    continue;
-	  add_symbol_overload_list_block (func_name, b, overload_list);
-	}
-    }
+  gdbarch_iterate_over_objfiles_in_search_order
+    (current_objfile ? current_objfile->arch () : current_inferior ()->arch (),
+     [func_name, surrounding_static_block, &overload_list]
+     (struct objfile *obj)
+       {
+	 for (compunit_symtab *cust : obj->compunits ())
+	   {
+	     QUIT;
+	     const struct block *b = cust->blockvector ()->global_block ();
+	     add_symbol_overload_list_block (func_name, b, overload_list);
+
+	     b = cust->blockvector ()->static_block ();
+	     /* Don't do this block twice.  */
+	     if (b == surrounding_static_block)
+	       continue;
+
+	     add_symbol_overload_list_block (func_name, b, overload_list);
+	   }
+
+	 return 0;
+       }, current_objfile);
 }
 
 /* Lookup the rtti type for a class name.  */
 
 struct type *
-cp_lookup_rtti_type (const char *name, struct block *block)
+cp_lookup_rtti_type (const char *name, const struct block *block)
 {
   struct symbol * rtti_sym;
   struct type * rtti_type;
 
-  /* Use VAR_DOMAIN here as NAME may be a typedef.  PR 18141, 18417.
-     Classes "live" in both STRUCT_DOMAIN and VAR_DOMAIN.  */
-  rtti_sym = lookup_symbol (name, block, VAR_DOMAIN, NULL).symbol;
+  rtti_sym = lookup_symbol (name, block,
+			    SEARCH_TYPE_DOMAIN | SEARCH_STRUCT_DOMAIN,
+			    nullptr).symbol;
 
   if (rtti_sym == NULL)
     {
@@ -1437,15 +1504,15 @@ cp_lookup_rtti_type (const char *name, struct block *block)
       return NULL;
     }
 
-  if (SYMBOL_CLASS (rtti_sym) != LOC_TYPEDEF)
+  if (rtti_sym->aclass () != LOC_TYPEDEF)
     {
       warning (_("RTTI symbol for class '%s' is not a type"), name);
       return NULL;
     }
 
-  rtti_type = check_typedef (SYMBOL_TYPE (rtti_sym));
+  rtti_type = check_typedef (rtti_sym->type ());
 
-  switch (TYPE_CODE (rtti_type))
+  switch (rtti_type->code ())
     {
     case TYPE_CODE_STRUCT:
       break;
@@ -1466,18 +1533,18 @@ cp_lookup_rtti_type (const char *name, struct block *block)
 
 #ifdef HAVE_WORKING_FORK
 
-/* If nonzero, attempt to catch crashes in the demangler and print
+/* If true, attempt to catch crashes in the demangler and print
    useful debugging information.  */
 
-static int catch_demangler_crashes = 1;
+static bool catch_demangler_crashes = true;
 
 /* Stack context and environment for demangler crash recovery.  */
 
-static SIGJMP_BUF gdb_demangle_jmp_buf;
+static thread_local SIGJMP_BUF *gdb_demangle_jmp_buf;
 
-/* If nonzero, attempt to dump core from the signal handler.  */
+/* If true, attempt to dump core from the signal handler.  */
 
-static int gdb_demangle_attempt_core_dump = 1;
+static std::atomic<bool> gdb_demangle_attempt_core_dump;
 
 /* Signal handler for gdb_demangle.  */
 
@@ -1489,99 +1556,108 @@ gdb_demangle_signal_handler (int signo)
       if (fork () == 0)
 	dump_core ();
 
-      gdb_demangle_attempt_core_dump = 0;
+      gdb_demangle_attempt_core_dump = false;
     }
 
-  SIGLONGJMP (gdb_demangle_jmp_buf, signo);
+  SIGLONGJMP (*gdb_demangle_jmp_buf, signo);
+}
+
+/* A helper for gdb_demangle that reports a demangling failure.  */
+
+static void
+report_failed_demangle (const char *name, bool core_dump_allowed,
+			int crash_signal)
+{
+  static bool error_reported = false;
+
+  if (!error_reported)
+    {
+      std::string short_msg
+	= string_printf (_("unable to demangle '%s' "
+			   "(demangler failed with signal %d)"),
+			 name, crash_signal);
+
+      std::string long_msg
+	= string_printf ("%s:%d: %s: %s", __FILE__, __LINE__,
+			 "demangler-warning", short_msg.c_str ());
+
+      target_terminal::scoped_restore_terminal_state term_state;
+      target_terminal::ours_for_output ();
+
+      begin_line ();
+      if (core_dump_allowed)
+	gdb_printf (gdb_stderr,
+		    _("%s\nAttempting to dump core.\n"),
+		    long_msg.c_str ());
+      else
+	warn_cant_dump_core (long_msg.c_str ());
+
+      demangler_warning (__FILE__, __LINE__, "%s", short_msg.c_str ());
+
+      error_reported = true;
+    }
 }
 
 #endif
 
 /* A wrapper for bfd_demangle.  */
 
-char *
+gdb::unique_xmalloc_ptr<char>
 gdb_demangle (const char *name, int options)
 {
-  char *result = NULL;
+  gdb::unique_xmalloc_ptr<char> result;
   int crash_signal = 0;
 
 #ifdef HAVE_WORKING_FORK
-#if defined (HAVE_SIGACTION) && defined (SA_RESTART)
-  struct sigaction sa, old_sa;
-#else
-  sighandler_t ofunc;
-#endif
-  static int core_dump_allowed = -1;
+  scoped_segv_handler_restore restore_segv
+    (catch_demangler_crashes
+     ? gdb_demangle_signal_handler
+     : nullptr);
 
-  if (core_dump_allowed == -1)
-    {
-      core_dump_allowed = can_dump_core (LIMIT_CUR);
-
-      if (!core_dump_allowed)
-	gdb_demangle_attempt_core_dump = 0;
-    }
-
+  bool core_dump_allowed = gdb_demangle_attempt_core_dump;
+  SIGJMP_BUF jmp_buf;
+  scoped_restore restore_jmp_buf
+    = make_scoped_restore (&gdb_demangle_jmp_buf, &jmp_buf);
   if (catch_demangler_crashes)
     {
-#if defined (HAVE_SIGACTION) && defined (SA_RESTART)
-      sa.sa_handler = gdb_demangle_signal_handler;
-      sigemptyset (&sa.sa_mask);
-#ifdef HAVE_SIGALTSTACK
-      sa.sa_flags = SA_ONSTACK;
+      /* The signal handler may keep the signal blocked when we longjmp out
+	 of it.  If we have sigprocmask, we can use it to unblock the signal
+	 afterwards and we can avoid the performance overhead of saving the
+	 signal mask just in case the signal gets triggered.  Otherwise, just
+	 tell sigsetjmp to save the mask.  */
+#ifdef HAVE_SIGPROCMASK
+      crash_signal = SIGSETJMP (*gdb_demangle_jmp_buf, 0);
 #else
-      sa.sa_flags = 0;
+      crash_signal = SIGSETJMP (*gdb_demangle_jmp_buf, 1);
 #endif
-      sigaction (SIGSEGV, &sa, &old_sa);
-#else
-      ofunc = signal (SIGSEGV, gdb_demangle_signal_handler);
-#endif
-
-      crash_signal = SIGSETJMP (gdb_demangle_jmp_buf);
     }
 #endif
 
   if (crash_signal == 0)
-    result = bfd_demangle (NULL, name, options);
+    result.reset (bfd_demangle (NULL, name, options | DMGL_VERBOSE));
 
 #ifdef HAVE_WORKING_FORK
   if (catch_demangler_crashes)
     {
-#if defined (HAVE_SIGACTION) && defined (SA_RESTART)
-      sigaction (SIGSEGV, &old_sa, NULL);
-#else
-      signal (SIGSEGV, ofunc);
-#endif
-
       if (crash_signal != 0)
 	{
-	  static int error_reported = 0;
+#ifdef HAVE_SIGPROCMASK
+	  /* If we got the signal, SIGSEGV may still be blocked; restore it.  */
+	  sigset_t segv_sig_set;
+	  sigemptyset (&segv_sig_set);
+	  sigaddset (&segv_sig_set, SIGSEGV);
+	  gdb_sigmask (SIG_UNBLOCK, &segv_sig_set, NULL);
+#endif
 
-	  if (!error_reported)
+	  /* If there was a failure, we can't report it here, because
+	     we might be in a background thread.  Instead, arrange for
+	     the reporting to happen on the main thread.  */
+	  std::string copy = name;
+	  run_on_main_thread ([=, copy = std::move (copy)] ()
 	    {
-	      std::string short_msg
-		= string_printf (_("unable to demangle '%s' "
-				   "(demangler failed with signal %d)"),
-				 name, crash_signal);
-
-	      std::string long_msg
-		= string_printf ("%s:%d: %s: %s", __FILE__, __LINE__,
-				 "demangler-warning", short_msg.c_str ());
-
-	      target_terminal::scoped_restore_terminal_state term_state;
-	      target_terminal::ours_for_output ();
-
-	      begin_line ();
-	      if (core_dump_allowed)
-		fprintf_unfiltered (gdb_stderr,
-				    _("%s\nAttempting to dump core.\n"),
-				    long_msg.c_str ());
-	      else
-		warn_cant_dump_core (long_msg.c_str ());
-
-	      demangler_warning (__FILE__, __LINE__, "%s", short_msg.c_str ());
-
-	      error_reported = 1;
-	    }
+	      report_failed_demangle (copy.c_str (), core_dump_allowed,
+				      crash_signal);
+	    });
 
 	  result = NULL;
 	}
@@ -1593,11 +1669,24 @@ gdb_demangle (const char *name, int options)
 
 /* See cp-support.h.  */
 
-int
-gdb_sniff_from_mangled_name (const char *mangled, char **demangled)
+char *
+gdb_cplus_demangle_print (int options,
+			  struct demangle_component *tree,
+			  int estimated_length,
+			  size_t *p_allocated_size)
 {
-  *demangled = gdb_demangle (mangled, DMGL_PARAMS | DMGL_ANSI);
-  return *demangled != NULL;
+  return cplus_demangle_print (options | DMGL_VERBOSE, tree,
+			       estimated_length, p_allocated_size);
+}
+
+/* A wrapper for cplus_demangle_v3_components that forces
+   DMGL_VERBOSE.  */
+
+static struct demangle_component *
+gdb_cplus_demangle_v3_components (const char *mangled,
+				  int options, void **mem)
+{
+  return cplus_demangle_v3_components (mangled, options | DMGL_VERBOSE, mem);
 }
 
 /* See cp-support.h.  */
@@ -1617,10 +1706,49 @@ cp_search_name_hash (const char *search_name)
   unsigned int hash = 0;
   for (const char *string = search_name; *string != '\0'; ++string)
     {
+      const char *before_skip = string;
       string = skip_spaces (string);
 
       if (*string == '(')
 	break;
+
+      /* Could it be the beginning of a function name?
+	 If yes, does it begin with the keyword "operator"?  */
+      if ((string != before_skip || string == search_name)
+	  && (string[0] == 'o' && startswith (string, CP_OPERATOR_STR)))
+	{
+	  /* Hash the "operator" part.  */
+	  for (size_t i = 0; i < CP_OPERATOR_LEN; ++i)
+	    hash = SYMBOL_HASH_NEXT (hash, *string++);
+
+	  string = skip_spaces (string);
+
+	  /* If no more data to process, stop right now.  This is specially
+	     intended for SEARCH_NAMEs that end with "operator".  In such
+	     cases, the whole string is processed and STRING is pointing to a
+	     null-byte.  Letting the loop body resume naturally would lead to
+	     a "++string" that causes STRING to point past the null-byte.  */
+	  if (string[0] == '\0')
+	    break;
+
+	  /* "<" and "<<" are sequences of interest here.  This covers
+	     "operator{<,<<,<=,<=>}".  In the last 2 cases, the "=" and "=>"
+	     parts are handled by the next iterations of the loop like other
+	     input chars.  The goal is to process all the operator-related '<'
+	     chars, so that later if a '<' is visited it can be inferred for
+	     sure that it is the beginning of a template parameter list.
+
+	     STRING is a null-byte terminated string.  If string[0] is not
+	     a null-byte, according to the previous check, string[1] is not
+	     past the end of the allocation and can be referenced safely.  */
+	  if (string[0] == '<')
+	    {
+	      hash = SYMBOL_HASH_NEXT (hash, *string);
+	      if (string[1] == '<')
+		hash = SYMBOL_HASH_NEXT (hash, *++string);
+	      continue;
+	    }
+	}
 
       /* Ignore ABI tags such as "[abi:cxx11].  */
       if (*string == '['
@@ -1628,10 +1756,54 @@ cp_search_name_hash (const char *search_name)
 	  && string[5] != ':')
 	break;
 
+      /* Ignore template parameter lists.  The likely "operator{<,<<,<=,<=>}"
+	 are already taken care of.  Therefore, any encounter of '<' character
+	 at this point is related to template lists.  */
+      if (*string == '<')
+	break;
+
       hash = SYMBOL_HASH_NEXT (hash, *string);
     }
   return hash;
 }
+
+#if GDB_SELF_TEST
+
+namespace selftests {
+
+static void
+test_cp_search_name_hash ()
+{
+   SELF_CHECK (cp_search_name_hash ("void func<(enum_test)0>(int*, int)")
+	       == cp_search_name_hash ("void func"));
+   SELF_CHECK (cp_search_name_hash ("operator")
+	       != cp_search_name_hash ("operator<"));
+   SELF_CHECK (cp_search_name_hash ("operator")
+	       != cp_search_name_hash ("operator<<"));
+   SELF_CHECK (cp_search_name_hash ("operator<")
+	       != cp_search_name_hash ("operator<<"));
+   SELF_CHECK (cp_search_name_hash ("operator<")
+	       == cp_search_name_hash ("operator <"));
+   SELF_CHECK (cp_search_name_hash ("operator")
+	       != cp_search_name_hash ("foo_operator"));
+   SELF_CHECK (cp_search_name_hash ("operator")
+	       != cp_search_name_hash ("operator_foo"));
+   SELF_CHECK (cp_search_name_hash ("operator<")
+	       != cp_search_name_hash ("foo_operator"));
+   SELF_CHECK (cp_search_name_hash ("operator<")
+	       != cp_search_name_hash ("operator_foo"));
+   SELF_CHECK (cp_search_name_hash ("operator<<")
+	       != cp_search_name_hash ("foo_operator"));
+   SELF_CHECK (cp_search_name_hash ("operator<<")
+	       != cp_search_name_hash ("operator_foo"));
+
+   SELF_CHECK (cp_search_name_hash ("func")
+	       == cp_search_name_hash ("func[abi:cxx11]"));
+}
+
+} /* namespace selftests */
+
+#endif /* GDB_SELF_TEST */
 
 /* Helper for cp_symbol_name_matches (i.e., symbol_name_matcher_ftype
    implementation for symbol_name_match_type::WILD matching).  Split
@@ -1678,10 +1850,12 @@ cp_symbol_name_matches_1 (const char *symbol_search_name,
   completion_match_for_lcd *match_for_lcd
     = (comp_match_res != NULL ? &comp_match_res->match_for_lcd : NULL);
 
+  gdb_assert (match_for_lcd == nullptr || match_for_lcd->empty ());
+
   while (true)
     {
       if (strncmp_iw_with_mode (sname, lookup_name, lookup_name_len,
-				mode, language_cplus, match_for_lcd) == 0)
+				mode, language_cplus, match_for_lcd, true) == 0)
 	{
 	  if (comp_match_res != NULL)
 	    {
@@ -1710,6 +1884,11 @@ cp_symbol_name_matches_1 (const char *symbol_search_name,
 	    }
 	  return true;
 	}
+
+      /* Clear match_for_lcd so the next strncmp_iw_with_mode call starts
+	 from scratch.  */
+      if (match_for_lcd != nullptr)
+	match_for_lcd->clear ();
 
       unsigned int len = cp_find_first_component (sname);
 
@@ -1791,7 +1970,7 @@ cp_get_symbol_name_matcher (const lookup_name_info &lookup_name)
 
 namespace selftests {
 
-void
+static void
 test_cp_symbol_name_matches ()
 {
 #define CHECK_MATCH(SYMBOL, INPUT)					\
@@ -1990,7 +2169,7 @@ static std::string
 quote (const char *str)
 {
   if (str != NULL)
-    return std::string (1, '\"') + str + '\"';
+    return std::string (1, '"') + str + '"';
   else
     return "<null>";
 }
@@ -1998,7 +2177,7 @@ quote (const char *str)
 /* Check that removing parameter info out of NAME produces EXPECTED.
    COMPLETION_MODE indicates whether we're testing normal and
    completion mode.  FILE and LINE are used to provide better test
-   location information in case ithe check fails.  */
+   location information in case the check fails.  */
 
 static void
 check_remove_params (const char *file, int line,
@@ -2081,15 +2260,8 @@ test_cp_remove_params ()
   CHECK_INCOMPL ("A::foo<(anonymous namespace)::B",
 		 "A::foo");
 
-  /* Shouldn't this parse?  Looks like a bug in
-     cp_demangled_name_to_comp.  See PR c++/22411.  */
-#if 0
   CHECK ("A::foo<void(int)>::func(int)",
 	 "A::foo<void(int)>::func");
-#else
-  CHECK_INCOMPL ("A::foo<void(int)>::func(int)",
-		 "A::foo");
-#endif
 
   CHECK_INCOMPL ("A::foo<void(int",
 		 "A::foo");
@@ -2102,18 +2274,6 @@ test_cp_remove_params ()
 
 #endif /* GDB_SELF_CHECK */
 
-/* Don't allow just "maintenance cplus".  */
-
-static  void
-maint_cplus_command (const char *arg, int from_tty)
-{
-  printf_unfiltered (_("\"maintenance cplus\" must be followed "
-		       "by the name of a command.\n"));
-  help_list (maint_cplus_cmd_list,
-	     "maintenance cplus ",
-	     all_commands, gdb_stdout);
-}
-
 /* This is a front end for cp_find_first_component, for unit testing.
    Be careful when using it: see the NOTE above
    cp_find_first_component.  */
@@ -2121,19 +2281,11 @@ maint_cplus_command (const char *arg, int from_tty)
 static void
 first_component_command (const char *arg, int from_tty)
 {
-  int len;  
-  char *prefix; 
-
   if (!arg)
     return;
 
-  len = cp_find_first_component (arg);
-  prefix = (char *) alloca (len + 1);
-
-  memcpy (prefix, arg, len);
-  prefix[len] = '\0';
-
-  printf_unfiltered ("%s\n", prefix);
+  int len = cp_find_first_component (arg);
+  gdb_printf ("%.*s\n", len, arg);
 }
 
 /* Implement "info vtbl".  */
@@ -2147,17 +2299,90 @@ info_vtbl_command (const char *arg, int from_tty)
   cplus_print_vtable (value);
 }
 
-void
-_initialize_cp_support (void)
+/* See description in cp-support.h.  */
+
+const char *
+find_toplevel_char (const char *s, char c)
 {
-  add_prefix_cmd ("cplus", class_maintenance,
-		  maint_cplus_command,
-		  _("C++ maintenance commands."),
-		  &maint_cplus_cmd_list,
-		  "maintenance cplus ",
-		  0, &maintenancelist);
-  add_alias_cmd ("cp", "cplus",
-		 class_maintenance, 1,
+  int quoted = 0;		/* zero if we're not in quotes;
+				   '"' if we're in a double-quoted string;
+				   '\'' if we're in a single-quoted string.  */
+  int depth = 0;		/* Number of unclosed parens we've seen.  */
+  const char *scan;
+
+  for (scan = s; *scan; scan++)
+    {
+      if (quoted)
+	{
+	  if (*scan == quoted)
+	    quoted = 0;
+	  else if (*scan == '\\' && *(scan + 1))
+	    scan++;
+	}
+      else if (*scan == c && ! quoted && depth == 0)
+	return scan;
+      else if (*scan == '"' || *scan == '\'')
+	quoted = *scan;
+      else if (*scan == '(' || *scan == '<')
+	depth++;
+      else if ((*scan == ')' || *scan == '>') && depth > 0)
+	depth--;
+      else if (*scan == 'o' && !quoted && depth == 0)
+	{
+	  /* Handle C++ operator names.  */
+	  if (strncmp (scan, CP_OPERATOR_STR, CP_OPERATOR_LEN) == 0)
+	    {
+	      scan += CP_OPERATOR_LEN;
+	      if (*scan == c)
+		return scan;
+	      while (ISSPACE (*scan))
+		{
+		  ++scan;
+		  if (*scan == c)
+		    return scan;
+		}
+	      if (*scan == '\0')
+		break;
+
+	      switch (*scan)
+		{
+		  /* Skip over one less than the appropriate number of
+		     characters: the for loop will skip over the last
+		     one.  */
+		case '<':
+		  if (scan[1] == '<')
+		    {
+		      scan++;
+		      if (*scan == c)
+			return scan;
+		    }
+		  break;
+		case '>':
+		  if (scan[1] == '>')
+		    {
+		      scan++;
+		      if (*scan == c)
+			return scan;
+		    }
+		  break;
+		}
+	    }
+	}
+    }
+
+  return 0;
+}
+
+void _initialize_cp_support ();
+void
+_initialize_cp_support ()
+{
+  cmd_list_element *maintenance_cplus
+    = add_basic_prefix_cmd ("cplus", class_maintenance,
+			    _("C++ maintenance commands."),
+			    &maint_cplus_cmd_list,
+			    0, &maintenancelist);
+  add_alias_cmd ("cp", maintenance_cplus, class_maintenance, 1,
 		 &maintenancelist);
 
   add_cmd ("first_component",
@@ -2183,6 +2408,8 @@ display the offending symbol."),
 			   NULL,
 			   &maintenance_set_cmdlist,
 			   &maintenance_show_cmdlist);
+
+  gdb_demangle_attempt_core_dump = can_dump_core (LIMIT_CUR);
 #endif
 
 #if GDB_SELF_TEST
@@ -2190,5 +2417,7 @@ display the offending symbol."),
 			    selftests::test_cp_symbol_name_matches);
   selftests::register_test ("cp_remove_params",
 			    selftests::test_cp_remove_params);
+  selftests::register_test ("cp_search_name_hash",
+			    selftests::test_cp_search_name_hash);
 #endif
 }

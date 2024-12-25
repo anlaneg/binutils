@@ -1,5 +1,5 @@
 /* Simulator header for cgen scache support.
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions.
 
 This file is part of GDB, the GNU debugger.
@@ -19,10 +19,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #ifndef CGEN_SCACHE_H
 #define CGEN_SCACHE_H
-
-#ifndef WITH_SCACHE
-#define WITH_SCACHE 0
-#endif
 
 /* When caching bb's, instructions are extracted into "chains".
    SCACHE_MAP is a hash table into these chains.  */
@@ -109,9 +105,6 @@ typedef struct cpu_scache {
 /* Non-zero if cache is in use.  */
 #define USING_SCACHE_P(sd) (STATE_SCACHE_SIZE (sd) > 0)
 
-/* Install the simulator cache into the simulator.  */
-MODULE_INSTALL_FN scache_install;
-
 /* Lookup a PC value in the scache [compilation only].  */
 extern SCACHE * scache_lookup (SIM_CPU *, IADDR);
 /* Return a pointer to at least N buffers.  */
@@ -124,7 +117,7 @@ extern void scache_flush_cpu (SIM_CPU *);
 /* Scache profiling support.  */
 
 /* Print summary scache usage information.  */
-extern void scache_print_profile (SIM_CPU *cpu, int verbose);
+extern void scache_print_profile (SIM_CPU *cpu, bool verbose);
 
 #if WITH_PROFILE_SCACHE_P
 

@@ -1,5 +1,5 @@
 /* General Cpu tools GENerated simulator support.
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -19,6 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #ifndef CGEN_DEFS_H
 #define CGEN_DEFS_H
+
+#include "cgen-types.h"
 
 /* Compute number of longs required to hold N bits.  */
 #define HOST_LONGS_FOR_BITS(n) \
@@ -138,21 +140,7 @@ typedef enum {
 #define ENDSWITCH(N)
 #endif
 
-/* Simulator state.  */
-
-/* CGEN_STATE contains additional state information not present in
-   sim_state_base.  */
-
-typedef struct cgen_state {
-  /* Non-zero if no tracing or profiling is selected.  */
-  int run_fast_p;
-#define STATE_RUN_FAST_P(sd) ((sd) -> cgen_state.run_fast_p)
-} CGEN_STATE;
-
 /* Various utilities.  */
-
-/* Called after sim_post_argv_init to do any cgen initialization.  */
-extern void cgen_init (SIM_DESC);
 
 /* Return the name of an insn.  */
 extern CPU_INSN_NAME_FN cgen_insn_name;
@@ -160,7 +148,7 @@ extern CPU_INSN_NAME_FN cgen_insn_name;
 /* Return the maximum number of extra bytes required for a sim_cpu struct.  */
 /* ??? Ok, yes, this is less pretty than it should be.  Give me a better
    language [or suggest a better way].  */
-extern int cgen_cpu_max_extra_bytes (void);
+extern int cgen_cpu_max_extra_bytes (SIM_DESC);
 
 /* Target supplied routine to process an invalid instruction.  */
 extern SEM_PC sim_engine_invalid_insn (SIM_CPU *, IADDR, SEM_PC);

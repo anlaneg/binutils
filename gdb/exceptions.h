@@ -1,6 +1,6 @@
 /* Exception (throw catch) mechanism, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,19 +17,18 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef EXCEPTIONS_H
-#define EXCEPTIONS_H
+#ifndef GDB_EXCEPTIONS_H
+#define GDB_EXCEPTIONS_H
 
 #include "ui-out.h"
 
 /* If E is an exception, print it's error message on the specified
    stream.  For _fprintf, prefix the message with PREFIX...  */
-extern void exception_print (struct ui_file *file, struct gdb_exception e);
-extern void exception_fprintf (struct ui_file *file, struct gdb_exception e,
+extern void exception_print (struct ui_file *file,
+			     const struct gdb_exception &e);
+extern void exception_fprintf (struct ui_file *file,
+			       const struct gdb_exception &e,
 			       const char *prefix,
 			       ...) ATTRIBUTE_PRINTF (3, 4);
 
-/* Compare two exception objects for print equality.  */
-extern int exception_print_same (struct gdb_exception e1,
-				 struct gdb_exception e2);
-#endif
+#endif /* GDB_EXCEPTIONS_H */

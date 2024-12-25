@@ -1,6 +1,6 @@
 /* Blackfin Core Event Controller (CEC) model.
 
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,9 +18,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <strings.h>
 
 #include "sim-main.h"
+#include "sim-signal.h"
 #include "devices.h"
 #include "dv-bfin_cec.h"
 #include "dv-bfin_evt.h"
@@ -127,7 +131,7 @@ bfin_cec_io_read_buffer (struct hw *me, void *dest,
     return 0;
 
   mmr_off = addr - cec->base;
-  valuep = (void *)((unsigned long)cec + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)cec + mmr_base() + mmr_off);
 
   HW_TRACE_READ ();
 
@@ -570,7 +574,7 @@ _cec_raise (SIM_CPU *cpu, struct bfin_cec *cec, int ivg)
 	  /* XXX: what happens with 'raise 0' ?  */
 	  SET_RETEREG (oldpc);
 	  excp_to_sim_halt (sim_stopped, SIM_SIGTRAP);
-	  /* XXX: Need an easy way for gdb to signal it isnt here.  */
+	  /* XXX: Need an easy way for gdb to signal it isn't here.  */
 	  cec->ipend &= ~IVG_EMU_B;
 	  break;
 	case IVG_RST:

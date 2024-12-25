@@ -1,8 +1,7 @@
-#ld: -Tdefined3.t
+#ld: -Tdefined3.t --no-error-rwx-segments
 #nm: -B
 #source: phdrs.s
 #source: defined.s
-#xfail: powerpc*-*-aix* rs6000-*-aix*
 
 # Check that DEFINED matches only symbols defined before its location.
 # The ellipsis account for target-specific symbols.  Matching both A and T

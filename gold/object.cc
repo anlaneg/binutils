@@ -1,6 +1,6 @@
 // object.cc -- support for an object file for linking in gold
 
-// Copyright (C) 2006-2019 Free Software Foundation, Inc.
+// Copyright (C) 2006-2024 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -427,7 +427,7 @@ Sized_relobj<size, big_endian>::do_for_all_local_got_entries(
   unsigned int nsyms = this->local_symbol_count();
   for (unsigned int i = 0; i < nsyms; i++)
     {
-      Local_got_entry_key key(i, 0);
+      Local_got_entry_key key(i);
       Local_got_offsets::const_iterator p = this->local_got_offsets_.find(key);
       if (p != this->local_got_offsets_.end())
 	{
@@ -464,6 +464,8 @@ Sized_relobj_file<size, big_endian>::Sized_relobj_file(
     const elfcpp::Ehdr<size, big_endian>& ehdr)
   : Sized_relobj<size, big_endian>(name, input_file, offset),
     elf_file_(this, ehdr),
+    osabi_(ehdr.get_ei_osabi()),
+    e_type_(ehdr.get_e_type()),
     symtab_shndx_(-1U),
     local_symbol_count_(0),
     output_local_symbol_count_(0),
@@ -481,7 +483,6 @@ Sized_relobj_file<size, big_endian>::Sized_relobj_file(
     deferred_layout_relocs_(),
     output_views_(NULL)
 {
-  this->e_type_ = ehdr.get_e_type();
 }
 
 template<int size, bool big_endian>
@@ -1304,6 +1305,10 @@ Sized_relobj_file<size, big_endian>::layout_gnu_property_section(
     Layout* layout,
     unsigned int shndx)
 {
+  // We ignore Gnu property sections on incremental links.
+  if (parameters->incremental())
+    return;
+
   section_size_type contents_len;
   const unsigned char* pcontents = this->section_contents(shndx,
 							  &contents_len,
@@ -1379,6 +1384,18 @@ Sized_relobj_file<size, big_endian>::layout_gnu_property_section(
       pcontents = pdesc + align_address(descsz, size / 8);
     }
 }
+
+// This a copy of lto_section defined in GCC (lto-streamer.h)
+
+struct lto_section
+{
+  int16_t major_version;
+  int16_t minor_version;
+  unsigned char slim_object;
+
+  /* Flags is a private field that is not defined publicly.  */
+  uint16_t flags;
+};
 
 // Lay out the input sections.  We walk through the sections and check
 // whether they should be included in the link.  If they should, we
@@ -1690,7 +1707,8 @@ Sized_relobj_file<size, big_endian>::do_layout(Symbol_table* symtab,
 	  if (this->is_section_name_included(name)
 	      || layout->keep_input_section (this, name)
 	      || sh_type == elfcpp::SHT_INIT_ARRAY
-	      || sh_type == elfcpp::SHT_FINI_ARRAY)
+	      || sh_type == elfcpp::SHT_FINI_ARRAY
+	      || this->osabi().has_shf_retain(shdr.get_sh_flags()))
 	    {
 	      symtab->gc()->worklist().push_back(Section_id(this, i));
 	    }
@@ -1863,6 +1881,23 @@ Sized_relobj_file<size, big_endian>::do_layout(Symbol_table* symtab,
 	      else if (strcmp(name, ".debug_types") == 0
 		       || strcmp(name, ".zdebug_types") == 0)
 		debug_types_sections.push_back(i);
+	    }
+	}
+
+      /* GCC uses .gnu.lto_.lto.<some_hash> as a LTO bytecode information
+	 section.  */
+      const char *lto_section_name = ".gnu.lto_.lto.";
+      if (strncmp (name, lto_section_name, strlen (lto_section_name)) == 0)
+	{
+	  section_size_type contents_len;
+	  const unsigned char* pcontents
+	    = this->section_contents(i, &contents_len, false);
+	  if (contents_len >= sizeof(lto_section))
+	    {
+	      const lto_section* lsection
+		= reinterpret_cast<const lto_section*>(pcontents);
+	      if (lsection->slim_object)
+		layout->set_lto_slim_object();
 	    }
 	}
     }
@@ -2083,7 +2118,7 @@ template<int size, bool big_endian>
 void
 Sized_relobj_file<size, big_endian>::do_add_symbols(Symbol_table* symtab,
 						    Read_symbols_data* sd,
-						    Layout*)
+						    Layout* layout)
 {
   if (sd->symbols == NULL)
     {
@@ -2101,6 +2136,11 @@ Sized_relobj_file<size, big_endian>::do_add_symbols(Symbol_table* symtab,
     }
 
   this->symbols_.resize(symcount);
+
+  if (!parameters->options().relocatable()
+      && layout->is_lto_slim_object ())
+    gold_info(_("%s: plugin needed to handle lto object"),
+	      this->name().c_str());
 
   const char* sym_names =
     reinterpret_cast<const char*>(sd->symbol_names->data());
@@ -2612,6 +2652,10 @@ Sized_relobj_file<size, big_endian>::do_finalize_local_symbols(
 	      lv->set_output_symtab_index(index);
 	      ++index;
 	    }
+	  if (lv->is_ifunc_symbol()
+	      && (lv->has_output_symtab_entry()
+		  || lv->needs_output_dynsym_entry()))
+	    symtab->set_has_gnu_output();
 	  break;
 	case CFLV_DISCARDED:
 	case CFLV_ERROR:
@@ -2943,17 +2987,20 @@ Sized_relobj_file<size, big_endian>::map_to_kept_section(
         {
 	  // The kept section is a linkonce section.
 	  if (sh_size == kept_section->linkonce_size())
-	    found = true;
+	    {
+	      kept_shndx = kept_section->shndx();
+	      found = true;
+	    }
         }
       else
 	{
+	  uint64_t kept_size = 0;
 	  if (is_comdat)
 	    {
 	      // Find the corresponding kept section.
 	      // Since we're using this mapping for relocation processing,
 	      // we don't want to match sections unless they have the same
 	      // size.
-	      uint64_t kept_size = 0;
 	      if (kept_section->find_comdat_section(section_name, &kept_shndx,
 						    &kept_size))
 		{
@@ -2961,9 +3008,8 @@ Sized_relobj_file<size, big_endian>::map_to_kept_section(
 		    found = true;
 		}
 	    }
-	  else
+	  if (!found)
 	    {
-	      uint64_t kept_size = 0;
 	      if (kept_section->find_single_comdat_section(&kept_shndx,
 							   &kept_size)
 		  && sh_size == kept_size)
@@ -3008,7 +3054,7 @@ Sized_relobj_file<size, big_endian>::find_kept_section_object(
 // Return the name of symbol SYMNDX.
 
 template<int size, bool big_endian>
-const char*
+std::string
 Sized_relobj_file<size, big_endian>::get_symbol_name(unsigned int symndx)
 {
   if (this->symtab_shndx_ == 0)
@@ -3019,6 +3065,24 @@ Sized_relobj_file<size, big_endian>::get_symbol_name(unsigned int symndx)
 							&symbols_size,
 							false);
 
+  const unsigned char* p = symbols + symndx * This::sym_size;
+  if (p >= symbols + symbols_size)
+    return NULL;
+
+  elfcpp::Sym<size, big_endian> sym(p);
+
+  if (sym.get_st_name() == 0 && sym.get_st_type() == elfcpp::STT_SECTION)
+    {
+      bool is_ordinary;
+      unsigned int sym_shndx = this->adjust_sym_shndx(symndx,
+						      sym.get_st_shndx(),
+						      &is_ordinary);
+      if (!is_ordinary || sym_shndx >= this->shnum())
+	return NULL;
+
+      return this->section_name(sym_shndx);
+    }
+
   unsigned int symbol_names_shndx =
     this->adjust_shndx(this->section_link(this->symtab_shndx_));
   section_size_type names_size;
@@ -3026,14 +3090,25 @@ Sized_relobj_file<size, big_endian>::get_symbol_name(unsigned int symndx)
     this->section_contents(symbol_names_shndx, &names_size, false);
   const char* symbol_names = reinterpret_cast<const char*>(symbol_names_u);
 
-  const unsigned char* p = symbols + symndx * This::sym_size;
-
-  if (p >= symbols + symbols_size)
+  unsigned int sym_name = sym.get_st_name();
+  if (sym_name >= names_size)
     return NULL;
+  const char* namep = symbol_names + sym_name;
+  const void* endp = memchr(namep, 0, names_size - sym_name);
+  if (!endp)
+    endp = symbol_names + names_size;
+  std::string name = std::string(namep, static_cast<const char*>(endp) - namep);
 
-  elfcpp::Sym<size, big_endian> sym(p);
+  if (!parameters->options().do_demangle())
+    return name;
 
-  return symbol_names + sym.get_st_name();
+  char* demangled_name = cplus_demangle(name.c_str(), DMGL_ANSI | DMGL_PARAMS);
+  if (!demangled_name)
+    return name;
+
+  name = demangled_name;
+  free(demangled_name);
+  return name;
 }
 
 // Get symbol counts.
@@ -3153,7 +3228,7 @@ Input_objects::add_object(Object* obj)
 {
   // Print the filename if the -t/--trace option is selected.
   if (parameters->options().trace())
-    gold_info("%s", obj->name().c_str());
+    gold_trace("%s", obj->name().c_str());
 
   if (!obj->is_dynamic())
     this->relobj_list_.push_back(static_cast<Relobj*>(obj));
@@ -3312,7 +3387,7 @@ Relocate_info<size, big_endian>::location(size_t, off_t offset) const
       if (info.enclosing_symbol_type == elfcpp::STT_FUNC)
 	ret += _("function ");
       ret += info.enclosing_symbol_name;
-      return ret;
+      ret += ":";
     }
 
   ret += "(";
@@ -3341,8 +3416,8 @@ make_elf_sized_object(const std::string& name, Input_file* input_file,
 {
   Target* target = select_target(input_file, offset,
 				 ehdr.get_e_machine(), size, big_endian,
-				 ehdr.get_e_ident()[elfcpp::EI_OSABI],
-				 ehdr.get_e_ident()[elfcpp::EI_ABIVERSION]);
+				 ehdr.get_ei_osabi(),
+				 ehdr.get_ei_abiversion());
   if (target == NULL)
     gold_fatal(_("%s: unsupported ELF machine number %d"),
 	       name.c_str(), ehdr.get_e_machine());

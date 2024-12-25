@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2019 Free Software Foundation, Inc.
+# Copyright (C) 2014-2024 Free Software Foundation, Inc.
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
@@ -43,7 +43,7 @@ DTOR="  .dtors	${CONSTRUCTING-0} :
   } ${RELOCATING+ > ${DATA_MEMORY}}"
 
 cat <<EOF
-/* Copyright (C) 2014-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
@@ -116,7 +116,7 @@ SECTIONS
   .rel.plt		${RELOCATING-0} : { *(.rel.plt) }
   .rela.plt		${RELOCATING-0} : { *(.rela.plt) }
 
-  .init			${RELOCATING-0} : { *(.init) } =${NOP-0}
+  .init			${RELOCATING-0} : { KEEP (*(SORT_NONE(.init))) } =${NOP-0}
   ${DATA_PLT-${PLT}}
 
   /* Internal text space */
@@ -127,8 +127,7 @@ SECTIONS
   {
     *(.text)
     ${RELOCATING+*(.gnu.linkonce.t*)
-    *(SORT_NONE(.init))
-    *(SORT_NONE(.fini))
+    KEEP (*(SORT_NONE(.fini)))
     _etext = . ;}
   } ${RELOCATING+ > ${TEXT_MEMORY}}
 
@@ -198,19 +197,10 @@ SECTIONS
     ${RELOCATING+ PROVIDE (__eit_end = .) ; }
   } ${RELOCATING+ > eit}
 
-  /* Stabs debugging sections.  */
-  .stab		 0 : { *(.stab) }
-  .stabstr	 0 : { *(.stabstr) }
-  .stab.excl	 0 : { *(.stab.excl) }
-  .stab.exclstr	 0 : { *(.stab.exclstr) }
-  .stab.index	 0 : { *(.stab.index) }
-  .stab.indexstr 0 : { *(.stab.indexstr) }
-
-  .comment	 0 : { *(.comment) }
-
 EOF
 
-. $srcdir/scripttempl/DWARF.sc
+source_sh $srcdir/scripttempl/misc-sections.sc
+source_sh $srcdir/scripttempl/DWARF.sc
 
 cat <<EOF
   ${RELOCATING+PROVIDE (__stack = ${STACK_START_ADDR});}

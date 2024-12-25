@@ -1,6 +1,6 @@
 /* MI Command Set - output generating routines.
 
-   Copyright (C) 2000-2019 Free Software Foundation, Inc.
+   Copyright (C) 2000-2024 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -19,10 +19,14 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
-#include "ui-out.h"
 #include "mi-out.h"
+
 #include <vector>
+
+#include "interps.h"
+#include "ui-out.h"
+#include "utils.h"
+#include "gdbsupport/gdb-checked-static-cast.h"
 
 /* Mark beginning of a table.  */
 
@@ -31,8 +35,8 @@ mi_ui_out::do_table_begin (int nr_cols, int nr_rows,
 			   const char *tblid)
 {
   open (tblid, ui_out_type_tuple);
-  do_field_int (-1, -1, ui_left, "nr_rows", nr_rows);
-  do_field_int (-1, -1, ui_left, "nr_cols", nr_cols);
+  do_field_signed (-1, -1, ui_left, "nr_rows", nr_rows, ui_file_style ());
+  do_field_signed (-1, -1, ui_left, "nr_cols", nr_cols, ui_file_style ());
   open ("hdr", ui_out_type_list);
 }
 
@@ -63,12 +67,12 @@ mi_ui_out::do_table_header (int width, ui_align alignment,
 			    const std::string &col_hdr)
 {
   open (NULL, ui_out_type_tuple);
-  do_field_int (0, 0, ui_center, "width", width);
-  do_field_int (0, 0, ui_center, "alignment", alignment);
+  do_field_signed (0, 0, ui_center, "width", width, ui_file_style ());
+  do_field_signed (0, 0, ui_center, "alignment", alignment, ui_file_style ());
   do_field_string (0, 0, ui_center, "col_name", col_name.c_str (),
-		   ui_out_style_kind::DEFAULT);
+		   ui_file_style ());
   do_field_string (0, width, alignment, "colhdr", col_hdr.c_str (),
-		   ui_out_style_kind::DEFAULT);
+		   ui_file_style ());
   close (ui_out_type_tuple);
 }
 
@@ -91,14 +95,22 @@ mi_ui_out::do_end (ui_out_type type)
 /* Output an int field.  */
 
 void
-mi_ui_out::do_field_int (int fldno, int width, ui_align alignment,
-			 const char *fldname, int value)
+mi_ui_out::do_field_signed (int fldno, int width, ui_align alignment,
+			    const char *fldname, LONGEST value,
+			    const ui_file_style &style)
 {
-  char buffer[20];	/* FIXME: how many chars long a %d can become? */
+  do_field_string (fldno, width, alignment, fldname, plongest (value),
+		   style);
+}
 
-  xsnprintf (buffer, sizeof (buffer), "%d", value);
-  do_field_string (fldno, width, alignment, fldname, buffer,
-		   ui_out_style_kind::DEFAULT);
+/* Output an unsigned field.  */
+
+void
+mi_ui_out::do_field_unsigned (int fldno, int width, ui_align alignment,
+			      const char *fldname, ULONGEST value)
+{
+  do_field_string (fldno, width, alignment, fldname, pulongest (value),
+		   ui_file_style ());
 }
 
 /* Used to omit a field.  */
@@ -115,33 +127,33 @@ mi_ui_out::do_field_skip (int fldno, int width, ui_align alignment,
 void
 mi_ui_out::do_field_string (int fldno, int width, ui_align align,
 			    const char *fldname, const char *string,
-			    ui_out_style_kind style)
+			    const ui_file_style &style)
 {
   ui_file *stream = m_streams.back ();
   field_separator ();
 
   if (fldname)
-    fprintf_unfiltered (stream, "%s=", fldname);
-  fprintf_unfiltered (stream, "\"");
+    gdb_printf (stream, "%s=", fldname);
+  gdb_printf (stream, "\"");
   if (string)
-    fputstr_unfiltered (string, '"', stream);
-  fprintf_unfiltered (stream, "\"");
+    stream->putstr (string, '"');
+  gdb_printf (stream, "\"");
 }
 
 void
 mi_ui_out::do_field_fmt (int fldno, int width, ui_align align,
-			 const char *fldname, const char *format,
-			 va_list args)
+			 const char *fldname, const ui_file_style &style,
+			 const char *format, va_list args)
 {
   ui_file *stream = m_streams.back ();
   field_separator ();
 
   if (fldname)
-    fprintf_unfiltered (stream, "%s=\"", fldname);
+    gdb_printf (stream, "%s=\"", fldname);
   else
-    fputs_unfiltered ("\"", stream);
-  vfprintf_unfiltered (stream, format, args);
-  fputs_unfiltered ("\"", stream);
+    gdb_puts ("\"", stream);
+  gdb_vprintf (stream, format, args);
+  gdb_puts ("\"", stream);
 }
 
 void
@@ -155,14 +167,15 @@ mi_ui_out::do_text (const char *string)
 }
 
 void
-mi_ui_out::do_message (const char *format, va_list args)
+mi_ui_out::do_message (const ui_file_style &style,
+		       const char *format, va_list args)
 {
 }
 
 void
-mi_ui_out::do_wrap_hint (const char *identstring)
+mi_ui_out::do_wrap_hint (int indent)
 {
-  wrap_here (identstring);
+  m_streams.back ()->wrap_here (indent);
 }
 
 void
@@ -187,7 +200,7 @@ mi_ui_out::field_separator ()
   if (m_suppress_field_separator)
     m_suppress_field_separator = false;
   else
-    fputc_unfiltered (',', m_streams.back ());
+    gdb_putc (',', m_streams.back ());
 }
 
 void
@@ -199,20 +212,20 @@ mi_ui_out::open (const char *name, ui_out_type type)
   m_suppress_field_separator = true;
 
   if (name)
-    fprintf_unfiltered (stream, "%s=", name);
+    gdb_printf (stream, "%s=", name);
 
   switch (type)
     {
     case ui_out_type_tuple:
-      fputc_unfiltered ('{', stream);
+      gdb_putc ('{', stream);
       break;
 
     case ui_out_type_list:
-      fputc_unfiltered ('[', stream);
+      gdb_putc ('[', stream);
       break;
 
     default:
-      internal_error (__FILE__, __LINE__, _("bad switch"));
+      internal_error (_("bad switch"));
     }
 }
 
@@ -224,15 +237,15 @@ mi_ui_out::close (ui_out_type type)
   switch (type)
     {
     case ui_out_type_tuple:
-      fputc_unfiltered ('}', stream);
+      gdb_putc ('}', stream);
       break;
 
     case ui_out_type_list:
-      fputc_unfiltered (']', stream);
+      gdb_putc (']', stream);
       break;
 
     default:
-      internal_error (__FILE__, __LINE__, _("bad switch"));
+      internal_error (_("bad switch"));
     }
 
   m_suppress_field_separator = false;
@@ -244,6 +257,38 @@ mi_ui_out::main_stream ()
   gdb_assert (m_streams.size () == 1);
 
   return (string_file *) m_streams.back ();
+}
+
+/* Initialize a progress update to be displayed with
+   mi_ui_out::do_progress_notify.  */
+
+void
+mi_ui_out::do_progress_start ()
+{
+  m_progress_info.emplace_back ();
+}
+
+/* Indicate that a task described by MSG is in progress.  */
+
+void
+mi_ui_out::do_progress_notify (const std::string &msg, const char *unit,
+			       double cur, double total)
+{
+  mi_progress_info &info (m_progress_info.back ());
+
+  if (info.state == progress_update::START)
+    {
+      gdb_printf ("%s...\n", msg.c_str ());
+      info.state = progress_update::WORKING;
+    }
+}
+
+/* Remove the most recent progress update from the progress_info stack.  */
+
+void
+mi_ui_out::do_progress_end ()
+{
+  m_progress_info.pop_back ();
 }
 
 /* Clear the buffer.  */
@@ -276,7 +321,8 @@ mi_ui_out::version ()
 /* Constructor for an `mi_out_data' object.  */
 
 mi_ui_out::mi_ui_out (int mi_version)
-: m_suppress_field_separator (false),
+: ui_out (make_flags (mi_version)),
+  m_suppress_field_separator (false),
   m_suppress_output (false),
   m_mi_version (mi_version)
 {
@@ -288,12 +334,21 @@ mi_ui_out::~mi_ui_out ()
 {
 }
 
-/* Initialize private members at startup.  */
+/* See mi/mi-out.h.  */
 
-mi_ui_out *
-mi_out_new (int mi_version)
+std::unique_ptr<mi_ui_out>
+mi_out_new (const char *mi_version)
 {
-  return new mi_ui_out (mi_version);
+  if (streq (mi_version, INTERP_MI4) ||  streq (mi_version, INTERP_MI))
+    return std::make_unique<mi_ui_out> (4);
+
+  if (streq (mi_version, INTERP_MI3))
+    return std::make_unique<mi_ui_out> (3);
+
+  if (streq (mi_version, INTERP_MI2))
+    return std::make_unique<mi_ui_out> (2);
+
+  return nullptr;
 }
 
 /* Helper function to return the given UIOUT as an mi_ui_out.  It is an error
@@ -302,17 +357,7 @@ mi_out_new (int mi_version)
 static mi_ui_out *
 as_mi_ui_out (ui_out *uiout)
 {
-  mi_ui_out *mi_uiout = dynamic_cast<mi_ui_out *> (uiout);
-
-  gdb_assert (mi_uiout != NULL);
-
-  return mi_uiout;
-}
-
-int
-mi_version (ui_out *uiout)
-{
-  return as_mi_ui_out (uiout)->version ();
+  return gdb::checked_static_cast<mi_ui_out *> (uiout);
 }
 
 void

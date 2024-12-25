@@ -31,21 +31,9 @@
 
 #include <stdio.h>
 #include <ctype.h>
-
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
 #include <setjmp.h>
-
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 
 #include "bfd.h"
 #include "libiberty.h"
@@ -75,8 +63,7 @@ struct _psim {
 };
 
 
-int current_target_byte_order;
-int current_host_byte_order;
+enum bfd_endian current_target_byte_order;
 int current_environment;
 int current_alignment;
 int current_floating_point;
@@ -105,14 +92,14 @@ psim_tree(void)
 }
 
 STATIC_INLINE_PSIM\
-(char *)
-find_arg(char *err_msg,
+(const char *)
+find_arg(const char *err_msg,
 	 int *ptr_to_argp,
-	 char **argv)
+	 char * const *argv)
 {
   *ptr_to_argp += 1;
   if (argv[*ptr_to_argp] == NULL)
-    error(err_msg);
+    error("%s", err_msg);
   return argv[*ptr_to_argp];
 }
 
@@ -228,7 +215,7 @@ psim_usage (int verbose, int help, SIM_OPEN_KIND kind)
 /* Test "string" for containing a string of digits that form a number
 between "min" and "max".  The return value is the number or "err". */
 static
-int is_num( char *string, int min, int max, int err)
+int is_num(const char *string, int min, int max, int err)
 {
   int result = 0;
 
@@ -248,9 +235,9 @@ int is_num( char *string, int min, int max, int err)
 }
 
 INLINE_PSIM\
-(char **)
+(char * const *)
 psim_options(device *root,
-	     char **argv,
+	     char * const *argv,
 	     SIM_OPEN_KIND kind)
 {
   device *current = root;
@@ -259,8 +246,8 @@ psim_options(device *root,
     return NULL;
   argp = 0;
   while (argv[argp] != NULL && argv[argp][0] == '-') {
-    char *p = argv[argp] + 1;
-    char *param;
+    const char *p = argv[argp] + 1;
+    const char *param;
     while (*p != '\0') {
       switch (*p) {
       default:
@@ -372,6 +359,11 @@ psim_options(device *root,
 	  {
 	    extern const char version[];
 	    printf ("GNU simulator %s%s\n", PKGVERSION, version);
+	    printf ("Copyright (C) 2024 Free Software Foundation, Inc.\n");
+	    printf ( "\
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\
+\nThis is free software: you are free to change and redistribute it.\n\
+There is NO WARRANTY, to the extent permitted by law.\n");
 	    if (kind == SIM_OPEN_STANDALONE)
 	      exit (0);
 	    else
@@ -407,7 +399,7 @@ psim_options(device *root,
 INLINE_PSIM\
 (void)
 psim_command(device *root,
-	     char **argv)
+	     char * const *argv)
 {
   int argp = 0;
   if (argv[argp] == NULL) {
@@ -421,8 +413,8 @@ psim_command(device *root,
       trace_option(opt, 1);
   }
   else if (strcmp(*argv, "change-media") == 0) {
-    char *device = find_arg("Missing device name", &argp, argv);
-    char *media = argv[++argp];
+    const char *device = find_arg("Missing device name", &argp, argv);
+    const char *media = argv[++argp];
     device_ioctl(tree_find_device(root, device), NULL, 0,
 		 device_ioctl_change_media, media);
   }
@@ -453,7 +445,7 @@ psim_create(const char *file_name,
 
   os_emulation = os_emul_create(file_name, root);
   if (os_emulation == NULL)
-    error("psim: either file %s was not reconized or unreconized or unknown os-emulation type\n", file_name);
+    error("psim: either file %s was not recognized or unreconized or unknown os-emulation type\n", file_name);
 
   /* fill in the missing real number of CPU's */
   nr_cpus = tree_find_integer_property(root, "/openprom/options/smp");
@@ -463,18 +455,10 @@ psim_create(const char *file_name,
   /* fill in the missing TARGET BYTE ORDER information */
   current_target_byte_order
     = (tree_find_boolean_property(root, "/options/little-endian?")
-       ? LITTLE_ENDIAN
-       : BIG_ENDIAN);
+       ? BFD_ENDIAN_LITTLE
+       : BFD_ENDIAN_BIG);
   if (CURRENT_TARGET_BYTE_ORDER != current_target_byte_order)
     error("target and configured byte order conflict\n");
-
-  /* fill in the missing HOST BYTE ORDER information */
-  current_host_byte_order = (current_host_byte_order = 1,
-			     (*(char*)(&current_host_byte_order)
-			      ? LITTLE_ENDIAN
-			      : BIG_ENDIAN));
-  if (CURRENT_HOST_BYTE_ORDER != current_host_byte_order)
-    error("host and configured byte order conflict\n");
 
   /* fill in the missing OEA/VEA information */
   env = tree_find_string_property(root, "/openprom/options/env");
@@ -556,7 +540,7 @@ psim_create(const char *file_name,
   if (ppc_trace[trace_print_device_tree] || ppc_trace[trace_dump_device_tree])
     tree_print(root);
   if (ppc_trace[trace_dump_device_tree])
-    error("");
+    error("%s", "");
 
   return system;
 }
@@ -594,7 +578,7 @@ psim_restart(psim *system,
 }
 
 
-static void
+static ATTRIBUTE_NORETURN void
 cntrl_c_simulation(void *data)
 {
   psim *system = data;
@@ -750,8 +734,8 @@ psim_init(psim *system)
 INLINE_PSIM\
 (void)
 psim_stack(psim *system,
-	   char **argv,
-	   char **envp)
+	   char * const *argv,
+	   char * const *envp)
 {
   /* pass the stack device the argv/envp and let it work out what to
      do with it */
@@ -805,7 +789,22 @@ psim_read_register(psim *system,
 		   transfer_mode mode)
 {
   register_descriptions description;
-  char *cooked_buf;
+  union {
+    uint8_t bytes[16];
+    unsigned_word unsigned_word;
+    unsigned_1 unsigned_1;
+    unsigned_2 unsigned_2;
+    unsigned_4 unsigned_4;
+    unsigned_8 unsigned_8;
+    unsigned_16 unsigned_16;
+    creg creg;
+    fpreg fpreg;
+    fpscreg fpscreg;
+    gpreg gpreg;
+    msreg msreg;
+    spreg spreg;
+    sreg sreg;
+  } cooked_buf;
   cpu *processor;
 
   /* find our processor */
@@ -824,90 +823,87 @@ psim_read_register(psim *system,
   description = register_description(reg);
   if (description.type == reg_invalid)
     return 0;
-  cooked_buf = alloca (description.size);
 
   /* get the cooked value */
   switch (description.type) {
 
   case reg_gpr:
-    *(gpreg*)cooked_buf = cpu_registers(processor)->gpr[description.index];
+    cooked_buf.gpreg = cpu_registers(processor)->gpr[description.index];
     break;
 
   case reg_spr:
-    *(spreg*)cooked_buf = cpu_registers(processor)->spr[description.index];
+    cooked_buf.spreg = cpu_registers(processor)->spr[description.index];
     break;
     
   case reg_sr:
-    *(sreg*)cooked_buf = cpu_registers(processor)->sr[description.index];
+    cooked_buf.sreg = cpu_registers(processor)->sr[description.index];
     break;
 
   case reg_fpr:
-    *(fpreg*)cooked_buf = cpu_registers(processor)->fpr[description.index];
+    cooked_buf.fpreg = cpu_registers(processor)->fpr[description.index];
     break;
 
   case reg_pc:
-    *(unsigned_word*)cooked_buf = cpu_get_program_counter(processor);
+    cooked_buf.unsigned_word = cpu_get_program_counter(processor);
     break;
 
   case reg_cr:
-    *(creg*)cooked_buf = cpu_registers(processor)->cr;
+    cooked_buf.creg = cpu_registers(processor)->cr;
     break;
 
   case reg_msr:
-    *(msreg*)cooked_buf = cpu_registers(processor)->msr;
+    cooked_buf.msreg = cpu_registers(processor)->msr;
     break;
 
   case reg_fpscr:
-    *(fpscreg*)cooked_buf = cpu_registers(processor)->fpscr;
+    cooked_buf.fpscreg = cpu_registers(processor)->fpscr;
     break;
 
   case reg_insns:
-    *(unsigned_word*)cooked_buf = mon_get_number_of_insns(system->monitor,
+    cooked_buf.unsigned_word = mon_get_number_of_insns(system->monitor,
 							  which_cpu);
     break;
 
   case reg_stalls:
     if (cpu_model(processor) == NULL)
       error("$stalls only valid if processor unit model enabled (-I)\n");
-    *(unsigned_word*)cooked_buf = model_get_number_of_stalls(cpu_model(processor));
+    cooked_buf.unsigned_word = model_get_number_of_stalls(cpu_model(processor));
     break;
 
   case reg_cycles:
     if (cpu_model(processor) == NULL)
       error("$cycles only valid if processor unit model enabled (-I)\n");
-    *(unsigned_word*)cooked_buf = model_get_number_of_cycles(cpu_model(processor));
+    cooked_buf.unsigned_word = model_get_number_of_cycles(cpu_model(processor));
     break;
 
 #ifdef WITH_ALTIVEC
   case reg_vr:
-    *(vreg*)cooked_buf = cpu_registers(processor)->altivec.vr[description.index];
+    cooked_buf.vreg = cpu_registers(processor)->altivec.vr[description.index];
     break;
 
   case reg_vscr:
-    *(vscreg*)cooked_buf = cpu_registers(processor)->altivec.vscr;
+    cooked_buf.vscreg = cpu_registers(processor)->altivec.vscr;
     break;
 #endif
 
 #ifdef WITH_E500
   case reg_gprh:
-    *(gpreg*)cooked_buf = cpu_registers(processor)->e500.gprh[description.index];
+    cooked_buf.gpreg = cpu_registers(processor)->e500.gprh[description.index];
     break;
 
   case reg_evr:
-    *(unsigned64*)cooked_buf = EVR(description.index);
+    cooked_buf.uint64_t = EVR(description.index);
     break;
 
   case reg_acc:
-    *(accreg*)cooked_buf = cpu_registers(processor)->e500.acc;
+    cooked_buf.accreg = cpu_registers(processor)->e500.acc;
     break;
 #endif
 
   default:
-    printf_filtered("psim_read_register(processor=0x%lx,buf=0x%lx,reg=%s) %s\n",
-		    (unsigned long)processor, (unsigned long)buf, reg,
-		    "read of this register unimplemented");
-    break;
-
+    printf_filtered("psim_read_register(processor=%p,buf=%p,reg=%s) %s\n",
+		    processor, buf, reg, "read of this register unimplemented");
+    return 0;
   }
 
   /* the PSIM internal values are in host order.  To fetch raw data,
@@ -916,36 +912,27 @@ psim_read_register(psim *system,
     /* FIXME - assumes that all registers are simple integers */
     switch (description.size) {
     case 1: 
-      *(unsigned_1*)buf = H2T_1(*(unsigned_1*)cooked_buf);
+      *(unsigned_1*)buf = H2T_1(cooked_buf.unsigned_1);
       break;
     case 2:
-      *(unsigned_2*)buf = H2T_2(*(unsigned_2*)cooked_buf);
+      *(unsigned_2*)buf = H2T_2(cooked_buf.unsigned_2);
       break;
     case 4:
-      *(unsigned_4*)buf = H2T_4(*(unsigned_4*)cooked_buf);
+      *(unsigned_4*)buf = H2T_4(cooked_buf.unsigned_4);
       break;
     case 8:
-      *(unsigned_8*)buf = H2T_8(*(unsigned_8*)cooked_buf);
+      *(unsigned_8*)buf = H2T_8(cooked_buf.unsigned_8);
       break;
-#ifdef WITH_ALTIVEC
     case 16:
-      if (CURRENT_HOST_BYTE_ORDER != CURRENT_TARGET_BYTE_ORDER)
-        {
-	  union { vreg v; unsigned_8 d[2]; } h, t;
-          memcpy(&h.v/*dest*/, cooked_buf/*src*/, description.size);
-	  { _SWAP_8(t.d[0] =, h.d[1]); }
-	  { _SWAP_8(t.d[1] =, h.d[0]); }
-          memcpy(buf/*dest*/, &t/*src*/, description.size);
-          break;
-        }
-      else
-        memcpy(buf/*dest*/, cooked_buf/*src*/, description.size);
+      {
+	unsigned_16 v = H2T_16(cooked_buf.unsigned_16);
+	memcpy(buf/*dest*/, &v, description.size);
+      }
       break;
-#endif
     }
   }
   else {
-    memcpy(buf/*dest*/, cooked_buf/*src*/, description.size);
+    memcpy(buf/*dest*/, cooked_buf.bytes/*src*/, description.size);
   }
 
   return description.size;
@@ -963,7 +950,22 @@ psim_write_register(psim *system,
 {
   cpu *processor;
   register_descriptions description;
-  char *cooked_buf;
+  union {
+    uint8_t bytes[16];
+    unsigned_word unsigned_word;
+    unsigned_1 unsigned_1;
+    unsigned_2 unsigned_2;
+    unsigned_4 unsigned_4;
+    unsigned_8 unsigned_8;
+    unsigned_16 unsigned_16;
+    creg creg;
+    fpreg fpreg;
+    fpscreg fpscreg;
+    gpreg gpreg;
+    msreg msreg;
+    spreg spreg;
+    sreg sreg;
+  } cooked_buf;
 
   /* find our processor */
   if (which_cpu == MAX_NR_PROCESSORS) {
@@ -978,7 +980,6 @@ psim_write_register(psim *system,
   description = register_description(reg);
   if (description.type == reg_invalid)
     return 0;
-  cooked_buf = alloca (description.size);
 
   if (which_cpu == -1) {
     int i;
@@ -990,112 +991,99 @@ psim_write_register(psim *system,
 
   processor = system->processors[which_cpu];
 
-  /* If the data is comming in raw (target order), need to cook it
+  /* If the data is coming in raw (target order), need to cook it
      into host order before putting it into PSIM's internal structures */
   if (mode == raw_transfer) {
     switch (description.size) {
     case 1: 
-      *(unsigned_1*)cooked_buf = T2H_1(*(unsigned_1*)buf);
+      cooked_buf.unsigned_1 = T2H_1(*(unsigned_1*)buf);
       break;
     case 2:
-      *(unsigned_2*)cooked_buf = T2H_2(*(unsigned_2*)buf);
+      cooked_buf.unsigned_2 = T2H_2(*(unsigned_2*)buf);
       break;
     case 4:
-      *(unsigned_4*)cooked_buf = T2H_4(*(unsigned_4*)buf);
+      cooked_buf.unsigned_4 = T2H_4(*(unsigned_4*)buf);
       break;
     case 8:
-      *(unsigned_8*)cooked_buf = T2H_8(*(unsigned_8*)buf);
+      cooked_buf.unsigned_8 = T2H_8(*(unsigned_8*)buf);
       break;
-#ifdef WITH_ALTIVEC
     case 16:
-      if (CURRENT_HOST_BYTE_ORDER != CURRENT_TARGET_BYTE_ORDER)
-        {
-	  union { vreg v; unsigned_8 d[2]; } h, t;
-          memcpy(&t.v/*dest*/, buf/*src*/, description.size);
-	  { _SWAP_8(h.d[0] =, t.d[1]); }
-	  { _SWAP_8(h.d[1] =, t.d[0]); }
-          memcpy(cooked_buf/*dest*/, &h/*src*/, description.size);
-          break;
-        }
-      else
-        memcpy(cooked_buf/*dest*/, buf/*src*/, description.size);
-#endif
+      cooked_buf.unsigned_16 = T2H_16(*(unsigned_16*)buf);
+      break;
     }
   }
   else {
-    memcpy(cooked_buf/*dest*/, buf/*src*/, description.size);
+    memcpy(cooked_buf.bytes/*dest*/, buf/*src*/, description.size);
   }
 
   /* put the cooked value into the register */
   switch (description.type) {
 
   case reg_gpr:
-    cpu_registers(processor)->gpr[description.index] = *(gpreg*)cooked_buf;
+    cpu_registers(processor)->gpr[description.index] = cooked_buf.gpreg;
     break;
 
   case reg_fpr:
-    cpu_registers(processor)->fpr[description.index] = *(fpreg*)cooked_buf;
+    cpu_registers(processor)->fpr[description.index] = cooked_buf.fpreg;
     break;
 
   case reg_pc:
-    cpu_set_program_counter(processor, *(unsigned_word*)cooked_buf);
+    cpu_set_program_counter(processor, cooked_buf.unsigned_word);
     break;
 
   case reg_spr:
-    cpu_registers(processor)->spr[description.index] = *(spreg*)cooked_buf;
+    cpu_registers(processor)->spr[description.index] = cooked_buf.spreg;
     break;
 
   case reg_sr:
-    cpu_registers(processor)->sr[description.index] = *(sreg*)cooked_buf;
+    cpu_registers(processor)->sr[description.index] = cooked_buf.sreg;
     break;
 
   case reg_cr:
-    cpu_registers(processor)->cr = *(creg*)cooked_buf;
+    cpu_registers(processor)->cr = cooked_buf.creg;
     break;
 
   case reg_msr:
-    cpu_registers(processor)->msr = *(msreg*)cooked_buf;
+    cpu_registers(processor)->msr = cooked_buf.msreg;
     break;
 
   case reg_fpscr:
-    cpu_registers(processor)->fpscr = *(fpscreg*)cooked_buf;
+    cpu_registers(processor)->fpscr = cooked_buf.fpscreg;
     break;
 
 #ifdef WITH_E500
   case reg_gprh:
-    cpu_registers(processor)->e500.gprh[description.index] = *(gpreg*)cooked_buf;
+    cpu_registers(processor)->e500.gprh[description.index] = cooked_buf.gpreg;
     break;
 
   case reg_evr:
     {
-      unsigned64 v;
-      v = *(unsigned64*)cooked_buf;
+      uint64_t v;
+      v = cooked_buf.uint64_t;
       cpu_registers(processor)->e500.gprh[description.index] = v >> 32;
       cpu_registers(processor)->gpr[description.index] = v;
       break;
     }
 
   case reg_acc:
-    cpu_registers(processor)->e500.acc = *(accreg*)cooked_buf;
+    cpu_registers(processor)->e500.acc = cooked_buf.accreg;
     break;
 #endif
 
 #ifdef WITH_ALTIVEC
   case reg_vr:
-    cpu_registers(processor)->altivec.vr[description.index] = *(vreg*)cooked_buf;
+    cpu_registers(processor)->altivec.vr[description.index] = cooked_buf.vreg;
     break;
 
   case reg_vscr:
-    cpu_registers(processor)->altivec.vscr = *(vscreg*)cooked_buf;
+    cpu_registers(processor)->altivec.vscr = cooked_buf.vscreg;
     break;
 #endif
 
   default:
-    printf_filtered("psim_write_register(processor=0x%lx,cooked_buf=0x%lx,reg=%s) %s\n",
-		    (unsigned long)processor, (unsigned long)cooked_buf, reg,
-		    "read of this register unimplemented");
-    break;
-
+    printf_filtered("psim_write_register(processor=%p,buf=%p,reg=%s) %s\n",
+		    processor, buf, reg, "read of this register unimplemented");
+    return 0;
   }
 
   return description.size;
@@ -1208,7 +1196,7 @@ psim_merge_device_file(device *root,
       /* append the next line */
       if (!fgets(device_path + curlen, sizeof(device_path) - curlen, description)) {
 	fclose(description);
-	error("%s:%s: unexpected eof in line continuation - %s",
+	error("%s:%d: unexpected eof in line continuation - %s",
 	      file_name, line_nr, device_path);
       }
       if (strchr(device_path, '\n') == NULL) {

@@ -1,5 +1,5 @@
 /* size.c -- report size of various sections of an executable file.
-   Copyright (C) 1991-2019 Free Software Foundation, Inc.
+   Copyright (C) 1991-2024 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -92,11 +92,12 @@ usage (FILE *stream, int status)
   -A|-B|-G  --format={sysv|berkeley|gnu}  Select output style (default is %s)\n\
   -o|-d|-x  --radix={8|10|16}         Display numbers in octal, decimal or hex\n\
   -t        --totals                  Display the total sizes (Berkeley only)\n\
+  -f                                  Ignored.\n\
             --common                  Display total size for *COM* syms\n\
             --target=<bfdname>        Set the binary file format\n\
             @<file>                   Read options from <file>\n\
-  -h        --help                    Display this information\n\
-  -v        --version                 Display the program's version\n\
+  -h|-H|-?  --help                    Display this information\n\
+  -v|-V     --version                 Display the program's version\n\
 \n"),
 #if BSD_DEFAULT
   "berkeley"
@@ -134,12 +135,10 @@ main (int argc, char **argv)
   int temp;
   int c;
 
-#if defined (HAVE_SETLOCALE) && defined (HAVE_LC_MESSAGES)
+#ifdef HAVE_LC_MESSAGES
   setlocale (LC_MESSAGES, "");
 #endif
-#if defined (HAVE_SETLOCALE)
   setlocale (LC_CTYPE, "");
-#endif
   bindtextdomain (PACKAGE, LOCALEDIR);
   textdomain (PACKAGE);
 
@@ -339,7 +338,6 @@ display_bfd (bfd *abfd)
     {
       bfd_nonfatal (bfd_get_filename (abfd));
       list_matching_formats (matching);
-      free (matching);
       return_code = 3;
       return;
     }
@@ -362,10 +360,7 @@ display_bfd (bfd *abfd)
   bfd_nonfatal (bfd_get_filename (abfd));
 
   if (bfd_get_error () == bfd_error_file_ambiguously_recognized)
-    {
-      list_matching_formats (matching);
-      free (matching);
-    }
+    list_matching_formats (matching);
 
   return_code = 3;
 }
@@ -373,16 +368,15 @@ display_bfd (bfd *abfd)
 static void
 display_archive (bfd *file)
 {
-  bfd *arfile = (bfd *) NULL;
-  bfd *last_arfile = (bfd *) NULL;
-
+  bfd *last_arfile = NULL;
   for (;;)
     {
-      bfd_set_error (bfd_error_no_error);
-
-      arfile = bfd_openr_next_archived_file (file, arfile);
-      if (arfile == NULL)
+      bfd *arfile = bfd_openr_next_archived_file (file, last_arfile);
+      if (arfile == NULL
+	  || arfile == last_arfile)
 	{
+	  if (arfile != NULL)
+	    bfd_set_error (bfd_error_malformed_archive);
 	  if (bfd_get_error () != bfd_error_no_more_archived_files)
 	    {
 	      bfd_nonfatal (bfd_get_filename (file));
@@ -391,17 +385,10 @@ display_archive (bfd *file)
 	  break;
 	}
 
-      display_bfd (arfile);
-
       if (last_arfile != NULL)
-	{
-	  bfd_close (last_arfile);
+	bfd_close (last_arfile);
 
-	  /* PR 17512: file: a244edbc.  */
-	  if (last_arfile == arfile)
-	    return;
-	}
-
+      display_bfd (arfile);
       last_arfile = arfile;
     }
 
@@ -446,12 +433,9 @@ size_number (bfd_size_type num)
 {
   char buffer[40];
 
-  sprintf (buffer,
-	   (radix == decimal ? "%" BFD_VMA_FMT "u" :
-	   ((radix == octal) ? "0%" BFD_VMA_FMT "o" : "0x%" BFD_VMA_FMT "x")),
-	   num);
-
-  return strlen (buffer);
+  return sprintf (buffer, (radix == decimal ? "%" PRIu64
+			   : radix == octal ? "0%" PRIo64 : "0x%" PRIx64),
+		  (uint64_t) num);
 }
 
 static void
@@ -459,10 +443,9 @@ rprint_number (int width, bfd_size_type num)
 {
   char buffer[40];
 
-  sprintf (buffer,
-	   (radix == decimal ? "%" BFD_VMA_FMT "u" :
-	   ((radix == octal) ? "0%" BFD_VMA_FMT "o" : "0x%" BFD_VMA_FMT "x")),
-	   num);
+  sprintf (buffer, (radix == decimal ? "%" PRIu64
+		    : radix == octal ? "0%" PRIo64 : "0x%" PRIx64),
+	   (uint64_t) num);
 
   printf ("%*s", width, buffer);
 }
@@ -478,11 +461,11 @@ berkeley_or_gnu_sum (bfd *abfd ATTRIBUTE_UNUSED, sec_ptr sec,
   flagword flags;
   bfd_size_type size;
 
-  flags = bfd_get_section_flags (abfd, sec);
+  flags = bfd_section_flags (sec);
   if ((flags & SEC_ALLOC) == 0)
     return;
 
-  size = bfd_get_section_size (sec);
+  size = bfd_section_size (sec);
   if ((flags & SEC_CODE) != 0
       || (selected_output_format == FORMAT_BERKLEY
 	  && (flags & SEC_READONLY) != 0))
@@ -557,21 +540,25 @@ static void
 sysv_internal_sizer (bfd *file ATTRIBUTE_UNUSED, sec_ptr sec,
 		     void *ignore ATTRIBUTE_UNUSED)
 {
-  bfd_size_type size = bfd_section_size (file, sec);
+  flagword flags = bfd_section_flags (sec);
+  /* Exclude sections with no flags set.  This is to omit som spaces.  */
+  if (flags == 0)
+    return;
 
   if (   ! bfd_is_abs_section (sec)
       && ! bfd_is_com_section (sec)
       && ! bfd_is_und_section (sec))
     {
-      int namelen = strlen (bfd_section_name (file, sec));
+      bfd_size_type size = bfd_section_size (sec);
+      int namelen = strlen (bfd_section_name (sec));
 
       if (namelen > svi_namelen)
 	svi_namelen = namelen;
 
       svi_total += size;
 
-      if (bfd_section_vma (file, sec) > svi_maxvma)
-	svi_maxvma = bfd_section_vma (file, sec);
+      if (bfd_section_vma (sec) > svi_maxvma)
+	svi_maxvma = bfd_section_vma (sec);
     }
 }
 
@@ -589,17 +576,21 @@ static void
 sysv_internal_printer (bfd *file ATTRIBUTE_UNUSED, sec_ptr sec,
 		       void *ignore ATTRIBUTE_UNUSED)
 {
-  bfd_size_type size = bfd_section_size (file, sec);
+  flagword flags = bfd_section_flags (sec);
+  if (flags == 0)
+    return;
 
   if (   ! bfd_is_abs_section (sec)
       && ! bfd_is_com_section (sec)
       && ! bfd_is_und_section (sec))
     {
+      bfd_size_type size = bfd_section_size (sec);
+
       svi_total += size;
 
-      sysv_one_line (bfd_section_name (file, sec),
+      sysv_one_line (bfd_section_name (sec),
 		     size,
-		     bfd_section_vma (file, sec));
+		     bfd_section_vma (sec));
     }
 }
 

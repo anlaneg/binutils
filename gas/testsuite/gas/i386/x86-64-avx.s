@@ -1222,9 +1222,9 @@ _start:
 
 # Tests for op regl/mem32, xmm, xmm
 	vcvtsi2sd %ecx,%xmm4,%xmm6
-	vcvtsi2sd (%rcx),%xmm4,%xmm6
+	vcvtsi2sdl (%rcx),%xmm4,%xmm6
 	vcvtsi2ss %ecx,%xmm4,%xmm6
-	vcvtsi2ss (%rcx),%xmm4,%xmm6
+	vcvtsi2ssl (%rcx),%xmm4,%xmm6
 
 # Tests for op imm8, xmm/mem32, xmm, xmm
 	vcmpss $7,%xmm4,%xmm6,%xmm2
@@ -3069,12 +3069,10 @@ _start:
 	vcvttsd2si rcx,[rcx]
 
 # Tests for op regq/mem64, xmm, xmm
-	vcvtsi2sdq xmm6,xmm4,rcx
-	vcvtsi2sdq xmm6,xmm4,QWORD PTR [rcx]
-	vcvtsi2sdq xmm6,xmm4,[rcx]
-	vcvtsi2ssq xmm6,xmm4,rcx
-	vcvtsi2ssq xmm6,xmm4,QWORD PTR [rcx]
-	vcvtsi2ssq xmm6,xmm4,[rcx]
+	vcvtsi2sd xmm6,xmm4,rcx
+	vcvtsi2sd xmm6,xmm4,QWORD PTR [rcx]
+	vcvtsi2ss xmm6,xmm4,rcx
+	vcvtsi2ss xmm6,xmm4,QWORD PTR [rcx]
 
 # Tests for op imm8, regq/mem64, xmm, xmm
 	vpinsrq xmm6,xmm4,rcx,7

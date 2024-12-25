@@ -1,6 +1,6 @@
 /* Routines for handling XML generic OS data provided by target.
 
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,11 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "target.h"
-#include "common/vec.h"
 #include "xml-support.h"
 #include "osdata.h"
 #include "ui-out.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 
 #if !defined(HAVE_LIBEXPAT)
 
@@ -36,7 +34,7 @@ osdata_parse (const char *xml)
     {
       have_warned = 1;
       warning (_("Can not parse XML OS data; XML support was disabled "
-                "at compile time"));
+		"at compile time"));
     }
 
   return NULL;
@@ -55,8 +53,8 @@ struct osdata_parsing_data
 
 static void
 osdata_start_osdata (struct gdb_xml_parser *parser,
-                        const struct gdb_xml_element *element,
-                        void *user_data,
+			const struct gdb_xml_element *element,
+			void *user_data,
 			std::vector<gdb_xml_value> &attributes)
 {
   struct osdata_parsing_data *data = (struct osdata_parsing_data *) user_data;
@@ -65,15 +63,15 @@ osdata_start_osdata (struct gdb_xml_parser *parser,
     gdb_xml_error (parser, _("Seen more than on osdata element"));
 
   char *type = (char *) xml_find_attribute (attributes, "type")->value.get ();
-  data->osdata.reset (new struct osdata (std::string (type)));
+  data->osdata = std::make_unique<osdata> (std::string (type));
 }
 
 /* Handle the start of a <item> element.  */
 
 static void
 osdata_start_item (struct gdb_xml_parser *parser,
-                  const struct gdb_xml_element *element,
-                  void *user_data,
+		  const struct gdb_xml_element *element,
+		  void *user_data,
 		  std::vector<gdb_xml_value> &attributes)
 {
   struct osdata_parsing_data *data = (struct osdata_parsing_data *) user_data;
@@ -84,8 +82,8 @@ osdata_start_item (struct gdb_xml_parser *parser,
 
 static void
 osdata_start_column (struct gdb_xml_parser *parser,
-                    const struct gdb_xml_element *element,
-                    void *user_data,
+		    const struct gdb_xml_element *element,
+		    void *user_data,
 		    std::vector<gdb_xml_value> &attributes)
 {
   struct osdata_parsing_data *data = (struct osdata_parsing_data *) user_data;
@@ -99,8 +97,8 @@ osdata_start_column (struct gdb_xml_parser *parser,
 
 static void
 osdata_end_column (struct gdb_xml_parser *parser,
-                  const struct gdb_xml_element *element,
-                  void *user_data, const char *body_text)
+		  const struct gdb_xml_element *element,
+		  void *user_data, const char *body_text)
 {
   osdata_parsing_data *data = (struct osdata_parsing_data *) user_data;
   struct osdata *osdata = data->osdata.get ();
@@ -163,7 +161,7 @@ std::unique_ptr<osdata>
 get_osdata (const char *type)
 {
   std::unique_ptr<osdata> osdata;
-  gdb::optional<gdb::char_vector> xml = target_get_osdata (type);
+  std::optional<gdb::char_vector> xml = target_get_osdata (type);
 
   if (xml)
     {
@@ -254,7 +252,7 @@ info_osdata (const char *type)
 	  snprintf (col_name, 32, "col%d", ix);
 	  uiout->table_header (10, ui_left,
 			       col_name, last->columns[ix].name.c_str ());
-        }
+	}
     }
 
   uiout->table_body ();
@@ -274,12 +272,11 @@ info_osdata (const char *type)
 		 continue;
 
 	       snprintf (col_name, 32, "col%d", ix_cols);
-	       uiout->field_string (col_name,
-				    item.columns[ix_cols].value.c_str ());
+	       uiout->field_string (col_name, item.columns[ix_cols].value);
 	     }
 	 }
 
-         uiout->text ("\n");
+	 uiout->text ("\n");
        }
     }
 }
@@ -290,9 +287,10 @@ info_osdata_command (const char *arg, int from_tty)
   info_osdata (arg);
 }
 
+void _initialize_osdata ();
 void
-_initialize_osdata (void)
+_initialize_osdata ()
 {
   add_info ("os", info_osdata_command,
-           _("Show OS data ARG."));
+	   _("Show OS data ARG."));
 }

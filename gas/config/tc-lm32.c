@@ -1,5 +1,5 @@
 /* tc-lm32.c - Lattice Mico32 assembler.
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
    Contributed by Jon Beniston <jon@beniston.com>
 
    This file is part of GAS, the GNU Assembler.
@@ -85,9 +85,9 @@ const pseudo_typeS md_pseudo_table[] =
 
 /* Target specific command line options.  */
 
-const char * md_shortopts = "";
+const char md_shortopts[] = "";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_MULTIPLY_ENABLED         (OPTION_MD_BASE + 1)
   { "mmultiply-enabled",            no_argument, NULL, OPTION_MULTIPLY_ENABLED },
@@ -109,7 +109,7 @@ struct option md_longopts[] =
   { "mall-enabled",                 no_argument, NULL, OPTION_ALL_ENABLED },
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* Display architecture specific options.  */
 
@@ -277,7 +277,7 @@ md_undefined_symbol (char * name ATTRIBUTE_UNUSED)
 valueT
 md_section_align (asection *seg, valueT addr)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
+  int align = bfd_section_alignment (seg);
   return ((addr + (1 << align) - 1) & -(1 << align));
 }
 
@@ -380,15 +380,15 @@ md_pcrel_from_section (fixS * fixP, segT sec)
 
 /* Return true if we can partially resolve a relocation now.  */
 
-bfd_boolean
+bool
 lm32_fix_adjustable (fixS * fixP)
 {
   /* We need the symbol name for the VTABLE entries */
   if (fixP->fx_r_type == BFD_RELOC_VTABLE_INHERIT
       || fixP->fx_r_type == BFD_RELOC_VTABLE_ENTRY)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 /* Relaxation isn't required/supported on this target.  */

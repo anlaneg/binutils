@@ -1,4 +1,4 @@
-# Copyright 2000-2019 Free Software Foundation, Inc.
+# Copyright 2000-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,7 +15,7 @@
 
 # This file was written by Michael Snyder (msnyder@redhat.com)
 
-set skip_float_test [gdb_skip_float_test]
+set allow_float_test [allow_float_test]
 
 # re-use the program from the "return2" test.
 if { [prepare_for_testing "failed to prepare" finish return2.c] } {
@@ -76,8 +76,7 @@ proc finish_void { } {
 
 proc finish_abbreviation { abbrev } {
 
-    if { ! [ runto "int_func" ] } then {
-        fail "running to int_func"
+    if {![runto "int_func"]} {
         return -1
     }
 
@@ -86,11 +85,24 @@ proc finish_abbreviation { abbrev } {
              "Testing the \"$abbrev\" abbreviation for \"finish\""
 }
 
-proc finish_tests { } {
-    global gdb_prompt skip_float_test
+# Test "set print finish off".
+proc finish_no_print {} {
+    global decimal
 
-    if { ! [ runto_main ] } then {
-	untested "couldn't run to main"
+    if {![runto "int_func"]} {
+	return
+    }
+    gdb_test_no_output "set print finish off"
+    gdb_test "finish" \
+	"Value returned is \\\$$decimal = <not displayed>"
+    gdb_test "print \$" " = 1" \
+	"Ensure return value was properly saved"
+}
+
+proc finish_tests { } {
+    global gdb_prompt allow_float_test
+
+    if {![runto_main]} {
 	return -1
     }
 
@@ -100,11 +112,12 @@ proc finish_tests { } {
     finish_1 "int"
     finish_1 "long"
     finish_1 "long_long"
-    if {!$skip_float_test} {
+    if {$allow_float_test} {
 	finish_1 "float"
 	finish_1 "double"
     }
     finish_abbreviation "fin"
+    finish_no_print
 }
 
 set prev_timeout $timeout

@@ -1,6 +1,6 @@
 /* Blackfin Phase Lock Loop (PLL) model.
 
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,10 +18,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
-#include "machs.h"
 #include "devices.h"
 #include "dv-bfin_pll.h"
 
@@ -56,7 +56,6 @@ bfin_pll_io_write_buffer (struct hw *me, const void *source,
   bu32 mmr_off;
   bu32 value;
   bu16 *value16p;
-  bu32 *value32p;
   void *valuep;
 
   /* Invalid access mode is higher priority than missing register.  */
@@ -69,9 +68,8 @@ bfin_pll_io_write_buffer (struct hw *me, const void *source,
     value = dv_load_2 (source);
 
   mmr_off = addr - pll->base;
-  valuep = (void *)((unsigned long)pll + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)pll + mmr_base() + mmr_off);
   value16p = valuep;
-  value32p = valuep;
 
   HW_TRACE_WRITE ();
 
@@ -108,7 +106,7 @@ bfin_pll_io_read_buffer (struct hw *me, void *dest,
     return 0;
 
   mmr_off = addr - pll->base;
-  valuep = (void *)((unsigned long)pll + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)pll + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 

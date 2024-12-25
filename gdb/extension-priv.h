@@ -1,7 +1,7 @@
 /* Private implementation details of interface between gdb and its
    extension languages.
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,8 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef EXTENSION_PRIV_H
-#define EXTENSION_PRIV_H
+#ifndef GDB_EXTENSION_PRIV_H
+#define GDB_EXTENSION_PRIV_H
 
 #include "extension.h"
 #include <signal.h>
@@ -92,7 +92,7 @@ struct extension_language_script_ops
 
   /* Return non-zero if auto-loading scripts in this extension language
      is enabled.  */
-  int (*auto_load_enabled) (const struct extension_language_defn *);
+  bool (*auto_load_enabled) (const struct extension_language_defn *);
 };
 
 /* The interface for making calls from GDB to an external extension
@@ -109,14 +109,19 @@ struct extension_language_script_ops
 
 struct extension_language_ops
 {
-  /* Called at the end of gdb initialization to give the extension language
-     an opportunity to finish up.  This is useful for things like adding
-     new commands where one has to wait until gdb itself is initialized.  */
-  void (*finish_initialization) (const struct extension_language_defn *);
+  /* Called after GDB has processed the early initialization settings
+     files.  This is when the extension language should be initialized.  By
+     the time this is called all of the earlier initialization functions
+     have already been called.  */
+  void (*initialize) (const struct extension_language_defn *);
 
   /* Return non-zero if the extension language successfully initialized.
      This method is required.  */
   int (*initialized) (const struct extension_language_defn *);
+
+  /* Called just before GDB exits.  This shuts down the extension
+     language.  This can be NULL.  */
+  void (*shutdown) (const struct extension_language_defn *);
 
   /* Process a sequence of commands embedded in GDB's own scripting language.
      E.g.,
@@ -136,7 +141,7 @@ struct extension_language_ops
 			       struct ext_lang_type_printers *);
 
   /* Try to pretty-print TYPE.  If successful the pretty-printed type is
-     stored in *PRETTIED_TYPE, and the caller must free it.
+     stored in *PRETTIED_TYPE.
      Returns EXT_LANG_RC_OK upon success, EXT_LANG_RC_NOP if the type
      is not recognized, and EXT_LANG_RC_ERROR if an error was encountered.
      This function has a bit of a funny name, since it actually applies
@@ -145,26 +150,22 @@ struct extension_language_ops
   enum ext_lang_rc (*apply_type_printers)
     (const struct extension_language_defn *,
      const struct ext_lang_type_printers *,
-     struct type *, char **prettied_type);
+     struct type *,
+     gdb::unique_xmalloc_ptr<char> *prettied_type);
 
   /* Called after a type has been printed to give the type pretty-printer
      mechanism an opportunity to clean up.  */
   void (*free_type_printers) (const struct extension_language_defn *,
 			      struct ext_lang_type_printers *);
 
-  /* Try to pretty-print a value of type TYPE located at VAL's contents
-     buffer + EMBEDDED_OFFSET, which came from the inferior at address
-     ADDRESS + EMBEDDED_OFFSET, onto stdio stream STREAM according to
-     OPTIONS.
-     VAL is the whole object that came from ADDRESS.
-     Returns EXT_LANG_RC_OK upon success, EXT_LANG_RC_NOP if the value
-     is not recognized, and EXT_LANG_RC_ERROR if an error was encountered.  */
+  /* Try to pretty-print a value, onto stdio stream STREAM according
+     to OPTIONS.  VAL is the object to print.  Returns EXT_LANG_RC_OK
+     upon success, EXT_LANG_RC_NOP if the value is not recognized, and
+     EXT_LANG_RC_ERROR if an error was encountered.  */
   enum ext_lang_rc (*apply_val_pretty_printer)
     (const struct extension_language_defn *,
-     struct type *type,
-     LONGEST embedded_offset, CORE_ADDR address,
-     struct ui_file *stream, int recurse,
-     struct value *val, const struct value_print_options *options,
+     struct value *val, struct ui_file *stream, int recurse,
+     const struct value_print_options *options,
      const struct language_defn *language);
 
   /* GDB access to the "frame filter" feature.
@@ -183,9 +184,14 @@ struct extension_language_ops
      or SCR_BT_COMPLETED on success.  */
   enum ext_lang_bt_status (*apply_frame_filter)
     (const struct extension_language_defn *,
-     struct frame_info *frame, frame_filter_flags flags,
+     const frame_info_ptr &frame, frame_filter_flags flags,
      enum ext_lang_frame_args args_type,
      struct ui_out *out, int frame_low, int frame_high);
+
+  /* Used for registering the ptwrite filter to the current thread.  */
+  void (*apply_ptwrite_filter)
+    (const struct extension_language_defn *extlang,
+     struct btrace_thread_info *btinfo);
 
   /* Update values held by the extension language when OBJFILE is discarded.
      New global types must be created for every such value, which must then be
@@ -195,7 +201,8 @@ struct extension_language_ops
      COPIED_TYPES is used to prevent cycles / duplicates and is passed to
      preserve_one_value.  */
   void (*preserve_values) (const struct extension_language_defn *,
-			   struct objfile *objfile, htab_t copied_types);
+			   struct objfile *objfile,
+			   copied_types_hash_t &copied_types);
 
   /* Return non-zero if there is a stop condition for the breakpoint.
      This is used to implement the restriction that a breakpoint may have
@@ -228,9 +235,9 @@ struct extension_language_ops
      This is called by GDB's SIGINT handler and must be async-safe.  */
   void (*set_quit_flag) (const struct extension_language_defn *);
 
-  /* Return non-zero if a SIGINT has occurred.
+  /* Return true if a SIGINT has occurred.
      This is expected to also clear the indicator.  */
-  int (*check_quit_flag) (const struct extension_language_defn *);
+  bool (*check_quit_flag) (const struct extension_language_defn *);
 
   /* Called before gdb prints its prompt, giving extension languages an
      opportunity to change it with set_prompt.
@@ -254,6 +261,54 @@ struct extension_language_ops
      struct type *obj_type,
      const char *method_name,
      std::vector<xmethod_worker_up> *dm_vec);
+
+  /* Colorize a source file.  NAME is the source file's name, and
+     CONTENTS is the contents of the file.  This should either return
+     colorized (using ANSI terminal escapes) version of the contents,
+     or an empty option.  */
+  std::optional<std::string> (*colorize) (const std::string &name,
+					  const std::string &contents);
+
+  /* Colorize a single line of disassembler output, CONTENT.  This should
+     either return colorized (using ANSI terminal escapes) version of the
+     contents, or an empty optional.  */
+  std::optional<std::string> (*colorize_disasm) (const std::string &content,
+						 gdbarch *gdbarch);
+
+  /* Print a single instruction from ADDRESS in architecture GDBARCH.  INFO
+     is the standard libopcodes disassembler_info structure.  Bytes for the
+     instruction being printed should be read using INFO->read_memory_func
+     as the actual instruction bytes might be in a buffer.
+
+     Use INFO->fprintf_func to print the results of the disassembly, and
+     return the length of the instruction.
+
+     If no instruction can be disassembled then return an empty value and
+     other extension languages will get a chance to perform the
+     disassembly.  */
+  std::optional<int> (*print_insn) (struct gdbarch *gdbarch,
+				    CORE_ADDR address,
+				    struct disassemble_info *info);
+
+  /* Give extension languages a chance to deal with missing debug
+     information.  OBJFILE is the file for which GDB was unable to find
+     any debug information.  */
+  ext_lang_missing_file_result
+    (*handle_missing_debuginfo) (const struct extension_language_defn *,
+				 struct objfile *objfile);
+
+  /* Give extension languages a chance to deal with missing objfiles.
+     PSPACE is the program space in which GDB is searching for a missing
+     objfile, and will not be NULL.  BUILD_ID is the build-id of the
+     objfile we're looking for, and will not be NULL.  FILENAME is the name
+     of the file we're looking for, and will not be NULL.  See
+     ext_lang_find_objfile_from_buildid for some additional information
+     about the meaning of FILENAME.  */
+  ext_lang_missing_file_result
+    (*find_objfile_from_buildid) (const struct extension_language_defn *,
+				  program_space *pspace,
+				  const struct bfd_build_id *build_id,
+				  const char *filename);
 };
 
 /* State necessary to restore a signal handler to its previous value.  */
@@ -279,11 +334,9 @@ struct active_ext_lang_state
   struct signal_handler sigint_handler;
 };
 
-extern const struct extension_language_defn *get_active_ext_lang (void);
-
 extern struct active_ext_lang_state *set_active_ext_lang
   (const struct extension_language_defn *);
 
 extern void restore_active_ext_lang (struct active_ext_lang_state *previous);
 
-#endif /* EXTENSION_PRIV_H */
+#endif /* GDB_EXTENSION_PRIV_H */

@@ -1,5 +1,5 @@
 /* tc-or1k.h -- Header file for tc-or1k.c.
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -29,9 +29,6 @@ extern unsigned long or1k_machine;
 #define TARGET_FORMAT           "elf32-or1k"
 #define TARGET_BYTES_BIG_ENDIAN 1
 
-extern const char or1k_comment_chars [];
-#define tc_comment_chars or1k_comment_chars
-
 /* Permit temporary numeric labels.  */
 #define LOCAL_LABELS_FB 1
 
@@ -46,11 +43,10 @@ extern const char or1k_comment_chars [];
 #define md_apply_fix or1k_apply_fix
 extern void or1k_apply_fix (struct fix *, valueT *, segT);
 
-extern bfd_boolean or1k_fix_adjustable (struct fix *);
+extern bool or1k_fix_adjustable (struct fix *);
 #define tc_fix_adjustable(FIX) or1k_fix_adjustable (FIX)
 
 /* Call md_pcrel_from_section(), not md_pcrel_from().  */
-extern long md_pcrel_from_section (struct fix *, segT);
 #define MD_PCREL_FROM_SECTION(FIX, SEC) md_pcrel_from_section (FIX, SEC)
 
 /* For 8 vs 16 vs 32 bit branch selection.  */
@@ -75,3 +71,5 @@ void or1k_elf_final_processing (void);
 #define tc_cfi_frame_initial_instructions \
     or1k_cfi_frame_initial_instructions
 extern void or1k_cfi_frame_initial_instructions (void);
+
+#define md_single_noop_insn "l.nop"

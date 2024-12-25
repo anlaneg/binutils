@@ -1,6 +1,6 @@
 /* Very simple "bfd" target, for GDB, the GNU debugger.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,15 +17,14 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef BFD_TARGET_H
-#define BFD_TARGET_H
+#ifndef GDB_BFD_TARGET_H
+#define GDB_BFD_TARGET_H
 
-struct bfd;
+#include "gdb_bfd.h"
+
 struct target_ops;
 
-/* Given an existing BFD, re-open it as a "struct target_ops".  This
-   acquires a new reference to the BFD.  This reference will be
-   released when the target is closed.  */
-struct target_ops *target_bfd_reopen (struct bfd *bfd);
+/* Given an existing BFD, re-open it as a "struct target_ops".  */
+target_ops_up target_bfd_reopen (const gdb_bfd_ref_ptr &bfd);
 
-#endif
+#endif /* GDB_BFD_TARGET_H */

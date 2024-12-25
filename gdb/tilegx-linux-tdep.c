@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux on Tilera TILE-Gx processors.
 
-   Copyright (C) 2012-2019 Free Software Foundation, Inc.
+   Copyright (C) 2012-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "osabi.h"
 #include "linux-tdep.h"
 #include "glibc-tdep.h"
@@ -28,12 +27,13 @@
 #include "tramp-frame.h"
 #include "trad-frame.h"
 #include "tilegx-tdep.h"
+#include "gdbarch.h"
 
 /* Signal trampoline support.  */
 
 static void
 tilegx_linux_sigframe_init (const struct tramp_frame *self,
-			    struct frame_info *this_frame,
+			    const frame_info_ptr &this_frame,
 			    struct trad_frame_cache *this_cache,
 			    CORE_ADDR func)
 {
@@ -41,9 +41,9 @@ tilegx_linux_sigframe_init (const struct tramp_frame *self,
 
   /* Base address of register save area.  */
   CORE_ADDR base = sp
-                   + 16    /* Skip ABI_SAVE_AREA.  */
-                   + 128   /* Skip SIGINFO.  */
-                   + 40;   /* Skip UCONTEXT.  */
+		   + 16    /* Skip ABI_SAVE_AREA.  */
+		   + 128   /* Skip SIGINFO.  */
+		   + 40;   /* Skip UCONTEXT.  */
 
   /* Address of saved LR register (R56) which holds previous PC.  */
   CORE_ADDR prev_pc = base + 56 * 8;
@@ -54,7 +54,7 @@ tilegx_linux_sigframe_init (const struct tramp_frame *self,
     trad_frame_set_reg_addr (this_cache, i, base + i * 8);
 
   trad_frame_set_reg_value (this_cache, 64,
-                            get_frame_memory_unsigned (this_frame, prev_pc, 8));
+			    get_frame_memory_unsigned (this_frame, prev_pc, 8));
 
   /* Save a frame ID.  */
   trad_frame_set_id (this_cache, frame_id_build (base, func));
@@ -110,7 +110,7 @@ tilegx_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
   int arch_size = gdbarch_addr_bit (gdbarch);
 
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   tramp_frame_prepend_unwinder (gdbarch, &tilegx_linux_rt_sigframe);
 
@@ -120,10 +120,10 @@ tilegx_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   /* GNU/Linux uses SVR4-style shared libraries.  */
   if (arch_size == 32)
     set_solib_svr4_fetch_link_map_offsets (gdbarch,
-					   svr4_ilp32_fetch_link_map_offsets);
+					   linux_ilp32_fetch_link_map_offsets);
   else
     set_solib_svr4_fetch_link_map_offsets (gdbarch,
-					   svr4_lp64_fetch_link_map_offsets);
+					   linux_lp64_fetch_link_map_offsets);
 
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
@@ -134,8 +134,9 @@ tilegx_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_skip_solib_resolver (gdbarch, glibc_skip_solib_resolver);
 }
 
+void _initialize_tilegx_linux_tdep ();
 void
-_initialize_tilegx_linux_tdep (void)
+_initialize_tilegx_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_tilegx, bfd_mach_tilegx, GDB_OSABI_LINUX,
 			  tilegx_linux_init_abi);

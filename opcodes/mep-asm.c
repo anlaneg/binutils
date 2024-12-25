@@ -5,7 +5,7 @@
    THIS FILE IS MACHINE GENERATED WITH CGEN.
    - the resultant file is machine generated, cgen-asm.in isn't
 
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
 
    This file is part of libopcodes.
 
@@ -305,6 +305,7 @@ parse_lo16 (CGEN_CPU_DESC cd,
     }
 
   if (**strp == '%')
+    /* xgettext:no-c-format */
     return _("invalid %function() here");
 
   return cgen_parse_signed_integer (cd, strp, opindex, valuep);
@@ -501,6 +502,7 @@ parse_unsigned7 (CGEN_CPU_DESC cd, const char **strp,
     }
 
   if (**strp == '%')
+    /* xgettext:no-c-format */
     return _("invalid %function() here");
 
   return parse_mep_alignu (cd, strp, opindex, valuep);
@@ -582,7 +584,7 @@ typedef struct
   int len;
 } arg;
 
-macro macros[] =
+static macro const macros[] =
 {
   { "sizeof", "(`1.end + (- `1))"},
   { "startof", "(`1 | 0)" },
@@ -615,10 +617,10 @@ str_append (char *dest, const char *input, int len)
   return strncat (new_dest, input, len);
 }
 
-static macro *
+static const macro *
 lookup_macro (const char *name)
 {
-  macro *m;
+  const macro *m;
 
   for (m = macros; m->name; ++m)
     if (strncmp (m->name, name, strlen(m->name)) == 0)
@@ -628,7 +630,7 @@ lookup_macro (const char *name)
 }
 
 static char *
-expand_macro (arg *args, int narg, macro *mac)
+expand_macro (arg *args, int narg, const macro *mac)
 {
   char *result = 0, *rescanned_result = 0;
   char *e = mac->expansion;
@@ -638,10 +640,10 @@ expand_macro (arg *args, int narg, macro *mac)
   /*  printf("expanding macro %s with %d args\n", mac->name, narg + 1); */
   while (*e)
     {
-      if (*e == '`' &&
-	  (*e+1) &&
-	  ((*(e + 1) - '1') <= MAXARGS) &&
-	  ((*(e + 1) - '1') <= narg))
+      if (*e == '`'
+	  && (*e+1)
+	  && ((*(e + 1) - '1') <= MAXARGS)
+	  && ((*(e + 1) - '1') <= narg))
 	{
 	  result = str_append (result, mark, e - mark);
 	  mac_arg = (*(e + 1) - '1');
@@ -678,7 +680,7 @@ expand_string (const char *in, int first_only)
   arg args[MAXARGS];
   int state = IN_TEXT;
   const char *mark = in;
-  macro *pmacro = NULL;
+  const macro *pmacro = NULL;
   char *expansion = 0;
   char *result = 0;
 
@@ -759,7 +761,6 @@ expand_string (const char *in, int first_only)
 	      if (narg > -1)
 		args[narg].len++;
 	    }
-
 	}
       ++in;
     }
@@ -811,8 +812,7 @@ mep_cgen_expand_macros_and_parse_operand (CGEN_CPU_DESC cd, int opindex,
 	*strp_in += (str - hold);
     }
 
-  if (hold)
-    free (hold);
+  free (hold);
 
   return errmsg;
 }

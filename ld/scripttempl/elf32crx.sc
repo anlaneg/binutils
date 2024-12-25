@@ -1,6 +1,6 @@
 # Linker Script for National Semiconductor's CRX-ELF32.
 #
-# Copyright (C) 2014-2019 Free Software Foundation, Inc.
+# Copyright (C) 2014-2024 Free Software Foundation, Inc.
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
@@ -20,7 +20,7 @@ cat <<EOF
 
 /* Example Linker Script for linking NS CRX elf32 files.
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
@@ -58,14 +58,14 @@ SECTIONS
   .init :
   {
     __INIT_START = .;
-    KEEP (*(.init))
+    KEEP (*(SORT_NONE(.init)))
     __INIT_END = .;
   } > rom
 
   .fini :
   {
     __FINI_START = .;
-    KEEP (*(.fini))
+    KEEP (*(SORT_NONE(.fini)))
     __FINI_END = .;
   } > rom
 
@@ -167,11 +167,10 @@ SECTIONS
     __ISTACK_START = .;
   } > ram
 
-  .comment        0 : { *(.comment) }
-
 EOF
 
-. $srcdir/scripttempl/DWARF.sc
+source_sh $srcdir/scripttempl/misc-sections.sc rom
+source_sh $srcdir/scripttempl/DWARF.sc
 
 cat <<EOF
 }

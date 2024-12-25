@@ -3,7 +3,7 @@
 
    Contributed by Daniel Berlin <dberlin@redhat.com>
 
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,14 +20,14 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef CP_ABI_H
-#define CP_ABI_H
+#ifndef GDB_CP_ABI_H
+#define GDB_CP_ABI_H
 
 struct fn_field;
 struct type;
 struct value;
 struct ui_file;
-struct frame_info;
+class frame_info_ptr;
 
 /* The functions here that attempt to determine what sort of thing a
    mangled name refers to may well be revised in the future.  It would
@@ -123,19 +123,19 @@ extern struct value *value_virtual_fn_field (struct value **valuep,
      - If *USING_ENC is zero, then *TOP is the offset from the start
        of the complete object to the start of the embedded subobject
        VALUE represents.  In other words, the enclosing object starts
-       at VALUE_ADDR (VALUE) + VALUE_OFFSET (VALUE) +
-       value_embedded_offset (VALUE) + *TOP
+       at VALUE_ADDR (VALUE) + VALUE->offset () +
+       VALUE->embedded_offset () + *TOP
      - If *USING_ENC is non-zero, then *TOP is the offset from the
        address of the complete object to the enclosing object stored
        in VALUE.  In other words, the enclosing object starts at
-       VALUE_ADDR (VALUE) + VALUE_OFFSET (VALUE) + *TOP.
+       VALUE_ADDR (VALUE) + VALUE->offset () + *TOP.
      If VALUE's type and enclosing type are the same, then these two
      cases are equivalent.
 
    FULL, TOP, and USING_ENC can each be zero, in which case we don't
    provide the corresponding piece of information.  */
 extern struct type *value_rtti_type (struct value *value,
-                                     int *full, LONGEST *top,
+				     int *full, LONGEST *top,
 				     int *using_enc);
 
 /* Compute the offset of the baseclass which is the INDEXth baseclass
@@ -204,12 +204,14 @@ extern std::string cplus_typename_from_type_info (struct value *value);
    address of the routine we are thunking to and continue to there
    instead.  */
 
-CORE_ADDR cplus_skip_trampoline (struct frame_info *frame,
+CORE_ADDR cplus_skip_trampoline (const frame_info_ptr &frame,
 				 CORE_ADDR stop_pc);
 
-/* Return non-zero if an argument of type TYPE should be passed by
-   reference instead of value.  */
-extern int cp_pass_by_reference (struct type *type);
+/* Return a struct that provides pass-by-reference information
+   about the given TYPE.  */
+
+extern struct language_pass_by_ref_info cp_pass_by_reference
+  (struct type *type);
 
 struct cp_abi_ops
 {
@@ -245,12 +247,12 @@ struct cp_abi_ops
   struct type *(*get_typeid_type) (struct gdbarch *gdbarch);
   struct type *(*get_type_from_type_info) (struct value *value);
   std::string (*get_typename_from_type_info) (struct value *value);
-  CORE_ADDR (*skip_trampoline) (struct frame_info *, CORE_ADDR);
-  int (*pass_by_reference) (struct type *type);
+  CORE_ADDR (*skip_trampoline) (const frame_info_ptr &, CORE_ADDR);
+  struct language_pass_by_ref_info (*pass_by_reference) (struct type *type);
 };
 
 
 extern int register_cp_abi (struct cp_abi_ops *abi);
 extern void set_cp_abi_as_auto_default (const char *short_name);
 
-#endif /* CP_ABI_H */
+#endif /* GDB_CP_ABI_H */

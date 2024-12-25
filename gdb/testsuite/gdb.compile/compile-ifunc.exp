@@ -1,4 +1,4 @@
-# Copyright 2015-2019 Free Software Foundation, Inc.
+# Copyright 2015-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,15 +13,23 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-if {[skip_ifunc_tests]} {
-    return 0
-}
+load_lib compile-support.exp
+
+require allow_ifunc_tests
 
 standard_testfile
 
+require is_c_compiler_gcc
+
+set flags ""
+if [test_compiler_info gcc*] {
+    set flags additional_flags=-Wno-attribute-alias
+}
+
 with_test_prefix "nodebug" {
 
-    if { [prepare_for_testing "failed to prepare" "$testfile-nodebug" $srcfile {}] } {
+    if { [prepare_for_testing "failed to prepare" "$testfile-nodebug" \
+	      $srcfile $flags] } {
 	return -1
     }
 
@@ -35,8 +43,7 @@ with_test_prefix "nodebug" {
     # feature check below will work.
     gdb_test_no_output "set language c" ""
 
-    if {[skip_compile_feature_tests]} {
-	untested "compile command not supported (could not find libcc1 shared library?)"
+    if {[skip_compile_feature_untested]} {
 	return -1
     }
 
@@ -51,7 +58,8 @@ with_test_prefix "nodebug" {
 
 with_test_prefix "debug" {
 
-    if { [prepare_for_testing "failed to prepare" "$testfile-debug" $srcfile] } {
+    if { [prepare_for_testing "failed to prepare" "$testfile-debug" \
+	      $srcfile "debug $flags"] } {
 	return -1
     }
 

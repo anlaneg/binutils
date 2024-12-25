@@ -1,6 +1,6 @@
 /* MI Internal Functions for GDB, the GNU debugger.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef MI_MI_MAIN_H
-#define MI_MI_MAIN_H
+#ifndef GDB_MI_MI_MAIN_H
+#define GDB_MI_MI_MAIN_H
 
 struct ui_file;
 
@@ -33,11 +33,6 @@ extern void mi_print_timing_maybe (struct ui_file *file);
 /* Whether MI is in async mode.  */
 
 extern int mi_async_p (void);
-
-extern char *current_token;
-
-extern int running_result_record_printed;
-extern int mi_proceeded;
 
 struct mi_suppress_notification
 {
@@ -54,4 +49,34 @@ struct mi_suppress_notification
 };
 extern struct mi_suppress_notification mi_suppress_notification;
 
-#endif /* MI_MI_MAIN_H */
+/* This is a hack so we can get some extra commands going, but has existed
+   within GDB for many years now.  Ideally we don't want to channel things
+   through the CLI, but implement all commands as pure MI commands with
+   their own implementation.
+
+   Execute the CLI command CMD, if ARGS_P is true then ARGS should be a
+   non-nullptr string containing arguments to add after CMD.  If ARGS_P is
+   false then ARGS must be nullptr.  */
+
+extern void mi_execute_cli_command (const char *cmd, bool args_p,
+				    const char *args);
+
+/* Implementation of -fix-multi-location-breakpoint-output.  */
+
+extern void mi_cmd_fix_multi_location_breakpoint_output (const char *command,
+							 const char *const *argv,
+							 int argc);
+
+/* Implementation of -fix-breakpoint-script-output.  */
+
+extern void mi_cmd_fix_breakpoint_script_output (const char *command,
+						 const char *const *argv,
+						 int argc);
+
+/* Parse a thread-group-id from ID, and return the integer part of the
+   ID.  A valid thread-group-id is the character 'i' followed by an
+   integer that is greater than zero.  */
+
+extern int mi_parse_thread_group_id (const char *id);
+
+#endif /* GDB_MI_MI_MAIN_H */

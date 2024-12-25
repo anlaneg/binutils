@@ -1,4 +1,4 @@
-# Copyright 2011-2019 Free Software Foundation, Inc.
+# Copyright 2011-2024 Free Software Foundation, Inc.
 #
 # Contributed by Red Hat, originally written by Keith Seitz.
 #
@@ -30,18 +30,18 @@ proc add {var name params expected {kind {func}}} {
     lappend result [list "${method_name}($params)" $expect]
 }
 
-if {[skip_cplus_tests]} { continue }
+require allow_cplus_tests
 
 # Tests for c++/12266 et al
 standard_testfile .cc
 
-if {[prepare_for_testing "failed to prepare" $testfile $srcfile {c++ debug}]} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile \
+	 {c++ debug additional_flags=-std=c++11}]} {
     return -1
 }
 
 if {![runto_main]} {
-    perror "couldn't run to breakpoint"
-    continue
+    return
 }
 
 array set typedefs {
@@ -137,6 +137,11 @@ foreach t $typedefs(_BAR_) {
     add methods "test" "$t&" {_BAR_&}
 }
 
+# Tests for c++/24367
+foreach t {int incomplete_struct another_incomplete_struct} {
+    add methods "test_incomplete" "${t}*" [string_to_regexp "${t}*"]
+}
+
 gdb_test_no_output "set listsize 1" ""
 
 # Finally, for each method in the list METHODS, check whether
@@ -147,12 +152,10 @@ foreach test $methods {
 
     gdb_test "list -qualified $func" $result
     gdb_test "list -qualified '$func'" $result
-    if {[gdb_breakpoint "-qualified $func"]} {
-      pass "break -qualified $func"
-    }
-    if {[gdb_breakpoint "-qualified '$func'"]} {
-      pass "break -qualified '$func'"
-    }
+    gdb_assert { [gdb_breakpoint "-qualified $func" no-message] } \
+	"break -qualified $func, unquoted"
+    gdb_assert { [gdb_breakpoint "-qualified '$func'" no-message] } \
+	"break -qualified $func, single-quoted"
 }
 
 # The tests above use -qualified to explicitly pick the one "test"
@@ -175,12 +178,10 @@ foreach f [list "$func" "'$func'"] {
 	     "file: \".*$srcfile\", line number: $line2, symbol: \"B::$func_re\"" \
 	     "$line2${any}B::test${any}" \
 	     "file: \".*$srcfile\", line number: $line3, symbol: \"$func_re\"" \
-	     "$line3${any}// test${any}"] \
-	"list $f"
+	     "$line3${any}// test${any}"]
 
     delete_breakpoints
     gdb_test "break $f" "\\(3 locations\\)"
 }
 
 gdb_exit
-return 0

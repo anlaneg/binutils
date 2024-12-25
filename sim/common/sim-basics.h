@@ -1,6 +1,6 @@
 /* The common simulator framework for GDB, the GNU Debugger.
 
-   Copyright 2002-2019 Free Software Foundation, Inc.
+   Copyright 2002-2024 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney and Red Hat.
 
@@ -26,26 +26,14 @@
 
 /* Basic configuration */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include "defs.h"
 
 /* Basic host dependant mess - hopefully <stdio.h> + <stdarg.h> will
    bring potential conflicts out in the open */
 
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <setjmp.h>
-
-#ifdef __CYGWIN32__
-extern int vasprintf (char **result, const char *format, va_list args);
-extern int asprintf (char **result, const char *format, ...);
-#endif
-
-
-#ifndef NULL
-#define NULL 0
-#endif
 
 
 #ifndef min
@@ -53,15 +41,6 @@ extern int asprintf (char **result, const char *format, ...);
 #endif
 #ifndef max
 #define max(a, b) ((a) > (b) ? (a) : (b))
-#endif
-
-
-/* Some versions of GCC include an attribute operator, define it */
-
-#if !defined (__attribute__)
-#if (!defined(__GNUC__) || (__GNUC__ < 2) || (__GNUC__ == 2 && __GNUC_MINOR__ < 6))
-#define __attribute__(arg)
-#endif
 #endif
 
 
@@ -107,7 +86,7 @@ enum {
 /* disposition of an object when things are reset */
 
 typedef enum {
-  permenant_object,
+  permanent_object,
   temporary_object,
 } object_disposition;
 
@@ -132,9 +111,7 @@ typedef enum {
 
 /* Basic definitions - ordered so that nothing calls what comes after it.  */
 
-#include "ansidecl.h"
-#include "gdb/callback.h"
-#include "gdb/remote-sim.h"
+#include "sim/sim.h"
 
 #include "sim-config.h"
 
@@ -143,8 +120,6 @@ typedef enum {
 #include "sim-types.h"
 #include "sim-bits.h"
 #include "sim-endian.h"
-#include "sim-signal.h"
-#include "sim-arange.h"
 
 #include "sim-utils.h"
 

@@ -1,6 +1,6 @@
 /* The common simulator framework for GDB, the GNU Debugger.
 
-   Copyright 2002-2019 Free Software Foundation, Inc.
+   Copyright 2002-2024 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney and Red Hat.
 
@@ -19,19 +19,23 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-
-#include "sim-main.h"
-#include "sim-io.h"
-#include "targ-vals.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include <errno.h>
 #if HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
-
-#if HAVE_UNISTD_H
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <unistd.h>
-#endif
+
+#undef open
+
+#include "sim-main.h"
+#include "sim-io.h"
+#include "sim/callback.h"
 
 /* Define the rate at which the simulator should poll the host
    for a quit. */
@@ -66,11 +70,10 @@ sim_io_unlink (SIM_DESC sd,
 }
 
 
-long
-sim_io_time (SIM_DESC sd,
-	     long *t)
+int64_t
+sim_io_time (SIM_DESC sd)
 {
-  return STATE_CALLBACK (sd)->time (STATE_CALLBACK (sd), t);
+  return STATE_CALLBACK (sd)->time (STATE_CALLBACK (sd));
 }
 
 
@@ -210,10 +213,10 @@ sim_io_open (SIM_DESC sd,
 }
 
 
-int
+int64_t
 sim_io_lseek (SIM_DESC sd,
 	      int fd,
-	      long off,
+	      int64_t off,
 	      int way)
 {
   return STATE_CALLBACK (sd)->lseek (STATE_CALLBACK (sd), fd, off, way);
@@ -303,7 +306,9 @@ sim_io_error (SIM_DESC sd,
     va_start (ap, fmt);
     STATE_CALLBACK (sd)->evprintf_filtered (STATE_CALLBACK (sd), fmt, ap);
     va_end (ap);
-    STATE_CALLBACK (sd)->error (STATE_CALLBACK (sd), "");
+    /* The %s avoids empty printf compiler warnings.  Not ideal, but we want
+       error's side-effect where it halts processing.  */
+    STATE_CALLBACK (sd)->error (STATE_CALLBACK (sd), "%s", "");
   }
 }
 
@@ -328,7 +333,7 @@ sim_io_poll_quit (SIM_DESC sd)
    FIXME: Some completly new mechanism for handling the general
    problem of asynchronous IO is needed.
 
-   FIXME: This function does not supress the echoing (ECHO) of input.
+   FIXME: This function does not suppress the echoing (ECHO) of input.
    Consequently polled input is always displayed.
 
    FIXME: This function does not perform uncooked reads.
@@ -342,7 +347,7 @@ sim_io_poll_read (SIM_DESC sd,
 		  char *buf,
 		  int sizeof_buf)
 {
-#if defined(O_NDELAY) && defined(F_GETFL) && defined(F_SETFL)
+#if defined(O_NONBLOCK) && defined(F_GETFL) && defined(F_SETFL)
   int fd = STATE_CALLBACK (sd)->fdmap[sim_io_fd];
   int flags;
   int status;
@@ -357,7 +362,7 @@ sim_io_poll_read (SIM_DESC sd,
       return 0;
     }
   /* temp, disable blocking IO */
-  status = fcntl (fd, F_SETFL, flags | O_NDELAY);
+  status = fcntl (fd, F_SETFL, flags | O_NONBLOCK);
   if (status == -1)
     {
       perror ("sim_io_read_stdin");

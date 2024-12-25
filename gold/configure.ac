@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+dnl   Copyright (C) 2006-2024 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -17,12 +17,13 @@ dnl along with this program; see the file COPYING3.  If not see
 dnl <http://www.gnu.org/licenses/>.
 dnl
 
-AC_INIT(gold, 0.1)
+AC_INIT([gold], [0.1])
 AC_CONFIG_SRCDIR(gold.cc)
 
 AC_CANONICAL_TARGET
 
 AM_INIT_AUTOMAKE([no-dist parallel-tests])
+AM_SILENT_RULES([yes])
 
 AM_CONFIG_HEADER(config.h:config.in)
 
@@ -312,8 +313,6 @@ AC_PROG_RANLIB
 AC_PROG_INSTALL
 AC_PROG_LN_S
 
-AC_GNU_SOURCE
-
 ZW_GNU_GETTEXT_SISTER_DIR
 AM_PO_SUBDIRS
 
@@ -371,6 +370,26 @@ CFLAGS="$save_CFLAGS"
 dnl Whether we can test -mcmodel=medium.
 AM_CONDITIONAL(MCMODEL_MEDIUM,
 [test "$target_cpu" = "x86_64" -a "$have_mcmodel_medium" = "yes" -a "$gold_cv_prog_gcc41" = "yes"])
+
+dnl Test for gcc 9 or later.  Some incremental tests fail with GCC 9 or
+dnl later.
+AC_CACHE_CHECK([for gcc >= 9], [gold_cv_prog_gcc9],
+[AC_COMPILE_IFELSE([AC_LANG_SOURCE([
+#if !defined __GNUC__ || __GNUC__ < 9
+error
+#endif
+])], [gold_cv_prog_gcc9=yes], [gold_cv_prog_gcc9=no])])
+AM_CONDITIONAL(GCC9, [test "$gold_cv_prog_gcc9" = "yes"])
+
+dnl Test for -fcf-protection on x86-64.  Some incremental tests fail with
+dnl -fcf-protection.
+AC_CACHE_CHECK([for -fcf-protection], [gold_cv_cflags_cf_protection],
+[AC_COMPILE_IFELSE([AC_LANG_SOURCE([
+#if !defined __x86_64__ || !defined __CET__
+error
+#endif
+])], [gold_cv_cflags_cf_protection=yes], [gold_cv_cflags_cf_protection=no])])
+AM_CONDITIONAL(CFLAGS_CF_PROTECTION, [test "$gold_cv_cflags_cf_protection" = "yes"])
 
 AC_CACHE_CHECK([whether $CC supports -fmerge-constants],
 	       [gold_cv_merge_constants], [
@@ -545,8 +564,10 @@ else
   AC_LIBOBJ(mremap)
 fi
 
-# Link in zlib if we can.  This allows us to write compressed sections.
+# Link in zlib/zstd if we can.  This allows us to write compressed sections.
 AM_ZLIB
+AC_ZSTD
+AM_CONDITIONAL(HAVE_ZSTD, test "$pkg_cv_ZSTD_LIBS" != "")
 
 AC_ARG_ENABLE([threads],
 [[  --enable-threads[=ARG]  multi-threaded linking [ARG={auto,yes,no}]]],
@@ -569,6 +590,32 @@ if test "$threads" = "yes"; then
 	    [Define to do multi-threaded linking])
 fi
 AM_CONDITIONAL(THREADS, test "$threads" = "yes")
+
+# Used to validate --package-metadata= input. Disabled by default.
+AC_ARG_ENABLE([jansson],
+  [AS_HELP_STRING([--enable-jansson],
+    [enable jansson [default=no]])],
+  [enable_jansson=$enableval],
+  [enable_jansson="no"])
+
+if test "x$enable_jansson" != "xno"; then
+  PKG_PROG_PKG_CONFIG
+  AS_IF([test -n "$PKG_CONFIG"],
+    [
+      PKG_CHECK_MODULES(JANSSON, [jansson],
+	[
+	  AC_DEFINE(HAVE_JANSSON, 1, [The jansson library is to be used])
+	  AC_SUBST([JANSSON_CFLAGS])
+	  AC_SUBST([JANSSON_LIBS])
+	],
+	[
+	  AC_MSG_ERROR([Cannot find jansson library])
+	])
+    ],
+    [
+      AC_MSG_ERROR([Cannot find pkg-config])
+    ])
+fi
 
 dnl We have to check these in C, not C++, because autoconf generates
 dnl tests which have no type information, and current glibc provides
@@ -602,6 +649,9 @@ AC_CHECK_HEADERS(tr1/unordered_set tr1/unordered_map)
 AC_CHECK_HEADERS(ext/hash_map ext/hash_set)
 AC_CHECK_HEADERS(byteswap.h)
 
+dnl Check for bswap_{16,32,64}
+AC_CHECK_DECLS([bswap_16, bswap_32, bswap_64], [], [], [[#include <byteswap.h>]])
+
 dnl When plugins enabled dynamic loader interface is required. Check headers
 dnl which may provide this interface. Add the necessary library to link.
 AC_CHECK_HEADERS(windows.h)
@@ -613,7 +663,7 @@ case "$ac_cv_search_dlopen" in
 esac
 AC_SUBST(DLOPEN_LIBS)
 
-AC_CHECK_FUNCS(mallinfo posix_fallocate fallocate readv sysconf times mkdtemp)
+AC_CHECK_FUNCS(mallinfo mallinfo2 posix_fallocate fallocate readv sysconf times mkdtemp)
 AC_CHECK_DECLS([basename, ffs, asprintf, vasprintf, snprintf, vsnprintf, strverscmp, strndup, memmem])
 
 # Use of ::std::tr1::unordered_map::rehash causes undefined symbols
@@ -628,6 +678,10 @@ if test "$gold_cv_unordered_map_rehash" = "yes"; then
   AC_DEFINE(HAVE_TR1_UNORDERED_MAP_REHASH, 1,
 	    [Define if ::std::tr1::unordered_map::rehash is usable])
 fi
+
+# Since 5e9091dab8858b25210a91d22fbbbfdee9c969ad gold now requires C++11
+# So we need to check for it.
+AX_CXX_COMPILE_STDCXX([11], [], [mandatory])
 
 # Use of tr1/unordered_map with off_t as a key is not supported on GCC
 # 4.1.xx when compiling in 32-bit mode with a 64-bit off_t type.

@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+#   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -22,17 +22,19 @@
 # This file is sourced from generic.em.
 
 fragment <<EOF
+#include "libiberty.h"
 #include "getopt.h"
+#include "ldlex.h"
 
 static void
 gld${EMULATION_NAME}_before_parse (void)
 {
   ldfile_set_output_arch ("${ARCH}", bfd_arch_`echo ${ARCH} | sed -e 's/:.*//'`);
-  input_flags.dynamic = TRUE;
-  config.has_shared = FALSE; /* Not yet.  */
+  input_flags.dynamic = true;
+  config.has_shared = false; /* Not yet.  */
 
   /* For ia64, harmless for alpha.  */
-  link_info.emit_hash = FALSE;
+  link_info.emit_hash = false;
   link_info.spare_dynamic_tags = 0;
 }
 
@@ -50,7 +52,7 @@ gld${EMULATION_NAME}_create_output_section_statements (void)
 /* Try to open a dynamic archive.  This is where we know that VMS
    shared images (dynamic libraries) have an extension of .exe.  */
 
-static bfd_boolean
+static bool
 gld${EMULATION_NAME}_open_dynamic_archive (const char *arch ATTRIBUTE_UNUSED,
 					   search_dirs_type *search,
 					   lang_input_statement_type *entry)
@@ -58,7 +60,7 @@ gld${EMULATION_NAME}_open_dynamic_archive (const char *arch ATTRIBUTE_UNUSED,
   char *string;
 
   if (! entry->flags.maybe_archive || entry->flags.full_name_provided)
-    return FALSE;
+    return false;
 
   string = (char *) xmalloc (strlen (search->name)
 			     + strlen (entry->filename)
@@ -69,12 +71,12 @@ gld${EMULATION_NAME}_open_dynamic_archive (const char *arch ATTRIBUTE_UNUSED,
   if (! ldfile_try_open_bfd (string, entry))
     {
       free (string);
-      return FALSE;
+      return false;
     }
 
   entry->filename = string;
 
-  return TRUE;
+  return true;
 }
 
 static int
@@ -85,7 +87,7 @@ gld${EMULATION_NAME}_find_potential_libraries
 }
 
 /* Place an orphan section.  We use this to put random OVR sections.
-   Much borrowed from elf32.em.  */
+   Much borrowed from elf.em.  */
 
 static lang_output_section_statement_type *
 vms_place_orphan (asection *s,
@@ -116,7 +118,7 @@ vms_place_orphan (asection *s,
 
   if (hold_data.os != NULL)
     {
-      lang_add_section (&hold_data.os->children, s, NULL, hold_data.os);
+      lang_add_section (&hold_data.os->children, s, NULL, NULL, hold_data.os);
       return hold_data.os;
     }
   else
@@ -124,7 +126,6 @@ vms_place_orphan (asection *s,
 }
 
 /* VMS specific options.  */
-#define OPTION_IDENTIFICATION		(300  + 1)
 
 static void
 gld${EMULATION_NAME}_add_options
@@ -152,20 +153,20 @@ gld${EMULATION_NAME}_list_options (FILE *file)
   fprintf (file, _("  --identification <string>          Set the identification of the output\n"));
 }
 
-static bfd_boolean
+static bool
 gld${EMULATION_NAME}_handle_option (int optc)
 {
   switch (optc)
     {
     default:
-      return FALSE;
+      return false;
 
     case OPTION_IDENTIFICATION:
       /* Currently ignored.  */
       break;
     }
 
-  return TRUE;
+  return true;
 }
 
 EOF
@@ -174,6 +175,7 @@ if test "$OUTPUT_FORMAT" = "elf64-ia64-vms"; then
 
 fragment <<EOF
 #include "elf-bfd.h"
+#include "ldelfgen.h"
 EOF
 
 source_em ${srcdir}/emultempl/elf-generic.em
@@ -195,10 +197,9 @@ gld${EMULATION_NAME}_before_allocation (void)
 
   /* The backend must work out the sizes of all the other dynamic
      sections.  */
-  if (elf_hash_table (&link_info)->dynamic_sections_created
-      && bed->elf_backend_size_dynamic_sections
-      && ! (*bed->elf_backend_size_dynamic_sections) (link_info.output_bfd,
-						      &link_info))
+  if (bed->elf_backend_late_size_sections
+      && !bed->elf_backend_late_size_sections (link_info.output_bfd,
+					       &link_info))
     einfo (_("%F%P: failed to set dynamic section sizes: %E\n"));
 
   before_allocation_default ();
@@ -212,7 +213,7 @@ gld${EMULATION_NAME}_after_allocation (void)
   if (need_layout < 0)
     einfo (_("%X%P: .eh_frame/.stab edit: %E\n"));
   else
-    gld${EMULATION_NAME}_map_segments (need_layout);
+    ldelf_map_segments (need_layout);
 }
 
 static void

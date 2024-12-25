@@ -1,6 +1,6 @@
 /* TUI display source window.
 
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -19,24 +19,80 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TUI_TUI_SOURCE_H
-#define TUI_TUI_SOURCE_H
+#ifndef GDB_TUI_TUI_SOURCE_H
+#define GDB_TUI_TUI_SOURCE_H
 
+#include "gdbsupport/gdb-checked-static-cast.h"
 #include "tui/tui-data.h"
+#include "tui-winsource.h"
 
-struct symtab;
-struct tui_win_info;
+/* A TUI source window.  */
 
-extern void tui_set_source_content_nil (struct tui_win_info *, 
-					const char *);
+struct tui_source_window : public tui_source_window_base
+{
+  tui_source_window ();
+  ~tui_source_window ();
 
-extern enum tui_status tui_set_source_content (struct symtab *, 
-					       int, int);
-extern void tui_show_symtab_source (struct gdbarch *, struct symtab *,
-				    struct tui_line_or_address,
-				    int);
-extern int tui_source_is_displayed (const char *);
-extern void tui_vertical_source_scroll (enum tui_scroll_direction,
-					int);
+  DISABLE_COPY_AND_ASSIGN (tui_source_window);
 
-#endif /* TUI_TUI_SOURCE_H */
+  const char *name () const override
+  {
+    return SRC_NAME;
+  }
+
+  /* Return true if the location LOC corresponds to the line number
+     LINE_NO in this source window; false otherwise.  */
+  bool location_matches_p (struct bp_location *loc, int line_no) override;
+
+  bool showing_source_p (const char *filename) const;
+
+  void maybe_update (const frame_info_ptr &fi, symtab_and_line sal) override;
+
+  void erase_source_content () override
+  {
+    do_erase_source_content (_("[ No Source Available ]"));
+  }
+
+  void display_start_addr (struct gdbarch **gdbarch_p,
+			   CORE_ADDR *addr_p) override;
+
+protected:
+
+  void do_scroll_vertical (int num_to_scroll) override;
+
+  bool set_contents (struct gdbarch *gdbarch,
+		     const struct symtab_and_line &sal) override;
+
+  int extra_margin () const override
+  {
+    return m_digits;
+  }
+
+  void show_line_number (int lineno) const override;
+
+private:
+
+  /* Answer whether a particular line number or address is displayed
+     in the current source window.  */
+  bool line_is_displayed (int line) const;
+
+  /* How many digits to use when formatting the line number.  This
+     includes the trailing space.  */
+  int m_digits;
+
+  /* It is the resolved form as returned by symtab_to_fullname.  */
+  gdb::unique_xmalloc_ptr<char> m_fullname;
+
+  /* A token used to register and unregister an observer.  */
+  gdb::observers::token m_src_observable;
+};
+
+/* Return the instance of the source window.  */
+
+inline tui_source_window *
+tui_src_win ()
+{
+  return gdb::checked_static_cast<tui_source_window *> (tui_win_list[SRC_WIN]);
+}
+
+#endif /* GDB_TUI_TUI_SOURCE_H */

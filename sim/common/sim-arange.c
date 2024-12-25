@@ -1,5 +1,5 @@
 /* Address ranges.
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions.
 
 This file is part of the GNU Simulators.
@@ -17,22 +17,19 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-/* Tell sim-arange.h it's us.  */
-#define SIM_ARANGE_C
+#ifndef _SIM_ARANGE_C_
+#define _SIM_ARANGE_C_
+
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <stdlib.h>
+#include <string.h>
 
 #include "libiberty.h"
+
 #include "sim-basics.h"
-#include "sim-assert.h"
-
-#ifdef HAVE_STDLIB_H
-#include <stdlib.h>
-#endif
-
-#ifdef HAVE_STRING_H
-#include <string.h>
-#endif
-
-#ifdef SIM_ARANGE_C_INCLUDED
+#include "sim-arange.h"
 
 /* Insert a range.  */
 
@@ -85,12 +82,12 @@ frob_range (ADDR_RANGE *ar, address_word start, address_word end, int delete_p)
     {
       if (! delete_p)
 	{
-	  /* Try next range if current range preceeds new one and not
+	  /* Try next range if current range precedes new one and not
 	     adjacent or overlapping.  */
 	  if (asr->end < caller->start - 1)
 	    goto next_range;
 
-	  /* Break out if new range preceeds current one and not
+	  /* Break out if new range precedes current one and not
 	     adjacent or overlapping.  */
 	  if (asr->start > caller->end + 1)
 	    break;
@@ -117,11 +114,11 @@ frob_range (ADDR_RANGE *ar, address_word start, address_word end, int delete_p)
 	}
       else /* deleting a range */
 	{
-	  /* Try next range if current range preceeds new one.  */
+	  /* Try next range if current range precedes new one.  */
 	  if (asr->end < caller->start)
 	    goto next_range;
 
-	  /* Break out if new range preceeds current one.  */
+	  /* Break out if new range precedes current one.  */
 	  if (asr->start > caller->end)
 	    break;
 
@@ -251,7 +248,8 @@ build_search_tree (ADDR_RANGE *ar)
   free (asrtab);
 }
 
-void
+INLINE_SIM_ARANGE\
+(void)
 sim_addr_range_add (ADDR_RANGE *ar, address_word start, address_word end)
 {
   frob_range (ar, start, end, 0);
@@ -264,7 +262,8 @@ sim_addr_range_add (ADDR_RANGE *ar, address_word start, address_word end)
   build_search_tree (ar);
 }
 
-void
+INLINE_SIM_ARANGE\
+(void)
 sim_addr_range_delete (ADDR_RANGE *ar, address_word start, address_word end)
 {
   frob_range (ar, start, end, 1);
@@ -277,9 +276,8 @@ sim_addr_range_delete (ADDR_RANGE *ar, address_word start, address_word end)
   build_search_tree (ar);
 }
 
-#else /* SIM_ARANGE_C_INCLUDED */
-
-SIM_ARANGE_INLINE int
+INLINE_SIM_ARANGE\
+(int)
 sim_addr_range_hit_p (ADDR_RANGE *ar, address_word addr)
 {
   ADDR_RANGE_TREE *t = ar->range_tree;
@@ -296,4 +294,4 @@ sim_addr_range_hit_p (ADDR_RANGE *ar, address_word addr)
   return 0;
 }
 
-#endif /* SIM_ARANGE_C_INCLUDED */
+#endif /* _SIM_ARANGE_C_ */

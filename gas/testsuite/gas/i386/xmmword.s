@@ -140,3 +140,18 @@ xmmword:
 	movq		xmmword ptr [eax], xmm0
 	vmovq		xmmword ptr [eax], xmm0
 	{evex} vmovq	xmmword ptr [eax], xmm0
+
+	cvtps2pi	mm0, xmmword ptr [eax]
+
+	cvttps2pi	mm0, xmmword ptr [eax]
+
+	vcvtph2dq	xmm0, xmmword ptr [eax]
+	vcvtph2pd	xmm0, xmmword ptr [eax]
+	vcvtph2psx	xmm0, xmmword ptr [eax]
+	vcvtph2qq	xmm0, xmmword ptr [eax]
+	vcvtph2udq	xmm0, xmmword ptr [eax]
+	vcvtph2uqq	xmm0, xmmword ptr [eax]
+	vcvttph2dq	xmm0, xmmword ptr [eax]
+	vcvttph2qq	xmm0, xmmword ptr [eax]
+	vcvttph2udq	xmm0, xmmword ptr [eax]
+	vcvttph2uqq	xmm0, xmmword ptr [eax]

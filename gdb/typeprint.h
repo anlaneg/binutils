@@ -1,5 +1,5 @@
 /* Language independent support for printing types for GDB, the GNU debugger.
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,22 +16,62 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TYPEPRINT_H
-#define TYPEPRINT_H
+#ifndef GDB_TYPEPRINT_H
+#define GDB_TYPEPRINT_H
 
-#include "gdb_obstack.h"
+#include "gdbsupport/gdb_obstack.h"
+#include "gdbsupport/unordered_set.h"
+#include "gdbtypes.h"
+#include "hashtab.h"
 
 enum language;
 struct ui_file;
 struct typedef_hash_table;
 struct ext_lang_type_printers;
 
+struct type_print_options
+{
+  /* True means that no special printing flags should apply.  */
+  unsigned int raw : 1;
+
+  /* True means print methods in a class.  */
+  unsigned int print_methods : 1;
+
+  /* True means print typedefs in a class.  */
+  unsigned int print_typedefs : 1;
+
+  /* True means to print offsets, a la 'pahole'.  */
+  unsigned int print_offsets : 1;
+
+  /* True means to print offsets in hex, otherwise use decimal.  */
+  unsigned int print_in_hex : 1;
+
+  /* The number of nested type definitions to print.  -1 == all.  */
+  int print_nested_type_limit;
+
+  /* If not NULL, a local typedef hash table used when printing a
+     type.  */
+  typedef_hash_table *local_typedefs;
+
+  /* If not NULL, a global typedef hash table used when printing a
+     type.  */
+  typedef_hash_table *global_typedefs;
+
+  /* The list of type printers associated with the global typedef
+     table.  This is intentionally opaque.  */
+  struct ext_lang_type_printers *global_printers;
+};
+
 struct print_offset_data
 {
+  /* Indicate if the offset an d size fields should be printed in decimal
+     (default) or hexadecimal.  */
+  bool print_in_hex  = false;
+
   /* The offset to be applied to bitpos when PRINT_OFFSETS is true.
      This is needed for when we are printing nested structs and want
      to make sure that the printed offset for each field carries over
-     the offset of the outter struct.  */
+     the offset of the outer struct.  */
   unsigned int offset_bitpos = 0;
 
   /* END_BITPOS is the one-past-the-end bit position of the previous
@@ -62,6 +102,8 @@ struct print_offset_data
      certain field.  */
   static const int indentation;
 
+  explicit print_offset_data (const struct type_print_options *flags);
+
 private:
 
   /* Helper function for ptype/o implementation that prints
@@ -73,53 +115,23 @@ private:
 			 const char *for_what);
 };
 
-struct type_print_options
-{
-  /* True means that no special printing flags should apply.  */
-  unsigned int raw : 1;
-
-  /* True means print methods in a class.  */
-  unsigned int print_methods : 1;
-
-  /* True means print typedefs in a class.  */
-  unsigned int print_typedefs : 1;
-
-  /* True means to print offsets, a la 'pahole'.  */
-  unsigned int print_offsets : 1;
-
-  /* The number of nested type definitions to print.  -1 == all.  */
-  int print_nested_type_limit;
-
-  /* If not NULL, a local typedef hash table used when printing a
-     type.  */
-  typedef_hash_table *local_typedefs;
-
-  /* If not NULL, a global typedef hash table used when printing a
-     type.  */
-  typedef_hash_table *global_typedefs;
-
-  /* The list of type printers associated with the global typedef
-     table.  This is intentionally opaque.  */
-  struct ext_lang_type_printers *global_printers;
-};
-
 extern const struct type_print_options type_print_raw_options;
 
-/* A hash table holding typedef_field objects.  This is more
-   complicated than an ordinary hash because it must also track the
-   lifetime of some -- but not all -- of the contained objects.  */
+/* A hash table holding decl_field objects.  This is more complicated than an
+   ordinary hash because it must also track the lifetime of some -- but not all
+   -- of the contained objects.  */
 
 class typedef_hash_table
 {
 public:
 
   /* Create a new typedef-lookup hash table.  */
-  typedef_hash_table ();
-
-  ~typedef_hash_table ();
+  typedef_hash_table () = default;
 
   /* Copy a typedef hash.  */
-  typedef_hash_table (const typedef_hash_table &);
+  typedef_hash_table (const typedef_hash_table &other)
+    : m_table (other.m_table)
+  {}
 
   typedef_hash_table &operator= (const typedef_hash_table &) = delete;
 
@@ -142,9 +154,36 @@ private:
   static const char *find_global_typedef (const struct type_print_options *flags,
 					  struct type *t);
 
+  struct decl_field_type_hash
+  {
+    using is_transparent = void;
 
-  /* The actual hash table.  */
-  htab_t m_table;
+    std::size_t operator() (type *t) const noexcept
+    {
+      /* Use check_typedef: the hash must agree with equals, and types_equal
+	 strips typedefs.  */
+      return htab_hash_string (TYPE_SAFE_NAME (check_typedef (t)));
+    }
+
+    std::size_t operator() (const decl_field *f) const noexcept
+    { return (*this) (f->type); }
+  };
+
+  struct decl_field_type_eq
+  {
+    using is_transparent = void;
+
+    bool operator () (type *t, const decl_field *f) const noexcept
+    { return types_equal (t, f->type); }
+
+    bool operator() (const decl_field *lhs,
+		     const decl_field *rhs) const noexcept
+    { return (*this) (lhs->type, rhs); }
+  };
+
+  /* The actual hash table of `decl_field *` identified by their type field.  */
+  gdb::unordered_set<decl_field *, decl_field_type_hash, decl_field_type_eq>
+    m_table;
 
   /* Storage for typedef_field objects that must be synthesized.  */
   auto_obstack m_storage;
@@ -152,6 +191,11 @@ private:
 
 
 void print_type_scalar (struct type * type, LONGEST, struct ui_file *);
+
+/* Assuming the TYPE is a fixed point type, print its type description
+   on STREAM.  */
+
+void print_type_fixed_point (struct type *type, struct ui_file *stream);
 
 void c_type_print_args (struct type *, struct ui_file *, int, enum language,
 			const struct type_print_options *);
@@ -169,4 +213,4 @@ extern void val_print_not_allocated (struct ui_file *stream);
 
 extern void val_print_not_associated (struct ui_file *stream);
 
-#endif
+#endif /* GDB_TYPEPRINT_H */

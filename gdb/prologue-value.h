@@ -1,5 +1,5 @@
 /* Interface to prologue value handling for GDB.
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,8 +16,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef PROLOGUE_VALUE_H
-#define PROLOGUE_VALUE_H
+#ifndef GDB_PROLOGUE_VALUE_H
+#define GDB_PROLOGUE_VALUE_H
 
 /* What sort of value is this?  This determines the interpretation
    of subsequent fields.  */
@@ -121,7 +121,7 @@ enum prologue_value_kind
    understand and maintain.  In the approach used here:
 
    - It's easier to see that the analyzer is correct: you just see
-     whether the analyzer properly (albiet conservatively) simulates
+     whether the analyzer properly (albeit conservatively) simulates
      the effect of each instruction.
 
    - It's easier to extend the analyzer: you can add support for new
@@ -216,9 +216,9 @@ enum pv_boolean {
    an element boundary, or doesn't refer to the whole element, return
    pv_maybe.  */
 enum pv_boolean pv_is_array_ref (pv_t addr, CORE_ADDR size,
-                                 pv_t array_addr, CORE_ADDR array_len,
-                                 CORE_ADDR elt_size,
-                                 int *i);
+				 pv_t array_addr, CORE_ADDR array_len,
+				 CORE_ADDR elt_size,
+				 int *i);
 
 
 /* A 'pv_area' keeps track of values stored in a particular region of
@@ -327,4 +327,4 @@ private:
   struct area_entry *m_entry;
 };
 
-#endif /* PROLOGUE_VALUE_H */
+#endif /* GDB_PROLOGUE_VALUE_H */

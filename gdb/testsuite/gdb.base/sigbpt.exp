@@ -1,6 +1,6 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 2004-2019 Free Software Foundation, Inc.
+# Copyright 2004-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,16 +22,13 @@
 # This test is known to tickle the following problems: kernel letting
 # the inferior execute both the system call, and the instruction
 # following, when single-stepping a system call; kernel failing to
-# propogate the single-step state when single-stepping the sigreturn
+# propagate the single-step state when single-stepping the sigreturn
 # system call, instead resuming the inferior at full speed; GDB
 # doesn't know how to software single-step across a sigreturn
 # instruction.  Since the kernel problems can be "fixed" using
 # software single-step this is KFAILed rather than XFAILed.
 
-if [target_info exists gdb,nosignals] {
-    verbose "Skipping sigbpt.exp because of nosignals."
-    continue
-}
+require {!target_info exists gdb,nosignals}
 
 
 standard_testfile
@@ -44,8 +41,7 @@ if {[prepare_for_testing "failed to prepare" $testfile $srcfile debug]} {
 # Run to `main' where we begin our tests.
 #
 
-if ![runto_main] then {
-    fail "can't run to main"
+if {![runto_main]} {
     return 0
 }
 
@@ -138,7 +134,9 @@ proc stepi_out { name args } {
     # disable SIGSEGV, ensuring that further signals stop the
     # inferior.  Stops a SIGSEGV infinite loop when a broke system
     # keeps re-executing the faulting instruction.
-    rerun_to_main
+    with_test_prefix $name {
+	rerun_to_main
+    }
     gdb_test "handle ${signame} nostop print pass" ".*" "${name}; pass ${signame}"
     gdb_test "continue" "keeper.*" "${name}; continue to keeper"
     gdb_test "handle ${signame} stop print nopass" ".*" "${name}; nopass ${signame}"
@@ -160,7 +158,6 @@ proc stepi_out { name args } {
 	    fail "$test (could not insert single-step breakpoint)"
 	}
 	-re "Cannot insert breakpoint.*Cannot access memory.*$gdb_prompt $" {
-	    setup_kfail gdb/8841 "nios2*-*-linux*"
 	    fail "$test (could not insert single-step breakpoint)"
 	}
 	-re "keeper.*$gdb_prompt $" {
@@ -212,7 +209,9 @@ proc cont_out { name args } {
     # disable SIGSEGV, ensuring that further signals stop the
     # inferior.  Stops a SIGSEGV infinite loop when a broke system
     # keeps re-executing the faulting instruction.
-    rerun_to_main
+    with_test_prefix $name {
+	rerun_to_main
+    }
     gdb_test "handle ${signame} nostop print pass" ".*" "${name}; pass ${signame}"
     gdb_test "continue" "keeper.*" "${name}; continue to keeper"
     gdb_test "handle ${signame} stop print nopass" ".*" "${name}; nopass ${signame}"

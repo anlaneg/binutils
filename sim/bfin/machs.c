@@ -1,6 +1,6 @@
 /* Simulator for Analog Devices Blackfin processors.
 
-   Copyright (C) 2005-2019 Free Software Foundation, Inc.
+   Copyright (C) 2005-2024 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc. and Mike Frysinger.
 
    This file is part of simulators.
@@ -18,14 +18,20 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <stdlib.h>
 
 #include "sim-main.h"
-#include "gdb/sim-bfin.h"
+#include "sim/sim-bfin.h"
 #include "bfd.h"
 
 #include "sim-hw.h"
+#include "sim-options.h"
+
 #include "devices.h"
+#include "arch.h"
 #include "dv-bfin_cec.h"
 #include "dv-bfin_dmac.h"
 
@@ -491,12 +497,12 @@ static const struct bfin_port_layout bf52x_port[] =
   SIC (1, 21, "bfin_usb",          "int1"),
   SIC (1, 22, "bfin_usb",          "int2"),
 };
-#define bf522_port bf51x_port
-#define bf523_port bf51x_port
-#define bf524_port bf51x_port
-#define bf525_port bf51x_port
-#define bf526_port bf51x_port
-#define bf527_port bf51x_port
+#define bf522_port bf52x_port
+#define bf523_port bf52x_port
+#define bf524_port bf52x_port
+#define bf525_port bf52x_port
+#define bf526_port bf52x_port
+#define bf527_port bf52x_port
 
 #define bf531_chipid 0x27a5
 #define bf532_chipid bf531_chipid
@@ -1755,7 +1761,7 @@ bfin_model_init (SIM_CPU *cpu)
 }
 
 static bu32
-bfin_extract_unsigned_integer (unsigned char *addr, int len)
+bfin_extract_unsigned_integer (const unsigned char *addr, int len)
 {
   bu32 retval;
   unsigned char * p;
@@ -1847,7 +1853,7 @@ bfin_get_reg (SIM_CPU *cpu, int rn)
 }
 
 static int
-bfin_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *buf, int len)
+bfin_reg_fetch (SIM_CPU *cpu, int rn, void *buf, int len)
 {
   bu32 value, *reg;
 
@@ -1878,7 +1884,7 @@ bfin_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *buf, int len)
 }
 
 static int
-bfin_reg_store (SIM_CPU *cpu, int rn, unsigned char *buf, int len)
+bfin_reg_store (SIM_CPU *cpu, int rn, const void *buf, int len)
 {
   bu32 value, *reg;
 
@@ -1959,7 +1965,7 @@ static const SIM_MACH bfin_mach =
   bfin_prepare_run
 };
 
-const SIM_MACH *sim_machs[] =
+const SIM_MACH * const bfin_sim_machs[] =
 {
   & bfin_mach,
   NULL
@@ -1974,7 +1980,7 @@ enum {
   OPTION_MACH_HW_BOARD_FILE,
 };
 
-const OPTION bfin_mach_options[] =
+static const OPTION bfin_mach_options[] =
 {
   { {"sirev", required_argument, NULL, OPTION_MACH_SIREV },
       '\0', "NUMBER", "Set CPU silicon revision",
@@ -2016,4 +2022,14 @@ bfin_mach_option_handler (SIM_DESC sd, sim_cpu *current_cpu, int opt,
       sim_io_eprintf (sd, "Unknown Blackfin option %d\n", opt);
       return SIM_RC_FAIL;
     }
+}
+
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+extern MODULE_INIT_FN sim_install_bfin_mach;
+
+SIM_RC
+sim_install_bfin_mach (SIM_DESC sd)
+{
+  SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
+  return sim_add_option_table (sd, NULL, bfin_mach_options);
 }

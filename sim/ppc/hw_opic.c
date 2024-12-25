@@ -23,13 +23,7 @@
 
 #include "device_table.h"
 
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
 
 
 /* DEVICE
@@ -311,7 +305,7 @@ typedef struct _opic_timer {
   hw_opic_device *opic; /* ditto */
   unsigned base_count;
   int inhibited;
-  signed64 count; /* *ONLY* if inhibited */
+  int64_t count; /* *ONLY* if inhibited */
   event_entry_tag timeout_event;
   opic_interrupt_source *interrupt_source;
 } opic_timer;
@@ -353,7 +347,7 @@ struct _hw_opic_device {
   unsigned timer_frequency;
 
   /* init register */
-  unsigned32 init;
+  uint32_t init;
 
   /* address maps */
   opic_idu idu;
@@ -423,10 +417,12 @@ hw_opic_init_data(device *me)
       }
       if (!device_find_integer_array_property(me, "interrupt-ranges",
 					      reg_nr * 2,
-					      &opic->isu_block[isb].int_number)
+					      (signed_cell *)
+					        &opic->isu_block[isb].int_number)
 	  || !device_find_integer_array_property(me, "interrupt-ranges",
 						 reg_nr * 2 + 1,
-						 &opic->isu_block[isb].range))
+						 (signed_cell *)
+						   &opic->isu_block[isb].range))
 	device_error(me, "missing or invalid interrupt-ranges property entry %d", reg_nr);
       /* first reg entry specifies the address of both the IDU and the
          first set of ISU registers, adjust things accordingly */
@@ -786,13 +782,13 @@ handle_interrupt(device *me,
   else if (!src->is_level_triggered
 	   && src->is_positive_polarity
 	   && !asserted) {
-    DTRACE(opic, ("interrupt %d - ignore falling edge (positive edge trigered)\n",
+    DTRACE(opic, ("interrupt %d - ignore falling edge (positive edge triggered)\n",
 		  src->nr));
   }
   else if (!src->is_level_triggered
 	   && !src->is_positive_polarity
 	   && asserted) {
-    DTRACE(opic, ("interrupt %d - ignore rising edge (negative edge trigered)\n",
+    DTRACE(opic, ("interrupt %d - ignore rising edge (negative edge triggered)\n",
 		  src->nr));
   }
   else if (src->in_service != 0) {
@@ -883,7 +879,7 @@ do_end_of_interrupt_register_N_write(device *me,
     DTRACE(opic, ("eoi %d - ignoring nonzero value\n", dest->nr));
   }
 
-  /* user doing wierd things? */
+  /* user doing weird things? */
   if (dest->current_in_service == NULL) {
     DTRACE(opic, ("eoi %d - strange, no current interrupt\n", dest->nr));
     return;
@@ -1397,7 +1393,7 @@ timer_event(void *data)
   opic_timer *timer = data;
   device *me = timer->me;
   if (timer->inhibited)
-    device_error(timer->me, "internal-error - timer event occured when timer %d inhibited",
+    device_error(timer->me, "internal-error - timer event occurred when timer %d inhibited",
 		 timer->nr);
   handle_interrupt(timer->me, timer->opic, timer->interrupt_source, 1);
   timer->timeout_event = device_event_queue_schedule(me, timer->base_count,

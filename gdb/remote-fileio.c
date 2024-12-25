@@ -1,6 +1,6 @@
 /* Remote File-I/O communications
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,21 +19,22 @@
 
 /* See the GDB User Guide for details of the GDB remote protocol.  */
 
-#include "defs.h"
-#include "gdbcmd.h"
+#include "event-top.h"
+#include "extract-store-integer.h"
+#include "cli/cli-cmds.h"
 #include "remote.h"
-#include "common/gdb_wait.h"
+#include "gdbsupport/gdb_wait.h"
 #include <sys/stat.h>
 #include "remote-fileio.h"
-#include "event-loop.h"
+#include "gdbsupport/event-loop.h"
 #include "target.h"
 #include "filenames.h"
-#include "common/filestuff.h"
+#include "gdbsupport/filestuff.h"
 
 #include <fcntl.h>
-#include "common/gdb_sys_time.h"
+#include "gdbsupport/gdb_sys_time.h"
 #ifdef __CYGWIN__
-#include <sys/cygwin.h>		/* For cygwin_conv_path.  */
+#include <sys/cygwin.h>
 #endif
 #include <signal.h>
 
@@ -61,7 +62,7 @@ remote_fileio_init_fd_map (void)
       remote_fio_data.fd_map[1] = FIO_FD_CONSOLE_OUT;
       remote_fio_data.fd_map[2] = FIO_FD_CONSOLE_OUT;
       for (i = 3; i < 10; ++i)
-        remote_fio_data.fd_map[i] = FIO_FD_INVALID;
+	remote_fio_data.fd_map[i] = FIO_FD_INVALID;
     }
   return 3;
 }
@@ -199,16 +200,16 @@ remote_fileio_seek_flag_to_host (long num, int *flag)
   switch (num)
     {
       case FILEIO_SEEK_SET:
-        *flag = SEEK_SET;
+	*flag = SEEK_SET;
 	break;
       case FILEIO_SEEK_CUR:
-        *flag =  SEEK_CUR;
+	*flag =  SEEK_CUR;
 	break;
       case FILEIO_SEEK_END:
-        *flag =  SEEK_END;
+	*flag =  SEEK_END;
 	break;
       default:
-        return -1;
+	return -1;
     }
   return 0;
 }
@@ -236,13 +237,13 @@ remote_fileio_extract_long (char **buf, LONGEST *retlong)
     {
       *retlong <<= 4;
       if (**buf >= '0' && **buf <= '9')
-        *retlong += **buf - '0';
+	*retlong += **buf - '0';
       else if (**buf >= 'a' && **buf <= 'f')
-        *retlong += **buf - 'a' + 10;
+	*retlong += **buf - 'a' + 10;
       else if (**buf >= 'A' && **buf <= 'F')
-        *retlong += **buf - 'A' + 10;
+	*retlong += **buf - 'A' + 10;
       else
-        return -1;
+	return -1;
     }
   *retlong *= sign;
   *buf = c;
@@ -316,7 +317,7 @@ static void
 remote_fileio_reply (remote_target *remote, int retcode, int error)
 {
   char buf[32];
-  int ctrl_c = check_quit_flag ();
+  bool ctrl_c = check_quit_flag ();
 
   strcpy (buf, "F");
   if (retcode < 0)
@@ -328,15 +329,15 @@ remote_fileio_reply (remote_target *remote, int retcode, int error)
   if (error || ctrl_c)
     {
       if (error && ctrl_c)
-        error = FILEIO_EINTR;
+	error = FILEIO_EINTR;
       if (error < 0)
-        {
+	{
 	  strcat (buf, "-");
 	  error = -error;
 	}
       sprintf (buf + strlen (buf), ",%x", error);
       if (ctrl_c)
-        strcat (buf, ",C");
+	strcat (buf, ",C");
     }
   quit_handler = remote_fileio_o_quit_handler;
   putpkt (remote, buf);
@@ -425,7 +426,7 @@ remote_fileio_func_open (remote_target *remote, char *buf)
 	}
     }
 
-  fd = gdb_open_cloexec (pathname, flags, mode);
+  fd = gdb_open_cloexec (pathname, flags, mode).release ();
   if (fd < 0)
     {
       remote_fileio_return_errno (remote, -1);
@@ -541,7 +542,7 @@ remote_fileio_func_read (remote_target *remote, char *buf)
 		 limit this read to something smaller than that - by a
 		 safe margin, in case the limit depends on system
 		 resources or version.  */
-	      ret = ui_file_read (gdb_stdtargin, (char *) buffer, 16383);
+	      ret = gdb_stdtargin->read ((char *) buffer, 16383);
 	      if (ret > 0 && (size_t)ret > length)
 		{
 		  remaining_buf = (char *) xmalloc (ret - length);
@@ -554,7 +555,7 @@ remote_fileio_func_read (remote_target *remote, char *buf)
 	break;
       default:
 	buffer = (gdb_byte *) xmalloc (length);
-	/* POSIX defines EINTR behaviour of read in a weird way.  It's allowed
+	/* POSIX defines EINTR behavior of read in a weird way.  It's allowed
 	   for read() to return -1 even if "some" bytes have been read.  It
 	   has been corrected in SUSv2 but that doesn't help us much...
 	   Therefore a complete solution must check how many bytes have been
@@ -639,10 +640,12 @@ remote_fileio_func_write (remote_target *remote, char *buf)
 	xfree (buffer);
 	return;
       case FIO_FD_CONSOLE_OUT:
-	ui_file_write (target_fd == 1 ? gdb_stdtarg : gdb_stdtargerr,
-		       (char *) buffer, length);
-	gdb_flush (target_fd == 1 ? gdb_stdtarg : gdb_stdtargerr);
-	ret = length;
+	{
+	  ui_file *file = gdb_stdtarg;
+	  file->write ((char *) buffer, length);
+	  file->flush ();
+	  ret = length;
+	}
 	break;
       default:
 	ret = write (fd, buffer, length);
@@ -767,14 +770,14 @@ remote_fileio_func_rename (remote_target *remote, char *buf)
   if (ret == -1)
     {
       /* Special case: newpath is a non-empty directory.  Some systems
-         return ENOTEMPTY, some return EEXIST.  We coerce that to be
+	 return ENOTEMPTY, some return EEXIST.  We coerce that to be
 	 always EEXIST.  */
       if (errno == ENOTEMPTY)
-        errno = EEXIST;
+	errno = EEXIST;
 #ifdef __CYGWIN__
       /* Workaround some Cygwin problems with correct errnos.  */
       if (errno == EACCES)
-        {
+	{
 	  if (!of && !nf && S_ISDIR (nst.st_mode))
 	    {
 	      if (S_ISREG (ost.st_mode))
@@ -958,7 +961,7 @@ remote_fileio_func_fstat (remote_target *remote, char *buf)
       if (!gettimeofday (&tv, NULL))
 	st.st_atime = st.st_mtime = st.st_ctime = tv.tv_sec;
       else
-        st.st_atime = st.st_mtime = st.st_ctime = (time_t) 0;
+	st.st_atime = st.st_mtime = st.st_ctime = (time_t) 0;
       ret = 0;
     }
   else
@@ -1076,7 +1079,7 @@ remote_fileio_func_system (remote_target *remote, char *buf)
 	}
     }
   
-  /* Check if system(3) has been explicitely allowed using the
+  /* Check if system(3) has been explicitly allowed using the
      `set remote system-call-allowed 1' command.  If length is 0,
      indicating a NULL parameter to the system call, return zero to
      indicate a shell is not available.  Otherwise fail with EPERM.  */
@@ -1185,18 +1188,22 @@ remote_fileio_request (remote_target *remote, char *buf, int ctrlc_pending_p)
     }
   else
     {
-      TRY
+      try
 	{
 	  do_remote_fileio_request (remote, buf);
 	}
-      CATCH (ex, RETURN_MASK_ALL)
+      catch (const gdb_exception_forced_quit &ex)
 	{
-	  if (ex.reason == RETURN_QUIT)
-	    remote_fileio_reply (remote, -1, FILEIO_EINTR);
-	  else
-	    remote_fileio_reply (remote, -1, FILEIO_EIO);
+	  throw;
 	}
-      END_CATCH
+      catch (const gdb_exception_quit &ex)
+	{
+	  remote_fileio_reply (remote, -1, FILEIO_EINTR);
+	}
+      catch (const gdb_exception &ex)
+	{
+	  remote_fileio_reply (remote, -1, FILEIO_EIO);
+	}
     }
 
   quit_handler = remote_fileio_o_quit_handler;
@@ -1275,7 +1282,7 @@ set_system_call_allowed (const char *args, int from_tty)
       int val = strtoul (args, &arg_end, 10);
 
       if (*args && *arg_end == '\0')
-        {
+	{
 	  remote_fio_system_call_allowed = !!val;
 	  return;
 	}
@@ -1289,20 +1296,20 @@ show_system_call_allowed (const char *args, int from_tty)
   if (args)
     error (_("Garbage after \"show remote "
 	     "system-call-allowed\" command: `%s'"), args);
-  printf_unfiltered ("Calling host system(3) call from target is %sallowed\n",
-		     remote_fio_system_call_allowed ? "" : "not ");
+  gdb_printf ("Calling host system(3) call from target is %sallowed\n",
+	      remote_fio_system_call_allowed ? "" : "not ");
 }
 
 void
-initialize_remote_fileio (struct cmd_list_element *remote_set_cmdlist,
-			  struct cmd_list_element *remote_show_cmdlist)
+initialize_remote_fileio (struct cmd_list_element **remote_set_cmdlist,
+			  struct cmd_list_element **remote_show_cmdlist)
 {
   add_cmd ("system-call-allowed", no_class,
 	   set_system_call_allowed,
 	   _("Set if the host system(3) call is allowed for the target."),
-	   &remote_set_cmdlist);
+	   remote_set_cmdlist);
   add_cmd ("system-call-allowed", no_class,
 	   show_system_call_allowed,
 	   _("Show if the host system(3) call is allowed for the target."),
-	   &remote_show_cmdlist);
+	   remote_show_cmdlist);
 }

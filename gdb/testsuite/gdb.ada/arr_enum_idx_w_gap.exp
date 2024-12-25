@@ -1,4 +1,4 @@
-# Copyright 2018-2019 Free Software Foundation, Inc.
+# Copyright 2018-2024 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,19 +15,24 @@
 
 load_lib "ada.exp"
 
+require allow_ada_tests
+
 standard_ada_testfile foo_q418_043
 
-if {[gdb_compile_ada "${srcfile}" "${binfile}" executable [list debug ]] != "" } {
-  return -1
+foreach_gnat_encoding scenario flags {all minimal} {
+    lappend flags debug
+
+    if {[gdb_compile_ada "${srcfile}" "${binfile}-${scenario}" executable $flags] != ""} {
+	return -1
+    }
+
+    clean_restart ${testfile}-${scenario}
+
+    set bp_location [gdb_get_line_number "BREAK" ${testdir}/foo_q418_043.adb]
+    if {![runto "foo_q418_043.adb:$bp_location"]} {
+	return
+    }
+
+    gdb_test "print A" \
+	" = \\(42, 42\\)"
 }
-
-clean_restart ${testfile}
-
-set bp_location [gdb_get_line_number "BREAK" ${testdir}/foo_q418_043.adb]
-if ![runto "foo_q418_043.adb:$bp_location" ] then {
-  perror "Couldn't run ${testfile}"
-  return
-}
-
-gdb_test "print A" \
-         " = \\(42, 42\\)"

@@ -1,6 +1,6 @@
 /* GDB routines for supporting auto-loaded scripts.
 
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,9 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "top.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "objfiles.h"
 #include "python.h"
 #include "auto-load.h"
@@ -29,7 +28,7 @@
    set auto-load python-scripts on|off
    This is true if we should auto-load associated Python scripts when an
    objfile is opened, false otherwise.  */
-static int auto_load_python_scripts = 1;
+static bool auto_load_python_scripts = true;
 
 /* "show" command for the auto_load_python_scripts configuration variable.  */
 
@@ -37,13 +36,12 @@ static void
 show_auto_load_python_scripts (struct ui_file *file, int from_tty,
 			       struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Auto-loading of Python scripts is %s.\n"), value);
+  gdb_printf (file, _("Auto-loading of Python scripts is %s.\n"), value);
 }
 
-/* Return non-zero if auto-loading Python scripts is enabled.
-   This is the extension_language_script_ops.auto_load_enabled "method".  */
+/* See python-internal.h.  */
 
-int
+bool
 gdbpy_auto_load_enabled (const struct extension_language_defn *extlang)
 {
   return auto_load_python_scripts;
@@ -54,19 +52,17 @@ gdbpy_auto_load_enabled (const struct extension_language_defn *extlang)
 static void
 info_auto_load_python_scripts (const char *pattern, int from_tty)
 {
-  auto_load_info_scripts (pattern, from_tty, &extension_language_python);
+  auto_load_info_scripts (current_program_space, pattern, from_tty,
+			  &extension_language_python);
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_auto_load (void)
 {
-  struct cmd_list_element *cmd;
-  const char *cmd_name;
-
   add_setshow_boolean_cmd ("python-scripts", class_support,
 			   &auto_load_python_scripts, _("\
-Set the debugger's behaviour regarding auto-loaded Python scripts."), _("\
-Show the debugger's behaviour regarding auto-loaded Python scripts."), _("\
+Set the debugger's behavior regarding auto-loaded Python scripts."), _("\
+Show the debugger's behavior regarding auto-loaded Python scripts."), _("\
 If enabled, auto-loaded Python scripts are loaded when the debugger reads\n\
 an executable or shared library.\n\
 This options has security implications for untrusted inferiors."),
@@ -74,32 +70,30 @@ This options has security implications for untrusted inferiors."),
 			   auto_load_set_cmdlist_get (),
 			   auto_load_show_cmdlist_get ());
 
-  add_setshow_boolean_cmd ("auto-load-scripts", class_support,
-			   &auto_load_python_scripts, _("\
-Set the debugger's behaviour regarding auto-loaded Python scripts, "
+  set_show_commands auto_load_scripts_cmds
+    = add_setshow_boolean_cmd ("auto-load-scripts", class_support,
+			       &auto_load_python_scripts, _("\
+Set the debugger's behavior regarding auto-loaded Python scripts, "
 								 "deprecated."),
-			   _("\
-Show the debugger's behaviour regarding auto-loaded Python scripts, "
+			       _("\
+Show the debugger's behavior regarding auto-loaded Python scripts, "
 								 "deprecated."),
-			   NULL, NULL, show_auto_load_python_scripts,
-			   &setlist, &showlist);
-  cmd_name = "auto-load-scripts";
-  cmd = lookup_cmd (&cmd_name, setlist, "", -1, 1);
-  deprecate_cmd (cmd, "set auto-load python-scripts");
-
-  /* It is needed because lookup_cmd updates the CMD_NAME pointer.  */
-  cmd_name = "auto-load-scripts";
-  cmd = lookup_cmd (&cmd_name, showlist, "", -1, 1);
-  deprecate_cmd (cmd, "show auto-load python-scripts");
+			       NULL, NULL, show_auto_load_python_scripts,
+			       &setlist, &showlist);
+  deprecate_cmd (auto_load_scripts_cmds.set, "set auto-load python-scripts");
+  deprecate_cmd (auto_load_scripts_cmds.show, "show auto-load python-scripts");
 
   add_cmd ("python-scripts", class_info, info_auto_load_python_scripts,
 	   _("Print the list of automatically loaded Python scripts.\n\
 Usage: info auto-load python-scripts [REGEXP]"),
 	   auto_load_info_cmdlist_get ());
 
-  cmd = add_info ("auto-load-scripts", info_auto_load_python_scripts, _("\
+  cmd_list_element *info_auto_load_scripts_cmd
+    = add_info ("auto-load-scripts", info_auto_load_python_scripts, _("\
 Print the list of automatically loaded Python scripts, deprecated."));
-  deprecate_cmd (cmd, "info auto-load python-scripts");
+  deprecate_cmd (info_auto_load_scripts_cmd, "info auto-load python-scripts");
 
   return 0;
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_auto_load);

@@ -1,4 +1,4 @@
-/* Copyright 2004-2019 Free Software Foundation, Inc.
+/* Copyright 2004-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -31,7 +31,9 @@ func1 ()
 
 int
 main ()
-{
+{ /* main prologue */
   int v0 = 0;
   func1 ();
+
+  return 0;
 }

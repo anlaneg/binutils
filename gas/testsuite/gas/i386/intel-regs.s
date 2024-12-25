@@ -1,8 +1,10 @@
 	.text
 	.intel_syntax noprefix
 
-	.arch i286
+	mov	eax, tmm1
+
 	.code16
+	.arch i286
 	mov	ax, eax			; add	[bx+si], al
 	mov	ax, rax			; add	[bx+si], al
 	mov	ax, axl			; add	[bx+si], al
@@ -59,3 +61,5 @@
 	mov	rax, r8
 ymm8:
 	jmp	ymm8
+tmm0:
+	jmp	tmm0

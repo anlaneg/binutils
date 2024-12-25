@@ -17,6 +17,8 @@
  
     */
 
+#include "ansidecl.h"
+
 /* Additional, and optional expressions.  */
 #ifdef WITH_ALTIVEC
 #include "altivec_expression.h"
@@ -28,7 +30,7 @@
 /* 32bit target expressions:
 
    Each calculation is performed three times using each of the
-   signed64, unsigned64 and long integer types.  The macro ALU_END
+   int64_t, uint64_t and long integer types.  The macro ALU_END
    (in _ALU_RESULT_VAL) then selects which of the three alternative
    results will be used in the final assignment of the target
    register.  As this selection is determined at compile time by
@@ -38,7 +40,7 @@
    resulting dead code.  That dead code being the calculations that,
    as it turned out were not in the end needed.
 
-   64bit arrithemetic is used firstly because it allows the use of
+   64bit arithmetic is used firstly because it allows the use of
    gcc's efficient long long operators (typically efficiently output
    inline) and secondly because the resultant answer will contain in
    the low 32bits the answer while in the high 32bits is either carry
@@ -46,7 +48,7 @@
 
 /* 64bit target expressions:
 
-   Unfortunatly 128bit arrithemetic isn't that common.  Consequently
+   Unfortunately 128bit arithmetic isn't that common.  Consequently
    the 32/64 bit trick can not be used.  Instead all calculations are
    required to retain carry/overflow information in separate
    variables.  Even with this restriction it is still possible for the
@@ -55,17 +57,17 @@
 
 
 /* Macro's to type cast 32bit constants to 64bits */
-#define SIGNED64(val)   ((signed64)(signed32)(val))
-#define UNSIGNED64(val) ((unsigned64)(unsigned32)(val))
+#define ALU_SIGNED64(val)   ((int64_t)(int32_t)(val))
+#define ALU_UNSIGNED64(val) ((uint64_t)(uint32_t)(val))
 
 
 /* Start a section of ALU code */
 
 #define ALU_BEGIN(val) \
 { \
-  natural_word alu_val; \
-  unsigned64 alu_carry_val; \
-  signed64 alu_overflow_val; \
+  signed_word alu_val; \
+  uint64_t alu_carry_val; \
+  int64_t alu_overflow_val; \
   ALU_SET(val)
 
 
@@ -76,7 +78,7 @@
   signed_word const alu_result = _ALU_RESULT_VAL(CA,OE,Rc); \
   /* determine the overflow bit if needed */ \
   if (OE) { \
-    if ((((unsigned64)(alu_overflow_val & BIT64(0))) \
+    if ((((uint64_t)(alu_overflow_val & BIT64(0))) \
 	 >> 32) \
         == (alu_overflow_val & BIT64(32))) \
       XER &= (~xer_overflow); \
@@ -116,30 +118,30 @@
 #define ALU_SET(val) \
 do { \
   alu_val = val; \
-  alu_carry_val = ((unsigned64)alu_val) >> 32; \
-  alu_overflow_val = ((signed64)alu_val) >> 32; \
+  alu_carry_val = ((uint64_t)alu_val) >> 32; \
+  alu_overflow_val = ((int64_t)alu_val) >> 32; \
 } while (0)
 #endif
 #if (WITH_TARGET_WORD_BITSIZE == 32)
 #define ALU_SET(val) \
 do { \
   alu_val = val; \
-  alu_carry_val = (unsigned32)(alu_val); \
-  alu_overflow_val = (signed32)(alu_val); \
+  alu_carry_val = (uint32_t)(alu_val); \
+  alu_overflow_val = (int32_t)(alu_val); \
 } while (0)
 #endif
 
 #if (WITH_TARGET_WORD_BITSIZE == 64)
 #define ALU_ADD(val) \
 do { \
-  unsigned64 alu_lo = (UNSIGNED64(alu_val) \
-		       + UNSIGNED64(val)); \
+  uint64_t alu_lo = (ALU_UNSIGNED64(alu_val) \
+		       + ALU_UNSIGNED64(val)); \
   signed alu_carry = ((alu_lo & BIT(31)) != 0); \
   alu_carry_val = (alu_carry_val \
-		   + UNSIGNED64(EXTRACTED(val, 0, 31)) \
+		   + ALU_UNSIGNED64(EXTRACTED(val, 0, 31)) \
 		   + alu_carry); \
   alu_overflow_val = (alu_overflow_val \
-		      + SIGNED64(EXTRACTED(val, 0, 31)) \
+		      + ALU_SIGNED64(EXTRACTED(val, 0, 31)) \
 		      + alu_carry); \
   alu_val = alu_val + val; \
 } while (0)
@@ -148,8 +150,8 @@ do { \
 #define ALU_ADD(val) \
 do { \
   alu_val += val; \
-  alu_carry_val += (unsigned32)(val); \
-  alu_overflow_val += (signed32)(val); \
+  alu_carry_val += (uint32_t)(val); \
+  alu_overflow_val += (int32_t)(val); \
 } while (0)
 #endif
 
@@ -177,8 +179,8 @@ do { \
 #define ALU_SUB(val) \
 do { \
   alu_val -= val; \
-  alu_carry_val -= (unsigned32)(val); \
-  alu_overflow_val -= (signed32)(val); \
+  alu_carry_val -= (uint32_t)(val); \
+  alu_overflow_val -= (int32_t)(val); \
 } while (0)
 #endif
 #endif
@@ -189,8 +191,8 @@ do { \
 #define ALU_OR(val) \
 do { \
   alu_val |= val; \
-  alu_carry_val = (unsigned32)(alu_val); \
-  alu_overflow_val = (signed32)(alu_val); \
+  alu_carry_val = (uint32_t)(alu_val); \
+  alu_overflow_val = (int32_t)(alu_val); \
 } while (0)
 #endif
 
@@ -201,8 +203,8 @@ do { \
 #define ALU_XOR(val) \
 do { \
   alu_val ^= val; \
-  alu_carry_val = (unsigned32)(alu_val); \
-  alu_overflow_val = (signed32)(alu_val); \
+  alu_carry_val = (uint32_t)(alu_val); \
+  alu_overflow_val = (int32_t)(alu_val); \
 } while (0)
 #endif
 
@@ -227,8 +229,8 @@ do { \
 #define ALU_AND(val) \
 do { \
   alu_val &= val; \
-  alu_carry_val = (unsigned32)(alu_val); \
-  alu_overflow_val = (signed32)(alu_val); \
+  alu_carry_val = (uint32_t)(alu_val); \
+  alu_overflow_val = (int32_t)(alu_val); \
 } while (0)
 #endif
 
@@ -236,7 +238,7 @@ do { \
 #if (WITH_TARGET_WORD_BITSIZE == 64)
 #define ALU_NOT \
 do { \
-  signed64 new_alu_val = ~alu_val; \
+  int64_t new_alu_val = ~alu_val; \
   ALU_SET(new_alu_val); \
 } while (0)
 #endif
@@ -314,7 +316,7 @@ do { \
 
 #define FPSCR_BEGIN \
 { \
-  fpscreg old_fpscr UNUSED = FPSCR
+  fpscreg old_fpscr ATTRIBUTE_UNUSED = FPSCR
 
 #define FPSCR_END(Rc) { \
   /* always update VX */ \

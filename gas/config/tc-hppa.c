@@ -1,5 +1,5 @@
 /* tc-hppa.c -- Assemble for the PA
-   Copyright (C) 1989-2019 Free Software Foundation, Inc.
+   Copyright (C) 1989-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -550,7 +550,7 @@ static struct call_info *last_call_info;
 static struct call_desc last_call_desc;
 
 /* handle of the OPCODE hash table */
-static struct hash_control *op_hash = NULL;
+static htab_t op_hash = NULL;
 
 /* These characters can be suffixes of opcode names and they may be
    followed by meaningful whitespace.  We don't include `,' and `!'
@@ -591,7 +591,7 @@ static struct pa_it the_insn;
 /* Points to the end of an expression just parsed by get_expression
    and friends.  FIXME.  This shouldn't be handled with a file-global
    variable.  */
-static char *expr_end;
+static char *expr_parse_end;
 
 /* Nonzero if a .callinfo appeared within the current procedure.  */
 static int callinfo_found;
@@ -1270,7 +1270,7 @@ cons_fix_new_hppa (fragS *frag, int where, int size, expressionS *exp,
 		hppa_field_selector, size * 8, 0, 0);
 }
 
-/* Mark (via expr_end) the end of an expression (I think).  FIXME.  */
+/* Mark (via expr_parse_end) the end of an expression (I think).  FIXME.  */
 
 static void
 get_expression (char *str)
@@ -1286,11 +1286,11 @@ get_expression (char *str)
 	|| SEG_NORMAL (seg)))
     {
       as_warn (_("Bad segment in expression."));
-      expr_end = input_line_pointer;
+      expr_parse_end = input_line_pointer;
       input_line_pointer = save_in;
       return;
     }
-  expr_end = input_line_pointer;
+  expr_parse_end = input_line_pointer;
   input_line_pointer = save_in;
 }
 
@@ -1322,7 +1322,7 @@ pa_parse_nullif (char **s)
 const char *
 md_atof (int type, char *litP, int *sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
 /* Write out big-endian.  */
@@ -1365,15 +1365,15 @@ tc_gen_reloc (asection *section, fixS *fixp)
   /* ??? It might be better to hide this +8 stuff in tc_cfi_emit_pcrel_expr,
      undefine DIFF_EXPR_OK, and let these sorts of complex expressions fail
      when R_HPPA_COMPLEX == R_PARISC_UNIMPLEMENTED.  */
-  if (fixp->fx_r_type == (bfd_reloc_code_real_type) R_HPPA_COMPLEX
+  if (fixp->fx_r_type == (int) R_HPPA_COMPLEX
       && fixp->fx_pcrel)
     {
-      fixp->fx_r_type = R_HPPA_PCREL_CALL;
+      fixp->fx_r_type = (int) R_HPPA_PCREL_CALL;
       fixp->fx_offset += 8;
     }
 
   codes = hppa_gen_reloc_type (stdoutput,
-			       fixp->fx_r_type,
+			       (int) fixp->fx_r_type,
 			       hppa_fixp->fx_r_format,
 			       hppa_fixp->fx_r_field,
 			       fixp->fx_subsy != NULL,
@@ -1477,8 +1477,7 @@ tc_gen_reloc (asection *section, fixS *fixp)
 	     of two symbols.  With that in mind we fill in all four
 	     relocs now and break out of the loop.  */
 	  gas_assert (i == 1);
-	  relocs[0]->sym_ptr_ptr
-	    = (asymbol **) bfd_abs_section_ptr->symbol_ptr_ptr;
+	  relocs[0]->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	  relocs[0]->howto
 	    = bfd_reloc_type_lookup (stdoutput,
 				     (bfd_reloc_code_real_type) *codes[0]);
@@ -1498,15 +1497,13 @@ tc_gen_reloc (asection *section, fixS *fixp)
 				     (bfd_reloc_code_real_type) *codes[2]);
 	  relocs[2]->address = fixp->fx_frag->fr_address + fixp->fx_where;
 	  relocs[2]->addend = 0;
-	  relocs[3]->sym_ptr_ptr
-	    = (asymbol **) bfd_abs_section_ptr->symbol_ptr_ptr;
+	  relocs[3]->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	  relocs[3]->howto
 	    = bfd_reloc_type_lookup (stdoutput,
 				     (bfd_reloc_code_real_type) *codes[3]);
 	  relocs[3]->address = fixp->fx_frag->fr_address + fixp->fx_where;
 	  relocs[3]->addend = 0;
-	  relocs[4]->sym_ptr_ptr
-	    = (asymbol **) bfd_abs_section_ptr->symbol_ptr_ptr;
+	  relocs[4]->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	  relocs[4]->howto
 	    = bfd_reloc_type_lookup (stdoutput,
 				     (bfd_reloc_code_real_type) *codes[4]);
@@ -1608,7 +1605,7 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
 valueT
 md_section_align (asection *segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
+  int align = bfd_section_alignment (segment);
   int align2 = (1 << align) - 1;
 
   return (size + align2) & ~align2;
@@ -1631,26 +1628,26 @@ md_estimate_size_before_relax (fragS *fragP, asection *segment ATTRIBUTE_UNUSED)
 
 #ifdef OBJ_ELF
 # ifdef WARN_COMMENTS
-const char *md_shortopts = "Vc";
+const char md_shortopts[] = "Vc";
 # else
-const char *md_shortopts = "V";
+const char md_shortopts[] = "V";
 # endif
 #else
 # ifdef WARN_COMMENTS
-const char *md_shortopts = "c";
+const char md_shortopts[] = "c";
 # else
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 # endif
 #endif
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #ifdef WARN_COMMENTS
   {"warn-comment", no_argument, NULL, 'c'},
 #endif
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
@@ -2029,7 +2026,7 @@ pa_parse_number (char **s, int is_float)
   symbolS *sym;
   int status;
   char *p = *s;
-  bfd_boolean have_prefix;
+  bool have_prefix;
 
   /* Skip whitespace before the number.  */
   while (*p == ' ' || *p == '\t')
@@ -2168,7 +2165,7 @@ pa_parse_number (char **s, int is_float)
 	      num = S_GET_VALUE (sym);
 	      /* Well, we don't really have one, but we do have a
 		 register, so...  */
-	      have_prefix = TRUE;
+	      have_prefix = true;
 	    }
 	  else if (S_GET_SEGMENT (sym) == bfd_abs_section_ptr)
 	    num = S_GET_VALUE (sym);
@@ -2223,10 +2220,10 @@ need_pa11_opcode (void)
 	  if (!bfd_set_arch_mach (stdoutput, bfd_arch_hppa, pa11))
 	    as_warn (_("could not update architecture and machine"));
 	}
-      return TRUE;
+      return true;
     }
   else
-    return FALSE;
+    return false;
 }
 
 /* Parse a condition for a fcmp instruction.  Return the numerical
@@ -2432,24 +2429,37 @@ pa_chk_field_selector (char **str)
   int middle, low, high;
   int cmp;
   char name[4];
+  char *s = *str;
 
   /* Read past any whitespace.  */
-  /* FIXME: should we read past newlines and formfeeds??? */
-  while (**str == ' ' || **str == '\t' || **str == '\n' || **str == '\f')
-    *str = *str + 1;
+  while (*s == ' ' || *s == '\t')
+    s++;
+  *str = s;
 
-  if ((*str)[1] == '\'' || (*str)[1] == '%')
-    name[0] = TOLOWER ((*str)[0]),
-    name[1] = 0;
-  else if ((*str)[2] == '\'' || (*str)[2] == '%')
-    name[0] = TOLOWER ((*str)[0]),
-    name[1] = TOLOWER ((*str)[1]),
-    name[2] = 0;
-  else if ((*str)[3] == '\'' || (*str)[3] == '%')
-    name[0] = TOLOWER ((*str)[0]),
-    name[1] = TOLOWER ((*str)[1]),
-    name[2] = TOLOWER ((*str)[2]),
-    name[3] = 0;
+  if (is_end_of_line [(unsigned char) s[0]])
+    return e_fsel;
+  else if (s[1] == '\'' || s[1] == '%')
+    {
+      name[0] = TOLOWER (s[0]);
+      name[1] = 0;
+    }
+  else if (is_end_of_line [(unsigned char) s[1]])
+    return e_fsel;
+  else if (s[2] == '\'' || s[2] == '%')
+    {
+      name[0] = TOLOWER (s[0]);
+      name[1] = TOLOWER (s[1]);
+      name[2] = 0;
+    }
+  else if (is_end_of_line [(unsigned char) s[2]])
+    return e_fsel;
+  else if (s[3] == '\'' || s[3] == '%')
+    {
+      name[0] = TOLOWER (s[0]);
+      name[1] = TOLOWER (s[1]);
+      name[2] = TOLOWER (s[2]);
+      name[3] = 0;
+    }
   else
     return e_fsel;
 
@@ -2505,7 +2515,7 @@ evaluate_absolute (struct pa_it *insn)
   return hppa_field_adjust (0, value, field_selector);
 }
 
-/* Mark (via expr_end) the end of an absolute expression.  FIXME.  */
+/* Mark (via expr_parse_end) the end of an absolute expression.  FIXME.  */
 
 static int
 pa_get_absolute_expression (struct pa_it *insn, char **strp)
@@ -2516,7 +2526,7 @@ pa_get_absolute_expression (struct pa_it *insn, char **strp)
   save_in = input_line_pointer;
   input_line_pointer = *strp;
   expression (&insn->exp);
-  expr_end = input_line_pointer;
+  expr_parse_end = input_line_pointer;
   input_line_pointer = save_in;
   if (insn->exp.X_op != O_constant)
     {
@@ -3170,7 +3180,7 @@ pa_ip (char *str)
   const char *error_message = "";
   char *s, c, *argstart, *name, *save_s;
   const char *args;
-  int match = FALSE;
+  int match = false;
   int comma = 0;
   int cmpltr, nullif, flag, cond, need_cond, num;
   int immediate_check = 0, pos = -1, len = -1;
@@ -3214,7 +3224,7 @@ pa_ip (char *str)
     }
 
   /* Look up the opcode in the hash table.  */
-  if ((insn = (struct pa_opcode *) hash_find (op_hash, str)) == NULL)
+  if ((insn = (struct pa_opcode *) str_hash_find (op_hash, str)) == NULL)
     {
       as_bad (_("Unknown opcode: `%s'"), str);
       return;
@@ -3253,7 +3263,7 @@ pa_ip (char *str)
 	    /* End of arguments.  */
 	    case '\0':
 	      if (*s == '\0')
-		match = TRUE;
+		match = true;
 	      break;
 
 	    case '+':
@@ -3333,7 +3343,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 32, 1, 0);
 	      SAVE_IMMEDIATE(num);
 	      INSERT_FIELD_AND_CONTINUE (opcode, 32 - num, 0);
@@ -3343,7 +3353,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      /* When in strict mode, we want to just reject this
 		 match instead of giving an out of range error.  */
 	      CHECK_FIELD (num, 15, -16, strict);
@@ -3355,7 +3365,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      /* When in strict mode, we want to just reject this
 		 match instead of giving an out of range error.  */
 	      CHECK_FIELD (num, 15, -16, strict);
@@ -3367,7 +3377,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 31, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 0);
 
@@ -3376,7 +3386,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 31, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 16);
 
@@ -3385,7 +3395,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 1023, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 16);
 
@@ -3553,7 +3563,7 @@ pa_ip (char *str)
 		/* Handle load cache hint completer.  */
 		case 'c':
 		  cmpltr = 0;
-		  if (!strncmp (s, ",sl", 3))
+		  if (startswith (s, ",sl"))
 		    {
 		      s += 3;
 		      cmpltr = 2;
@@ -3563,12 +3573,12 @@ pa_ip (char *str)
 		/* Handle store cache hint completer.  */
 		case 'C':
 		  cmpltr = 0;
-		  if (!strncmp (s, ",sl", 3))
+		  if (startswith (s, ",sl"))
 		    {
 		      s += 3;
 		      cmpltr = 2;
 		    }
-		  else if (!strncmp (s, ",bc", 3))
+		  else if (startswith (s, ",bc"))
 		    {
 		      s += 3;
 		      cmpltr = 1;
@@ -3578,7 +3588,7 @@ pa_ip (char *str)
 		/* Handle load and clear cache hint completer.  */
 		case 'd':
 		  cmpltr = 0;
-		  if (!strncmp (s, ",co", 3))
+		  if (startswith (s, ",co"))
 		    {
 		      s += 3;
 		      cmpltr = 1;
@@ -3587,7 +3597,7 @@ pa_ip (char *str)
 
 		/* Handle load ordering completer.  */
 		case 'o':
-		  if (strncmp (s, ",o", 2) != 0)
+		  if (!startswith (s, ",o"))
 		    break;
 		  s += 2;
 		  continue;
@@ -4098,12 +4108,12 @@ pa_ip (char *str)
 			else if (*s == '*')
 			  break;
 
-			if (strncmp (s, "<", 1) == 0)
+			if (startswith (s, "<"))
 			  {
 			    cmpltr = 0;
 			    s++;
 			  }
-			else if (strncmp (s, ">=", 2) == 0)
+			else if (startswith (s, ">="))
 			  {
 			    cmpltr = 1;
 			    s += 2;
@@ -4543,7 +4553,7 @@ pa_ip (char *str)
 	       are 0..6 inclusive.  */
 	    case 'h':
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4560,7 +4570,7 @@ pa_ip (char *str)
 	      get_expression (s);
 	      if (the_insn.exp.X_op == O_constant)
 		{
-		  s = expr_end;
+		  s = expr_parse_end;
 		  num = evaluate_absolute (&the_insn);
 		  CHECK_FIELD (num, 6, 0, 0);
 		  num = (num + 1) ^ 1;
@@ -4580,7 +4590,7 @@ pa_ip (char *str)
 	    case 'i':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4616,7 +4626,7 @@ pa_ip (char *str)
 	    case 'J':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  int mb;
@@ -4640,7 +4650,7 @@ pa_ip (char *str)
 	    case 'K':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  int mb;
@@ -4662,7 +4672,7 @@ pa_ip (char *str)
 	    case '<':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  int mb;
@@ -4682,7 +4692,7 @@ pa_ip (char *str)
 	    case '>':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  int mb;
@@ -4706,7 +4716,7 @@ pa_ip (char *str)
 		break;
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4748,7 +4758,7 @@ pa_ip (char *str)
 	    case 'd':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4789,7 +4799,7 @@ pa_ip (char *str)
 	    case 'j':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4825,7 +4835,7 @@ pa_ip (char *str)
 	    case 'k':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4861,7 +4871,7 @@ pa_ip (char *str)
 	    case 'l':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4898,7 +4908,7 @@ pa_ip (char *str)
 	    case 'y':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4936,7 +4946,7 @@ pa_ip (char *str)
 	    case '&':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      if (the_insn.exp.X_op == O_constant)
 		{
 		  num = evaluate_absolute (&the_insn);
@@ -4974,7 +4984,7 @@ pa_ip (char *str)
 	    case 'w':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      the_insn.pcrel = 1;
 	      if (!the_insn.exp.X_add_symbol
 		  || !strcmp (S_GET_NAME (the_insn.exp.X_add_symbol),
@@ -4998,7 +5008,7 @@ pa_ip (char *str)
 		  the_insn.format = 12;
 		  the_insn.arg_reloc = last_call_desc.arg_reloc;
 		  memset (&last_call_desc, 0, sizeof (struct call_desc));
-		  s = expr_end;
+		  s = expr_parse_end;
 		  continue;
 		}
 
@@ -5006,7 +5016,7 @@ pa_ip (char *str)
 	    case 'W':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      the_insn.pcrel = 1;
 	      if (!the_insn.exp.X_add_symbol
 		  || !strcmp (S_GET_NAME (the_insn.exp.X_add_symbol),
@@ -5037,7 +5047,7 @@ pa_ip (char *str)
 	    case 'X':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      the_insn.pcrel = 1;
 	      if (!the_insn.exp.X_add_symbol
 		  || !strcmp (S_GET_NAME (the_insn.exp.X_add_symbol),
@@ -5067,7 +5077,7 @@ pa_ip (char *str)
 	    case 'z':
 	      the_insn.field_selector = pa_chk_field_selector (&s);
 	      get_expression (s);
-	      s = expr_end;
+	      s = expr_parse_end;
 	      the_insn.pcrel = 0;
 	      if (!the_insn.exp.X_add_symbol
 		  || !strcmp (S_GET_NAME (the_insn.exp.X_add_symbol),
@@ -5124,7 +5134,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 3, 1, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 6);
 
@@ -5133,7 +5143,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 15, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 6);
 
@@ -5142,7 +5152,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 31, 0, strict);
 	      SAVE_IMMEDIATE(num);
 	      INSERT_FIELD_AND_CONTINUE (opcode, 31 - num, 5);
@@ -5152,7 +5162,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 63, 0, strict);
 	      SAVE_IMMEDIATE(num);
 	      num = 63 - num;
@@ -5165,7 +5175,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 64, 1, strict);
 	      SAVE_IMMEDIATE(num);
 	      num--;
@@ -5178,7 +5188,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 64, 1, strict);
 	      SAVE_IMMEDIATE(num);
 	      num--;
@@ -5191,7 +5201,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 31, 0, strict);
 	      SAVE_IMMEDIATE(num);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 5);
@@ -5201,7 +5211,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 63, 0, strict);
 	      SAVE_IMMEDIATE(num);
 	      opcode |= (num & 0x20) << 6;
@@ -5213,7 +5223,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 63, 0, strict);
 	      if (num & 0x20)
 		opcode &= ~(1 << 13);
@@ -5224,7 +5234,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 31, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 21);
 
@@ -5233,7 +5243,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 511, 1, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 3);
 
@@ -5242,7 +5252,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 8191, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 13);
 
@@ -5251,7 +5261,7 @@ pa_ip (char *str)
 	      num = pa_get_absolute_expression (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 67108863, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 0);
 
@@ -5262,7 +5272,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 7, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 6);
 
@@ -5271,7 +5281,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 1048575, 0, strict);
 	      num = (num & 0x1f) | ((num & 0x000fffe0) << 6);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 0);
@@ -5281,7 +5291,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 32767, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 11);
 
@@ -5290,7 +5300,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 1023, 0, strict);
 	      num = (num & 0x1f) | ((num & 0x000003e0) << 6);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 0);
@@ -5300,7 +5310,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 32767, 0, strict);
 	      num = (num & 0x1f) | ((num & 0x00007fe0) << 6);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 0);
@@ -5312,7 +5322,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 7, 0, strict);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 6);
 
@@ -5321,7 +5331,7 @@ pa_ip (char *str)
 	      num = pa_get_number (&the_insn, &s);
 	      if (strict && the_insn.exp.X_op != O_constant)
 		break;
-	      s = expr_end;
+	      s = expr_parse_end;
 	      CHECK_FIELD (num, 4194303, 0, strict);
 	      num = (num & 0x1f) | ((num & 0x003fffe0) << 4);
 	      INSERT_FIELD_AND_CONTINUE (opcode, num, 0);
@@ -5690,7 +5700,7 @@ pa_ip (char *str)
 	  && !bfd_set_arch_mach (stdoutput, bfd_arch_hppa, insn->arch))
 	{
 	  as_warn (_("could not update architecture and machine"));
-	  match = FALSE;
+	  match = false;
 	}
 
  failed:
@@ -5787,7 +5797,7 @@ md_assemble (char *str)
   if (the_insn.reloc != R_HPPA_NONE)
     fix_new_hppa (frag_now, (to - frag_now->fr_literal), 4, NULL,
 		  (offsetT) 0, &the_insn.exp, the_insn.pcrel,
-		  the_insn.reloc, the_insn.field_selector,
+		  (int) the_insn.reloc, the_insn.field_selector,
 		  the_insn.format, the_insn.arg_reloc, 0);
 
 #ifdef OBJ_ELF
@@ -5962,7 +5972,7 @@ pa_build_unwind_subspace (struct call_info *call_info)
   char *name, *p;
   symbolS *symbolP;
 
-  if ((bfd_get_section_flags (stdoutput, now_seg)
+  if ((bfd_section_flags (now_seg)
        & (SEC_ALLOC | SEC_LOAD | SEC_READONLY))
       != (SEC_ALLOC | SEC_LOAD | SEC_READONLY))
     return;
@@ -5989,8 +5999,8 @@ pa_build_unwind_subspace (struct call_info *call_info)
   else
     {
       symbolP = symbol_new (name, now_seg,
-			    S_GET_VALUE (call_info->start_symbol),
-			    symbol_get_frag (call_info->start_symbol));
+			    symbol_get_frag (call_info->start_symbol),
+			    S_GET_VALUE (call_info->start_symbol));
       gas_assert (symbolP);
       S_CLEAR_EXTERNAL (symbolP);
       symbol_table_insert (symbolP);
@@ -6006,10 +6016,9 @@ pa_build_unwind_subspace (struct call_info *call_info)
   if (seg == ASEC_NULL)
     {
       seg = subseg_new (UNWIND_SECTION_NAME, 0);
-      bfd_set_section_flags (stdoutput, seg,
-			     SEC_READONLY | SEC_HAS_CONTENTS
-			     | SEC_LOAD | SEC_RELOC | SEC_ALLOC | SEC_DATA);
-      bfd_set_section_alignment (stdoutput, seg, 2);
+      bfd_set_section_flags (seg, (SEC_READONLY | SEC_HAS_CONTENTS | SEC_LOAD
+				   | SEC_RELOC | SEC_ALLOC | SEC_DATA));
+      bfd_set_section_alignment (seg, 2);
     }
 
   subseg_set (seg, 0);
@@ -6071,7 +6080,7 @@ pa_callinfo (int unused ATTRIBUTE_UNUSED)
 
   /* Mark the fact that we found the .CALLINFO for the
      current procedure.  */
-  callinfo_found = TRUE;
+  callinfo_found = true;
 
   /* Iterate over the .CALLINFO arguments.  */
   while (!is_end_of_statement ())
@@ -6187,7 +6196,7 @@ pa_callinfo (int unused ATTRIBUTE_UNUSED)
    label when finished.  */
 
 static void
-pa_text (int unused ATTRIBUTE_UNUSED)
+pa_text (int arg)
 {
 #ifdef OBJ_SOM
   current_space = is_defined_space ("$TEXT$");
@@ -6195,21 +6204,32 @@ pa_text (int unused ATTRIBUTE_UNUSED)
     = pa_subsegment_to_subspace (current_space->sd_seg, 0);
 #endif
 
-  s_text (0);
+#ifdef OBJ_ELF
+  obj_elf_text (arg);
+#else
+  s_text (arg);
+#endif
+
   pa_undefine_label ();
 }
 
 /* Switch to the data space.  As usual delete our label.  */
 
 static void
-pa_data (int unused ATTRIBUTE_UNUSED)
+pa_data (int arg)
 {
 #ifdef OBJ_SOM
   current_space = is_defined_space ("$PRIVATE$");
   current_subspace
     = pa_subsegment_to_subspace (current_space->sd_seg, 0);
 #endif
-  s_data (0);
+
+#ifdef OBJ_ELF
+  obj_elf_data (arg);
+#else
+  s_data (arg);
+#endif
+
   pa_undefine_label ();
 }
 
@@ -6305,7 +6325,7 @@ pa_entry (int unused ATTRIBUTE_UNUSED)
 	as_bad (_("Missing .callinfo."));
     }
   demand_empty_rest_of_line ();
-  within_entry_exit = TRUE;
+  within_entry_exit = true;
 
 #ifdef OBJ_SOM
   /* SOM defers building of unwind descriptors until the link phase.
@@ -6342,6 +6362,7 @@ hppa_force_reg_syms_absolute (expressionS *resultP,
 			      expressionS *rightP)
 {
   if (fudge_reg_expressions
+      && resultP
       && rightP->X_op == O_register
       && resultP->X_op == O_register)
     {
@@ -6440,8 +6461,7 @@ hppa_elf_mark_end_of_function (void)
     {
       /* symbol value should be the offset of the
 	 last instruction of the function */
-      symbolP = symbol_new (name, now_seg, (valueT) (frag_now_fix () - 4),
-			    frag_now);
+      symbolP = symbol_new (name, now_seg, frag_now, frag_now_fix () - 4);
 
       gas_assert (symbolP);
       S_CLEAR_EXTERNAL (symbolP);
@@ -6512,7 +6532,7 @@ pa_exit (int unused ATTRIBUTE_UNUSED)
 	    as_bad (_("No .ENTRY for this .EXIT"));
 	  else
 	    {
-	      within_entry_exit = FALSE;
+	      within_entry_exit = false;
 	      process_exit ();
 	    }
 	}
@@ -6815,25 +6835,25 @@ pa_level (int unused ATTRIBUTE_UNUSED)
   char *level;
 
   level = input_line_pointer;
-  if (strncmp (level, "1.0", 3) == 0)
+  if (startswith (level, "1.0"))
     {
       input_line_pointer += 3;
       if (!bfd_set_arch_mach (stdoutput, bfd_arch_hppa, 10))
 	as_warn (_("could not set architecture and machine"));
     }
-  else if (strncmp (level, "1.1", 3) == 0)
+  else if (startswith (level, "1.1"))
     {
       input_line_pointer += 3;
       if (!bfd_set_arch_mach (stdoutput, bfd_arch_hppa, 11))
 	as_warn (_("could not set architecture and machine"));
     }
-  else if (strncmp (level, "2.0w", 4) == 0)
+  else if (startswith (level, "2.0w"))
     {
       input_line_pointer += 4;
       if (!bfd_set_arch_mach (stdoutput, bfd_arch_hppa, 25))
 	as_warn (_("could not set architecture and machine"));
     }
-  else if (strncmp (level, "2.0", 3) == 0)
+  else if (startswith (level, "2.0"))
     {
       input_line_pointer += 3;
       if (!bfd_set_arch_mach (stdoutput, bfd_arch_hppa, 20))
@@ -6909,8 +6929,8 @@ pa_proc (int unused ATTRIBUTE_UNUSED)
     as_fatal (_("Nested procedures"));
 
   /* Reset global variables for new procedure.  */
-  callinfo_found = FALSE;
-  within_procedure = TRUE;
+  callinfo_found = false;
+  within_procedure = true;
 
   /* Create another call_info structure.  */
   call_info = XNEW (struct call_info);
@@ -7028,7 +7048,7 @@ pa_procend (int unused ATTRIBUTE_UNUSED)
   hppa_elf_mark_end_of_function ();
 #endif
 
-  within_procedure = FALSE;
+  within_procedure = false;
   demand_empty_rest_of_line ();
   pa_undefine_label ();
 }
@@ -7079,9 +7099,9 @@ pa_parse_space_stmt (const char *space_name, int create_flag)
   /* Load default values.  */
   spnum = 0;
   sort = 0;
-  loadable = TRUE;
-  defined = TRUE;
-  private = FALSE;
+  loadable = true;
+  defined = true;
+  private = false;
   if (strcmp (space_name, "$TEXT$") == 0)
     {
       seg = pa_def_spaces[0].segment;
@@ -7101,7 +7121,7 @@ pa_parse_space_stmt (const char *space_name, int create_flag)
 
   if (!is_end_of_statement ())
     {
-      print_errors = FALSE;
+      print_errors = false;
       ptemp = input_line_pointer + 1;
       /* First see if the space was specified as a number rather than
 	 as a name.  According to the PA assembly manual the rest of
@@ -7134,17 +7154,17 @@ pa_parse_space_stmt (const char *space_name, int create_flag)
 	      else if ((strncasecmp (name, "unloadable", 10) == 0))
 		{
 		  (void) restore_line_pointer (c);
-		  loadable = FALSE;
+		  loadable = false;
 		}
 	      else if ((strncasecmp (name, "notdefined", 10) == 0))
 		{
 		  (void) restore_line_pointer (c);
-		  defined = FALSE;
+		  defined = false;
 		}
 	      else if ((strncasecmp (name, "private", 7) == 0))
 		{
 		  (void) restore_line_pointer (c);
-		  private = TRUE;
+		  private = true;
 		}
 	      else
 		{
@@ -7155,7 +7175,7 @@ pa_parse_space_stmt (const char *space_name, int create_flag)
 		}
 	    }
 	}
-      print_errors = TRUE;
+      print_errors = true;
     }
 
   if (create_flag && seg == NULL)
@@ -7204,7 +7224,7 @@ pa_space (int unused ATTRIBUTE_UNUSED)
 	 and place them into a subroutine or something similar?  */
       /* FIXME Is this (and the next IF stmt) really right?
 	 What if INPUT_LINE_POINTER points to "$TEXT$FOO"?  */
-      if (strncmp (input_line_pointer, "$TEXT$", 6) == 0)
+      if (startswith (input_line_pointer, "$TEXT$"))
 	{
 	  input_line_pointer += 6;
 	  sd_chain = is_defined_space ("$TEXT$");
@@ -7221,7 +7241,7 @@ pa_space (int unused ATTRIBUTE_UNUSED)
 	  demand_empty_rest_of_line ();
 	  return;
 	}
-      if (strncmp (input_line_pointer, "$PRIVATE$", 9) == 0)
+      if (startswith (input_line_pointer, "$PRIVATE$"))
 	{
 	  input_line_pointer += 9;
 	  sd_chain = is_defined_space ("$PRIVATE$");
@@ -7533,14 +7553,13 @@ pa_subspace (int create_new)
 	seg_info (section)->bss = 1;
 
       /* Now set the flags.  */
-      bfd_set_section_flags (stdoutput, section, applicable);
+      bfd_set_section_flags (section, applicable);
 
       /* Record any alignment request for this section.  */
       record_alignment (section, exact_log2 (alignment));
 
       /* Set the starting offset for this section.  */
-      bfd_set_section_vma (stdoutput, section,
-			   pa_subspace_start (space, quadrant));
+      bfd_set_section_vma (section, pa_subspace_start (space, quadrant));
 
       /* Now that all the flags are set, update an existing subspace,
 	 or create a new one.  */
@@ -7614,7 +7633,7 @@ pa_spaces_begin (void)
 	{
 	  text_section = segment;
 	  applicable = bfd_applicable_section_flags (stdoutput);
-	  bfd_set_section_flags (stdoutput, segment,
+	  bfd_set_section_flags (segment,
 				 applicable & (SEC_ALLOC | SEC_LOAD
 					       | SEC_RELOC | SEC_CODE
 					       | SEC_READONLY
@@ -7624,7 +7643,7 @@ pa_spaces_begin (void)
 	{
 	  data_section = segment;
 	  applicable = bfd_applicable_section_flags (stdoutput);
-	  bfd_set_section_flags (stdoutput, segment,
+	  bfd_set_section_flags (segment,
 				 applicable & (SEC_ALLOC | SEC_LOAD
 					       | SEC_RELOC
 					       | SEC_HAS_CONTENTS));
@@ -7634,13 +7653,13 @@ pa_spaces_begin (void)
 	{
 	  bss_section = segment;
 	  applicable = bfd_applicable_section_flags (stdoutput);
-	  bfd_set_section_flags (stdoutput, segment,
+	  bfd_set_section_flags (segment,
 				 applicable & SEC_ALLOC);
 	}
       else if (!strcmp (pa_def_subspaces[i].name, "$LIT$"))
 	{
 	  applicable = bfd_applicable_section_flags (stdoutput);
-	  bfd_set_section_flags (stdoutput, segment,
+	  bfd_set_section_flags (segment,
 				 applicable & (SEC_ALLOC | SEC_LOAD
 					       | SEC_RELOC
 					       | SEC_READONLY
@@ -7649,7 +7668,7 @@ pa_spaces_begin (void)
       else if (!strcmp (pa_def_subspaces[i].name, "$MILLICODE$"))
 	{
 	  applicable = bfd_applicable_section_flags (stdoutput);
-	  bfd_set_section_flags (stdoutput, segment,
+	  bfd_set_section_flags (segment,
 				 applicable & (SEC_ALLOC | SEC_LOAD
 					       | SEC_RELOC
 					       | SEC_READONLY
@@ -7658,7 +7677,7 @@ pa_spaces_begin (void)
       else if (!strcmp (pa_def_subspaces[i].name, "$UNWIND$"))
 	{
 	  applicable = bfd_applicable_section_flags (stdoutput);
-	  bfd_set_section_flags (stdoutput, segment,
+	  bfd_set_section_flags (segment,
 				 applicable & (SEC_ALLOC | SEC_LOAD
 					       | SEC_RELOC
 					       | SEC_READONLY
@@ -8217,7 +8236,6 @@ pa_lsym (int unused ATTRIBUTE_UNUSED)
 void
 md_begin (void)
 {
-  const char *retval = NULL;
   int lose = 0;
   unsigned int i = 0;
 
@@ -8240,18 +8258,14 @@ md_begin (void)
   pa_spaces_begin ();
 #endif
 
-  op_hash = hash_new ();
+  op_hash = str_htab_create ();
 
   while (i < NUMOPCODES)
     {
       const char *name = pa_opcodes[i].name;
 
-      retval = hash_insert (op_hash, name, (struct pa_opcode *) &pa_opcodes[i]);
-      if (retval != NULL && *retval != '\0')
-	{
-	  as_fatal (_("Internal error: can't hash `%s': %s\n"), name, retval);
-	  lose = 1;
-	}
+      if (str_hash_insert (op_hash, name, &pa_opcodes[i], 0) != NULL)
+	as_fatal (_("duplicate %s"), name);
 
       do
 	{
@@ -8319,7 +8333,8 @@ hppa_fix_adjustable (fixS *fixp)
   /* LR/RR selectors are implicitly used for a number of different relocation
      types.  We must ensure that none of these types are adjusted (see below)
      even if they occur with a different selector.  */
-  code = elf_hppa_reloc_final_type (stdoutput, fixp->fx_r_type,
+  code = elf_hppa_reloc_final_type (stdoutput,
+				    (int) fixp->fx_r_type,
 		  		    hppa_fix->fx_r_format,
 				    hppa_fix->fx_r_field);
 

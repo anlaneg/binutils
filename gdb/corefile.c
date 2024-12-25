@@ -1,6 +1,6 @@
 /* Core dump and executable file functions above target vector, for GDB.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,14 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include <signal.h>
 #include <fcntl.h>
+#include "event-top.h"
+#include "extract-store-integer.h"
 #include "inferior.h"
 #include "symtab.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "bfd.h"
 #include "target.h"
 #include "gdbcore.h"
@@ -32,95 +33,31 @@
 #include "completer.h"
 #include "observable.h"
 #include "cli/cli-utils.h"
-
-/* You can have any number of hooks for `exec_file_command' command to
-   call.  If there's only one hook, it is set in exec_file_display
-   hook.  If there are two or more hooks, they are set in
-   exec_file_extra_hooks[], and deprecated_exec_file_display_hook is
-   set to a function that calls all of them.  This extra complexity is
-   needed to preserve compatibility with old code that assumed that
-   only one hook could be set, and which called
-   deprecated_exec_file_display_hook directly.  */
-
-typedef void (*hook_type) (const char *);
-
-hook_type deprecated_exec_file_display_hook;	/* The original hook.  */
-static hook_type *exec_file_extra_hooks;	/* Array of additional
-						   hooks.  */
-static int exec_file_hook_count = 0;		/* Size of array.  */
-
-
-
-/* If there are two or more functions that wish to hook into
-   exec_file_command, this function will call all of the hook
-   functions.  */
-
-static void
-call_extra_exec_file_hooks (const char *filename)
-{
-  int i;
-
-  for (i = 0; i < exec_file_hook_count; i++)
-    (*exec_file_extra_hooks[i]) (filename);
-}
-
-/* Call this to specify the hook for exec_file_command to call back.
-   This is called from the x-window display code.  */
-
-void
-specify_exec_file_hook (void (*hook) (const char *))
-{
-  hook_type *new_array;
-
-  if (deprecated_exec_file_display_hook != NULL)
-    {
-      /* There's already a hook installed.  Arrange to have both it
-	 and the subsequent hooks called.  */
-      if (exec_file_hook_count == 0)
-	{
-	  /* If this is the first extra hook, initialize the hook
-	     array.  */
-	  exec_file_extra_hooks = XNEW (hook_type);
-	  exec_file_extra_hooks[0] = deprecated_exec_file_display_hook;
-	  deprecated_exec_file_display_hook = call_extra_exec_file_hooks;
-	  exec_file_hook_count = 1;
-	}
-
-      /* Grow the hook array by one and add the new hook to the end.
-         Yes, it's inefficient to grow it by one each time but since
-         this is hardly ever called it's not a big deal.  */
-      exec_file_hook_count++;
-      new_array = (hook_type *)
-	xrealloc (exec_file_extra_hooks,
-		  exec_file_hook_count * sizeof (hook_type));
-      exec_file_extra_hooks = new_array;
-      exec_file_extra_hooks[exec_file_hook_count - 1] = hook;
-    }
-  else
-    deprecated_exec_file_display_hook = hook;
-}
+#include "gdbarch.h"
+#include "interps.h"
+#include "arch-utils.h"
 
 void
 reopen_exec_file (void)
 {
-  int res;
-  struct stat st;
+  bfd *exec_bfd = current_program_space->exec_bfd ();
 
   /* Don't do anything if there isn't an exec file.  */
-  if (exec_bfd == NULL)
+  if (exec_bfd == nullptr)
     return;
 
-  /* If the timestamp of the exec file has changed, reopen it.  */
-  std::string filename = bfd_get_filename (exec_bfd);
-  res = stat (filename.c_str (), &st);
+  /* The main executable can't be an in-memory BFD object.  If it was then
+     the use of bfd_stat below would not work as expected.  */
+  gdb_assert ((exec_bfd->flags & BFD_IN_MEMORY) == 0);
 
-  if (res == 0 && exec_bfd_mtime && exec_bfd_mtime != st.st_mtime)
-    exec_file_attach (filename.c_str (), 0);
-  else
-    /* If we accessed the file since last opening it, close it now;
-       this stops GDB from holding the executable open after it
-       exits.  */
-    bfd_cache_close_all ();
+  /* If the timestamp of the exec file has changed, reopen it.  */
+  struct stat st;
+  int res = gdb_bfd_stat (exec_bfd, &st);
+
+  if (res == 0
+      && current_program_space->ebfd_mtime != 0
+      && current_program_space->ebfd_mtime != st.st_mtime)
+    exec_file_attach (bfd_get_filename (exec_bfd), 0);
 }
 
 /* If we have both a core file and an exec file,
@@ -129,28 +66,23 @@ reopen_exec_file (void)
 void
 validate_files (void)
 {
-  if (exec_bfd && core_bfd)
+  if (current_program_space->exec_bfd () && current_program_space->core_bfd ())
     {
-      if (!core_file_matches_executable_p (core_bfd, exec_bfd))
+      if (!core_file_matches_executable_p (current_program_space->core_bfd (),
+					   current_program_space->exec_bfd ()))
 	warning (_("core file may not match specified executable file."));
-      else if (bfd_get_mtime (exec_bfd) > bfd_get_mtime (core_bfd))
+      else if (gdb_bfd_get_mtime (current_program_space->exec_bfd ())
+	       > gdb_bfd_get_mtime (current_program_space->core_bfd ()))
 	warning (_("exec file is newer than core file."));
     }
 }
 
-/* See common/common-inferior.h.  */
+/* See arch-utils.h.  */
 
-char *
-get_exec_file (int err)
+core_file_exec_context
+default_core_parse_exec_context (struct gdbarch *gdbarch, bfd *cbfd)
 {
-  if (exec_filename)
-    return exec_filename;
-  if (!err)
-    return NULL;
-
-  error (_("No executable file specified.\n\
-Use the \"file\" or \"exec-file\" command."));
-  return NULL;
+  return {};
 }
 
 
@@ -169,8 +101,7 @@ memory_error_message (enum target_xfer_status err,
       return string_printf (_("Memory at address %s unavailable."),
 			    paddress (gdbarch, memaddr));
     default:
-      internal_error (__FILE__, __LINE__,
-		      "unhandled target_xfer_status: %s (%s)",
+      internal_error ("unhandled target_xfer_status: %s (%s)",
 		      target_xfer_status_to_string (err),
 		      plongest (err));
     }
@@ -184,7 +115,8 @@ memory_error (enum target_xfer_status err, CORE_ADDR memaddr)
   enum errors exception = GDB_NO_ERROR;
 
   /* Build error string.  */
-  std::string str = memory_error_message (err, target_gdbarch (), memaddr);
+  std::string str
+    = memory_error_message (err, current_inferior ()->arch (), memaddr);
 
   /* Choose the right error to throw.  */
   switch (err)
@@ -214,8 +146,8 @@ read_memory_object (enum target_object object, CORE_ADDR memaddr,
       enum target_xfer_status status;
       ULONGEST xfered_len;
 
-      status = target_xfer_partial (current_top_target (), object, NULL,
-				    myaddr + xfered, NULL,
+      status = target_xfer_partial (current_inferior ()->top_target (), object,
+				    NULL, myaddr + xfered, NULL,
 				    memaddr + xfered, len - xfered,
 				    &xfered_len);
 
@@ -328,39 +260,12 @@ read_code_unsigned_integer (CORE_ADDR memaddr, int len,
   return extract_unsigned_integer (buf, len, byte_order);
 }
 
-void
-read_memory_string (CORE_ADDR memaddr, char *buffer, int max_len)
-{
-  char *cp;
-  int i;
-  int cnt;
-
-  cp = buffer;
-  while (1)
-    {
-      if (cp - buffer >= max_len)
-	{
-	  buffer[max_len - 1] = '\0';
-	  break;
-	}
-      cnt = max_len - (cp - buffer);
-      if (cnt > 8)
-	cnt = 8;
-      read_memory (memaddr + (int) (cp - buffer), (gdb_byte *) cp, cnt);
-      for (i = 0; i < cnt && *cp; i++, cp++)
-	;			/* null body */
-
-      if (i < cnt && !*cp)
-	break;
-    }
-}
-
 CORE_ADDR
 read_memory_typed_address (CORE_ADDR addr, struct type *type)
 {
-  gdb_byte *buf = (gdb_byte *) alloca (TYPE_LENGTH (type));
+  gdb_byte *buf = (gdb_byte *) alloca (type->length ());
 
-  read_memory (addr, buf, TYPE_LENGTH (type));
+  read_memory (addr, buf, type->length ());
   return extract_typed_address (buf, type);
 }
 
@@ -377,6 +282,16 @@ write_memory (CORE_ADDR memaddr,
     memory_error (TARGET_XFER_E_IO, memaddr);
 }
 
+/* Notify interpreters and observers that INF's memory was changed.  */
+
+static void
+notify_memory_changed (inferior *inf, CORE_ADDR addr, ssize_t len,
+		       const bfd_byte *data)
+{
+  interps_notify_memory_changed (inf, addr, len, data);
+  gdb::observers::memory_changed.notify (inf, addr, len, data);
+}
+
 /* Same as write_memory, but notify 'memory_changed' observers.  */
 
 void
@@ -384,7 +299,7 @@ write_memory_with_notification (CORE_ADDR memaddr, const bfd_byte *myaddr,
 				ssize_t len)
 {
   write_memory (memaddr, myaddr, len);
-  gdb::observers::memory_changed.notify (current_inferior (), memaddr, len, myaddr);
+  notify_memory_changed (current_inferior (), memaddr, len, myaddr);
 }
 
 /* Store VALUE at ADDR in the inferior as a LEN-byte unsigned
@@ -415,32 +330,32 @@ write_memory_signed_integer (CORE_ADDR addr, int len,
 
 /* The current default bfd target.  Points to storage allocated for
    gnutarget_string.  */
-char *gnutarget;
+const char *gnutarget;
 
 /* Same thing, except it is "auto" not NULL for the default case.  */
-static char *gnutarget_string;
+static std::string gnutarget_string;
 static void
 show_gnutarget_string (struct ui_file *file, int from_tty,
 		       struct cmd_list_element *c,
 		       const char *value)
 {
-  fprintf_filtered (file,
-		    _("The current BFD target is \"%s\".\n"), value);
+  gdb_printf (file,
+	      _("The current BFD target is \"%s\".\n"), value);
 }
 
 static void
 set_gnutarget_command (const char *ignore, int from_tty,
 		       struct cmd_list_element *c)
 {
-  char *gend = gnutarget_string + strlen (gnutarget_string);
+  const char *gend = gnutarget_string.c_str () + gnutarget_string.size ();
+  gend = remove_trailing_whitespace (gnutarget_string.c_str (), gend);
+  gnutarget_string
+    = gnutarget_string.substr (0, gend - gnutarget_string.data ());
 
-  gend = remove_trailing_whitespace (gnutarget_string, gend);
-  *gend = '\0';
-
-  if (strcmp (gnutarget_string, "auto") == 0)
+  if (gnutarget_string == "auto")
     gnutarget = NULL;
   else
-    gnutarget = gnutarget_string;
+    gnutarget = gnutarget_string.c_str ();
 }
 
 /* A completion function for "set gnutarget".  */
@@ -472,26 +387,24 @@ complete_set_gnutarget (struct cmd_list_element *cmd,
 void
 set_gnutarget (const char *newtarget)
 {
-  if (gnutarget_string != NULL)
-    xfree (gnutarget_string);
-  gnutarget_string = xstrdup (newtarget);
+  gnutarget_string = newtarget;
   set_gnutarget_command (NULL, 0, NULL);
 }
 
+void _initialize_core ();
 void
-_initialize_core (void)
+_initialize_core ()
 {
-  struct cmd_list_element *c;
-
-  c = add_cmd ("core-file", class_files, core_file_command, _("\
+  cmd_list_element *core_file_cmd
+    = add_cmd ("core-file", class_files, core_file_command, _("\
 Use FILE as core dump for examining memory and registers.\n\
 Usage: core-file FILE\n\
 No arg means have no core file.  This command has been superseded by the\n\
 `target core' and `detach' commands."), &cmdlist);
-  set_cmd_completer (c, filename_completer);
+  set_cmd_completer (core_file_cmd, deprecated_filename_completer);
 
-  
-  c = add_setshow_string_noescape_cmd ("gnutarget", class_files,
+  set_show_commands set_show_gnutarget
+    = add_setshow_string_noescape_cmd ("gnutarget", class_files,
 				       &gnutarget_string, _("\
 Set the current BFD target."), _("\
 Show the current BFD target."), _("\
@@ -499,9 +412,9 @@ Use `set gnutarget auto' to specify automatic detection."),
 				       set_gnutarget_command,
 				       show_gnutarget_string,
 				       &setlist, &showlist);
-  set_cmd_completer (c, complete_set_gnutarget);
+  set_cmd_completer (set_show_gnutarget.set, complete_set_gnutarget);
 
-  add_alias_cmd ("g", "gnutarget", class_files, 1, &setlist);
+  add_alias_cmd ("g", set_show_gnutarget.set, class_files, 1, &setlist);
 
   if (getenv ("GNUTARGET"))
     set_gnutarget (getenv ("GNUTARGET"));

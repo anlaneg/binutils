@@ -1,5 +1,5 @@
 /* SOM object file format.
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -30,18 +30,13 @@
 #include "som/reloc.h"
 #include "targ-cpu.h"
 
-#ifndef FALSE
-#define FALSE 0
-#define TRUE !FALSE
-#endif
-
 /* should be conditional on address size!  */
 #define som_symbol(asymbol) ((som_symbol_type *) (&(asymbol)->the_bfd))
 
 extern void som_file_symbol           (char *);
 extern void som_frob_file             (void);
 extern void obj_som_version           (int);
-extern void obj_som_init_stab_section (segT);
+extern void obj_som_init_stab_section (segT, segT);
 extern void obj_som_copyright         (int);
 extern void obj_som_compiler          (int);
 
@@ -65,7 +60,7 @@ extern void obj_som_compiler          (int);
 
 /* We use INIT_STAB_SECTION to record the space/subspace relationships
    for the various debugging sections.  */
-#define INIT_STAB_SECTION(seg) obj_som_init_stab_section (seg)
+#define INIT_STAB_SECTION(stab, str) obj_som_init_stab_section (stab, str)
 
 /* We'll be updating the magic 1st stab entry once the entire assembly
    fail has been processed.  */

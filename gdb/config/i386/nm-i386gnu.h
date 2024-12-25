@@ -1,5 +1,5 @@
 /* Native-dependent definitions for Intel 386 running the GNU Hurd
-   Copyright (C) 1994-2019 Free Software Foundation, Inc.
+   Copyright (C) 1994-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,13 +18,6 @@
 
 #ifndef CONFIG_I386_NM_I386GNU_H
 #define CONFIG_I386_NM_I386GNU_H
-
-#include <unistd.h>
-#include <mach.h>
-#include <mach/exception.h>
-#include "regcache.h"
-
-extern char *gnu_target_pid_to_str (int pid);
 
 /* Thread flavors used in re-setting the T bit.  */
 #define THREAD_STATE_FLAVOR		i386_REGS_SEGS_STATE

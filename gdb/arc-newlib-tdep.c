@@ -1,6 +1,6 @@
 /* Target-dependent code for Newlib ARC.
 
-   Copyright (C) 2016-2019 Free Software Foundation, Inc.
+   Copyright (C) 2016-2024 Free Software Foundation, Inc.
    Contributed by Synopsys Inc.
 
    This file is part of GDB.
@@ -18,21 +18,24 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 
 #include "gdbarch.h"
 #include "arc-tdep.h"
 #include "osabi.h"
+
+/* Print an "arc-newlib" debug statement.  */
+
+#define arc_newlib_debug_printf(fmt, ...) \
+  debug_prefixed_printf_cond (arc_debug, "arc-newlib", fmt, ##__VA_ARGS__)
 
 /* Implement the 'init_osabi' method of struct gdb_osabi_handler.  */
 
 static void
 arc_newlib_init_osabi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  if (arc_debug)
-    debug_printf ("arc-newlib: Initialization.\n");
+  arc_newlib_debug_printf ("Initialization.");
 
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  arc_gdbarch_tdep *tdep = gdbarch_tdep<arc_gdbarch_tdep> (gdbarch);
 
   /* Offset of original PC in longjmp jump buffer (in registers).  Value of PC
      offset can be found in newlib/libc/machine/arc/setjmp.S.  */
@@ -44,8 +47,7 @@ arc_newlib_init_osabi (struct gdbarch_info info, struct gdbarch *gdbarch)
 static enum gdb_osabi
 arc_newlib_osabi_sniffer (bfd *abfd)
 {
-  if (arc_debug)
-    debug_printf ("arc-newlib: OS/ABI sniffer.\n");
+  arc_newlib_debug_printf ("OS/ABI sniffer.");
 
   /* crt0.S in libgloss for ARC defines .ivt section for interrupt handlers.
      If this section is not present then this is likely not a newlib - could be
@@ -56,8 +58,9 @@ arc_newlib_osabi_sniffer (bfd *abfd)
     return GDB_OSABI_UNKNOWN;
 }
 
+void _initialize_arc_newlib_tdep ();
 void
-_initialize_arc_newlib_tdep (void)
+_initialize_arc_newlib_tdep ()
 {
   gdbarch_register_osabi_sniffer (bfd_arch_arc, bfd_target_elf_flavour,
 				  arc_newlib_osabi_sniffer);

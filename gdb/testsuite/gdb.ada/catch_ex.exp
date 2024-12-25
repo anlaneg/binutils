@@ -1,4 +1,4 @@
-# Copyright 2007-2019 Free Software Foundation, Inc.
+# Copyright 2007-2024 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,8 @@
 
 load_lib "ada.exp"
 
+require allow_ada_tests gnat_runtime_has_debug_info
+
 standard_ada_testfile foo
 
 if {[gdb_compile_ada "${srcfile}" "${binfile}" executable [list debug additional_flags=-gnata ]] != "" } {
@@ -27,50 +29,39 @@ clean_restart ${testfile}
 # the regular expressions below.
 set any_nb "\[0-9\]+"
 set any_addr "0x\[0-9a-zA-Z\]+"
-set eol "\[\r\n\]+"
+set eol "\r\n"
 set sp "\[ \t\]*"
 
 set info_break_header "Num${sp}Type${sp}Disp${sp}Enb${sp}Address${sp}What"
 set catch_exception_info \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}all Ada exceptions"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}all Ada exceptions"
 
 ####################################
 # 1. Try catching all exceptions.  #
 ####################################
 
-if ![runto_main] then {
-   fail "cannot run to main, testcase aborted"
+if {![runto_main]} {
    return 0
 }
 
-set msg "insert catchpoint on all Ada exceptions"
-gdb_test_multiple "catch exception" $msg {
-    -re "Catchpoint $any_nb: all Ada exceptions$eol$gdb_prompt $" {
-	pass $msg
-    }
-    -re "Your Ada runtime appears to be missing some debugging information.*$eol$gdb_prompt $" {
-	# If the runtime was not built with enough debug information,
-	# or if it was stripped, we can not test exception
-	# catchpoints.
-	unsupported $msg
-	return -1
-    }
-}
+gdb_test "catch exception" \
+    "Catchpoint $any_nb: all Ada exceptions" \
+    "insert catchpoint on all Ada exceptions"
 
 gdb_test "info break" \
          "$info_break_header$eol.*$catch_exception_info" \
          "info break, catch all Ada exceptions"
 
 set catchpoint_msg \
-  "Catchpoint $any_nb, CONSTRAINT_ERROR (\\\(foo\\.adb:$decimal explicit raise\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
+  "Catchpoint $any_nb, CONSTRAINT_ERROR (\\\(ignore C_E\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
-         "Continuing\.$eol$catchpoint_msg$eol.*SPOT1" \
+	 "Continuing\\.$eol$eol$catchpoint_msg$eol.*SPOT1" \
          "continuing to first exception"
 
 set catchpoint_msg \
   "Catchpoint $any_nb, PROGRAM_ERROR (\\\(foo\\.adb:$decimal explicit raise\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
-         "Continuing\.$eol$catchpoint_msg$eol.*SPOT2" \
+	 "Continuing\\.$eol$eol$catchpoint_msg$eol.*SPOT2" \
          "continuing to second exception"
 
 ################################################
@@ -87,8 +78,7 @@ gdb_test "continue" \
 #  - continue, we should see the unhandled Constrait_Error exception
 #  - continue, the program exits.
 
-if ![runto_main] then {
-   fail "cannot run to main, testcase aborted"
+if {![runto_main]} {
    return 0
 }
 
@@ -105,11 +95,11 @@ gdb_test "catch exception unhandled" \
          "insert catchpoint on unhandled exceptions"
 
 set catch_exception_entry \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}\`Program_Error' Ada exception"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}\`Program_Error' Ada exception"
 set catch_assert_entry \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}failed Ada assertions"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}failed Ada assertions"
 set catch_unhandled_entry \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}unhandled Ada exceptions"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}unhandled Ada exceptions"
 
 gdb_test "info break" \
          "$info_break_header$eol.*$catch_exception_entry$eol$catch_assert_entry$eol$catch_unhandled_entry" \
@@ -118,23 +108,23 @@ gdb_test "info break" \
 set catchpoint_msg \
   "Catchpoint $any_nb, PROGRAM_ERROR (\\\(foo.adb:$decimal explicit raise\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
-         "Continuing\.$eol$catchpoint_msg$eol.*SPOT2" \
+	 "Continuing\\.$eol$eol$catchpoint_msg$eol.*SPOT2" \
          "continuing to Program_Error exception"
 
 set catchpoint_msg \
   "Catchpoint $any_nb, failed assertion at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
-         "Continuing\.$eol$catchpoint_msg$eol.*SPOT3" \
+	 "Continuing\\.$eol$eol$catchpoint_msg$eol.*SPOT3" \
          "continuing to failed assertion"
 
 set catchpoint_msg \
   "Catchpoint $any_nb, unhandled CONSTRAINT_ERROR at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
-         "Continuing\.$eol$catchpoint_msg$eol.*SPOT4" \
+	 "Continuing\\.$eol$eol$catchpoint_msg$eol.*SPOT4" \
          "continuing to unhandled exception"
 
 gdb_test "continue" \
-         "Continuing\..*$inferior_exited_re.*" \
+         "Continuing\\..*$inferior_exited_re.*" \
          "continuing to program completion"
 
 #################################
@@ -148,8 +138,7 @@ gdb_test "continue" \
 #     at any of the other exceptions that are being raised inside
 #     the program.
 
-if ![runto_main] then {
-   fail "cannot run to main, testcase aborted"
+if {![runto_main]} {
    return 0
 }
 
@@ -159,12 +148,13 @@ gdb_test "tcatch exception" \
 set temp_catchpoint_msg \
   "Temporary catchpoint $any_nb, CONSTRAINT_ERROR (\\\(.*\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
-         "Continuing\.$eol$temp_catchpoint_msg$eol.*SPOT1" \
+	 "Continuing\\.$eol$eol$temp_catchpoint_msg$eol.*SPOT1" \
          "continuing to temporary catchpoint"
 
-gdb_test "continue" \
-         "Continuing\..*$inferior_exited_re.*" \
-         "continuing to program completion"
-
+with_test_prefix "temporary catchpoint" {
+    gdb_test "continue" \
+	"Continuing\\..*$inferior_exited_re.*" \
+	"continuing to program completion"
+}
 
 

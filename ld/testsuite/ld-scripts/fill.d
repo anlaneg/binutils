@@ -3,10 +3,12 @@
 #source: fill_2.s
 #ld: -T fill.t
 #objdump: -s -j .text
+#notarget: [is_aout_format]
 #skip: ia64-*-* mips*-*-freebsd* mips*-*-gnu* mips*-*-irix* mips*-*-kfreebsd*
-#skip: mips*-*-linux* mips*-*-netbsd* mips*-*-openbsd* mips*-*-sysv4*
+#skip: mips*-*-linux* mips*-*-netbsd* mips*-*-openbsd* mips*-*-sysv4* sh-*-pe
 #skip: tilegx*-*-* tilepro-*-* x86_64-*-cygwin x86_64-*-mingw* x86_64-*-pe*
-#xfail: alpha*-*-*ecoff m32c-*-* sh-*-pe sparc*-*-coff
+#skip: kvx*-*-*
+#xfail: alpha*-*-*ecoff
 #xfail: tic30-*-coff tic4x-*-* tic54x-*-* z8k-*-*
 #
 # See also fill16.d.  We use `skip' for configurations unsupported
@@ -16,15 +18,14 @@
 #
 # alpha-linuxecoff pads out code to 16 bytes.
 # ia64 aligns code to minimum 16 bytes.
-# m32c pads out code sections with 4 NOPs (see `m32c_md_end').
 # mips aligns to minimum 16 bytes (except for bare-metal ELF and VxWorks).
 # sh-pe pads out code sections to 16 bytes
-# sparc-coff aligns to 8 bytes
 # tic30-coff aligns to 2 bytes
 # tic4x has 4 octet bytes
 # tic54x doesn't support .p2align
 # tilegx aligns code to minimum 8 bytes.
 # tilepro aligns code to minimum 8 bytes.
+# kvx aligns code to minimum 8 bytes.
 # x86_64-pe aligns to 16 bytes
 # z8k-coff aligns to 2 bytes
 

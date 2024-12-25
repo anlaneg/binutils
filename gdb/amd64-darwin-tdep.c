@@ -1,5 +1,5 @@
 /* Darwin support for GDB, the GNU debugger.
-   Copyright (C) 1997-2019 Free Software Foundation, Inc.
+   Copyright (C) 1997-2024 Free Software Foundation, Inc.
 
    Contributed by Apple Computer, Inc.
 
@@ -18,7 +18,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "inferior.h"
 #include "gdbcore.h"
@@ -28,7 +28,7 @@
 #include "objfiles.h"
 
 #include "i387-tdep.h"
-#include "common/x86-xstate.h"
+#include "gdbsupport/x86-xstate.h"
 #include "amd64-tdep.h"
 #include "osabi.h"
 #include "ui-out.h"
@@ -36,7 +36,7 @@
 #include "i386-darwin-tdep.h"
 #include "solib.h"
 #include "solib-darwin.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 
 /* Offsets into the struct x86_thread_state64 where we'll find the saved regs.
    From <mach/i386/thread_status.h> and amd64-tdep.h.  */
@@ -75,7 +75,7 @@ const int amd64_darwin_thread_state_num_regs =
    address of the associated sigcontext structure.  */
 
 static CORE_ADDR
-amd64_darwin_sigcontext_addr (struct frame_info *this_frame)
+amd64_darwin_sigcontext_addr (const frame_info_ptr &this_frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -97,7 +97,7 @@ amd64_darwin_sigcontext_addr (struct frame_info *this_frame)
 static void
 x86_darwin_init_abi_64 (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   amd64_init_abi (info, gdbarch,
 		  amd64_target_description (X86_XSTATE_SSE_MASK, true));
@@ -113,12 +113,13 @@ x86_darwin_init_abi_64 (struct gdbarch_info info, struct gdbarch *gdbarch)
 
   tdep->jb_pc_offset = 56;
 
-  set_solib_ops (gdbarch, &darwin_so_ops);
+  set_gdbarch_so_ops (gdbarch, &darwin_so_ops);
 }
 
+void _initialize_amd64_darwin_tdep ();
 void
-_initialize_amd64_darwin_tdep (void)
+_initialize_amd64_darwin_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_i386, bfd_mach_x86_64,
-                          GDB_OSABI_DARWIN, x86_darwin_init_abi_64);
+			  GDB_OSABI_DARWIN, x86_darwin_init_abi_64);
 }

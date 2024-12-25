@@ -1,5 +1,5 @@
 /* Character set conversion support for GDB.
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,10 +16,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef CHARSET_H
-#define CHARSET_H
+#ifndef GDB_CHARSET_H
+#define GDB_CHARSET_H
 
-#include "common/def-vector.h"
+#include "gdbsupport/def-vector.h"
 
 /* If the target program uses a different character set than the host,
    GDB has some support for translating between the two; GDB converts
@@ -159,9 +159,10 @@ class wchar_iterator
    character.  */
 char host_letter_to_control_character (char c);
 
-/* Convert a hex digit character to its numeric value.  E.g., 'f' is
-   converted to 15.  This function assumes that C is a valid hex
-   digit.  Both upper- and lower-case letters are recognized.  */
-int host_hex_value (char c);
+#if WORDS_BIGENDIAN
+#define HOST_UTF32 "UTF-32BE"
+#else
+#define HOST_UTF32 "UTF-32LE"
+#endif
 
-#endif /* CHARSET_H */
+#endif /* GDB_CHARSET_H */

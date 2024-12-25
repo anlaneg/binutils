@@ -1,6 +1,6 @@
 /* Self tests for child_path for GDB, the GNU debugger.
 
-   Copyright (C) 2019 Free Software Foundation, Inc.
+   Copyright (C) 2019-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,9 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
-#include "common/pathstuff.h"
-#include "common/selftest.h"
+#include "gdbsupport/pathstuff.h"
+#include "gdbsupport/selftest.h"
 
 namespace selftests {
 namespace child_path {
@@ -59,6 +58,7 @@ test ()
 }
 }
 
+void _initialize_child_path_selftests ();
 void
 _initialize_child_path_selftests ()
 {

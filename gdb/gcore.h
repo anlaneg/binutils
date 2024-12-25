@@ -1,6 +1,6 @@
 /* Support for reading/writing gcore files.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,16 +17,24 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (GCORE_H)
-#define GCORE_H 1
+#ifndef GDB_GCORE_H
+#define GDB_GCORE_H
 
 #include "gdb_bfd.h"
 
+struct thread_info;
+
 extern gdb_bfd_ref_ptr create_gcore_bfd (const char *filename);
 extern void write_gcore_file (bfd *obfd);
-extern bfd *load_corefile (char *filename, int from_tty);
 extern int objfile_find_memory_regions (struct target_ops *self,
 					find_memory_region_ftype func,
 					void *obfd);
 
-#endif /* GCORE_H */
+/* Find the signalled thread.  In case there's more than one signalled
+   thread, prefer the current thread, if it is signalled.  If no thread was
+   signalled, default to the current thread, unless it has exited, in which
+   case return NULL.  */
+
+extern thread_info *gcore_find_signalled_thread ();
+
+#endif /* GDB_GCORE_H */

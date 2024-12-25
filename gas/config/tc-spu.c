@@ -1,6 +1,6 @@
 /* spu.c -- Assembler for the IBM Synergistic Processing Unit (SPU)
 
-   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+   Copyright (C) 2006-2024 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -57,7 +57,7 @@ static void spu_brinfo (int);
 static void spu_cons (int);
 
 extern char *myname;
-static struct hash_control *op_hash = NULL;
+static htab_t op_hash = NULL;
 
 /* These bits should be turned off in the first address of every segment */
 int md_seg_align = 7;
@@ -110,30 +110,18 @@ unsigned int brinfo;
 void
 md_begin (void)
 {
-  const char *retval = NULL;
   int i;
 
-  /* initialize hash table */
+  op_hash = str_htab_create ();
 
-  op_hash = hash_new ();
-
-  /* loop until you see the end of the list */
-
+  /* Hash each mnemonic and record its position.  There are
+     duplicates, keep just the first.  */
   for (i = 0; i < spu_num_opcodes; i++)
-    {
-      /* hash each mnemonic and record its position */
-
-      retval = hash_insert (op_hash, spu_opcodes[i].mnemonic,
-			    (void *) &spu_opcodes[i]);
-
-      if (retval != NULL && strcmp (retval, "exists") != 0)
-	as_fatal (_("Can't hash instruction '%s':%s"),
-		  spu_opcodes[i].mnemonic, retval);
-    }
+    str_hash_insert (op_hash, spu_opcodes[i].mnemonic, &spu_opcodes[i], 0);
 }
 
-const char *md_shortopts = "";
-struct option md_longopts[] = {
+const char md_shortopts[] = "";
+const struct option md_longopts[] = {
 #define OPTION_APUASM (OPTION_MD_BASE)
   {"apuasm", no_argument, NULL, OPTION_APUASM},
 #define OPTION_DD2 (OPTION_MD_BASE+1)
@@ -144,7 +132,7 @@ struct option md_longopts[] = {
   {"mdd3.0", no_argument, NULL, OPTION_DD3},
   { NULL, no_argument, NULL, 0 }
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* When set (by -apuasm) our assembler emulates the behaviour of apuasm.
  * e.g. don't add bias to float conversion and don't right shift
@@ -285,7 +273,7 @@ md_assemble (char *op)
 
   /* try to find the instruction in the hash table */
 
-  if ((format = (struct spu_opcode *) hash_find (op_hash, op)) == NULL)
+  if ((format = (struct spu_opcode *) str_hash_find (op_hash, op)) == NULL)
     {
       as_bad (_("Invalid mnemonic '%s'"), op);
       return;
@@ -585,6 +573,7 @@ get_reg (const char *param, struct spu_insn *insn, int arg, int accept_expr)
       expression (&ex);
       param = input_line_pointer;
       input_line_pointer = save_ptr;
+      resolve_register (&ex);
       if (ex.X_op == O_register || ex.X_op == O_constant)
 	{
 	  insn->opcode |= ex.X_add_number << arg_encode[arg].pos;
@@ -719,7 +708,7 @@ get_imm (const char *param, struct spu_insn *insn, int arg)
 const char *
 md_atof (int type, char *litP, int *sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
 #ifndef WORKING_DOT_WORD
@@ -880,12 +869,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
   arelent *reloc;
   reloc = XNEW (arelent);
   reloc->sym_ptr_ptr = XNEW (asymbol *);
-  if (fixp->fx_addsy)
-    *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
-  else if (fixp->fx_subsy)
-    *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_subsy);
-  else
-    abort ();
+  *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
   if (reloc->howto == (reloc_howto_type *) NULL)
@@ -893,6 +877,8 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
       as_bad_where (fixp->fx_file, fixp->fx_line,
 		    _("reloc %d not supported by object file format"),
 		    (int) fixp->fx_r_type);
+      free (reloc->sym_ptr_ptr);
+      free (reloc);
       return NULL;
     }
   reloc->addend = fixp->fx_addnumber;
@@ -904,7 +890,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 valueT
 md_section_align (segT seg, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
+  int align = bfd_section_alignment (seg);
   valueT mask = ((valueT) 1 << align) - 1;
 
   return (size + mask) & ~mask;
@@ -969,7 +955,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
   if (fixP->fx_subsy != (symbolS *) NULL)
     {
       /* We can't actually support subtracting a symbol.  */
-      as_bad_where (fixP->fx_file, fixP->fx_line, _("expression too complex"));
+      as_bad_subtract (fixP);
     }
 
   if (fixP->fx_addsy != NULL)

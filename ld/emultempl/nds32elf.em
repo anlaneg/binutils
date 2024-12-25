@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-# Copyright (C) 2012-2019 Free Software Foundation, Inc.
+# Copyright (C) 2012-2024 Free Software Foundation, Inc.
 # Contributed by Andes Technology Corporation.
 #
 # This file is part of the GNU Binutils.
@@ -24,7 +24,7 @@ fragment <<EOF
 
 #include "elf-bfd.h"
 #include "elf/nds32.h"
-#include "bfd_stdint.h"
+#include <stdint.h>
 #include "elf32-nds32.h"
 
 static int relax_fp_as_gp = 1;		/* --mrelax-omit-fp  */
@@ -68,7 +68,7 @@ nds32_elf_after_parse (void)
   if (!RELAXATION_ENABLED)
     relax_fp_as_gp = 0;
 
-  gld${EMULATION_NAME}_after_parse ();
+  ldelf_after_parse ();
 }
 
 static void
@@ -123,7 +123,7 @@ nds32_elf_after_allocation (void)
 {
   /* Call default after allocation callback.
      1. This is where relaxation is done.
-     2. It calls gld${EMULATION_NAME}_map_segments to build ELF segment table.
+     2. It calls ldelf_map_segments to build ELF segment table.
      3. Any relaxation requires relax being done must be called after it.  */
   gld${EMULATION_NAME}_after_allocation ();
 }
@@ -132,18 +132,6 @@ EOF
 # Define some shell vars to insert bits of code into the standard elf
 # parse_args and list_options functions.
 #
-PARSE_AND_LIST_PROLOGUE='
-#define OPTION_BASELINE			301
-#define OPTION_ELIM_GC_RELOCS		(OPTION_BASELINE + 1)
-#define OPTION_FP_AS_GP			(OPTION_BASELINE + 2)
-#define OPTION_NO_FP_AS_GP		(OPTION_BASELINE + 3)
-#define OPTION_REDUCE_FP_UPDATE		(OPTION_BASELINE + 4)
-#define OPTION_NO_REDUCE_FP_UPDATE	(OPTION_BASELINE + 5)
-#define OPTION_EXPORT_SYMBOLS		(OPTION_BASELINE + 6)
-#define OPTION_HYPER_RELAX		(OPTION_BASELINE + 7)
-#define OPTION_TLSDESC_TRAMPOLINE	(OPTION_BASELINE + 8)
-#define OPTION_NO_TLSDESC_TRAMPOLINE	(OPTION_BASELINE + 9)
-'
 PARSE_AND_LIST_LONGOPTS='
   { "mfp-as-gp", no_argument, NULL, OPTION_FP_AS_GP},
   { "mno-fp-as-gp", no_argument, NULL, OPTION_NO_FP_AS_GP},

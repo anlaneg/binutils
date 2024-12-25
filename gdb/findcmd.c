@@ -1,6 +1,6 @@
 /* The find command.
 
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,20 +17,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "arch-utils.h"
 #include <ctype.h>
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "value.h"
 #include "target.h"
 #include "cli/cli-utils.h"
 #include <algorithm>
-#include "common/byte-vector.h"
+#include "gdbsupport/byte-vector.h"
 
 /* Copied from bfd_put_bits.  */
 
 static void
-put_bits (bfd_uint64_t data, gdb::byte_vector &buf, int bits, bfd_boolean big_p)
+put_bits (uint64_t data, gdb::byte_vector &buf, int bits, bfd_boolean big_p)
 {
   int i;
   int bytes;
@@ -121,7 +120,7 @@ parse_find_args (const char *args, ULONGEST *max_countp,
       len = value_as_long (v);
       if (len == 0)
 	{
-	  printf_filtered (_("Empty search range.\n"));
+	  gdb_printf (_("Empty search range.\n"));
 	  return pattern_buf;
 	}
       if (len < 0)
@@ -162,7 +161,7 @@ parse_find_args (const char *args, ULONGEST *max_countp,
       s = skip_spaces (s);
 
       v = parse_to_comma_and_eval (&s);
-      t = value_type (v);
+      t = v->type ();
 
       if (size != '\0')
 	{
@@ -185,9 +184,9 @@ parse_find_args (const char *args, ULONGEST *max_countp,
 	}
       else
 	{
-	  const gdb_byte *contents = value_contents (v);
+	  const gdb_byte *contents = v->contents ().data ();
 	  pattern_buf.insert (pattern_buf.end (), contents,
-			      contents + TYPE_LENGTH (t));
+			      contents + t->length ());
 	}
 
       if (*s == ',')
@@ -247,7 +246,7 @@ find_command (const char *args, int from_tty)
 	break;
 
       print_address (gdbarch, found_addr, gdb_stdout);
-      printf_filtered ("\n");
+      gdb_printf ("\n");
       ++found_count;
       last_found_addr = found_addr;
 
@@ -274,23 +273,25 @@ find_command (const char *args, int from_tty)
     }
 
   if (found_count == 0)
-    printf_filtered ("Pattern not found.\n");
+    gdb_printf ("Pattern not found.\n");
   else
-    printf_filtered ("%d pattern%s found.\n", found_count,
-		     found_count > 1 ? "s" : "");
+    gdb_printf ("%d pattern%s found.\n", found_count,
+		found_count > 1 ? "s" : "");
 }
 
+void _initialize_mem_search ();
 void
-_initialize_mem_search (void)
+_initialize_mem_search ()
 {
   add_cmd ("find", class_vars, find_command, _("\
 Search memory for a sequence of bytes.\n\
 Usage:\nfind \
-[/size-char] [/max-count] start-address, end-address, expr1 [, expr2 ...]\n\
-find [/size-char] [/max-count] start-address, +length, expr1 [, expr2 ...]\n\
-size-char is one of b,h,w,g for 8,16,32,64 bit values respectively,\n\
+[/SIZE-CHAR] [/MAX-COUNT] START-ADDRESS, END-ADDRESS, EXPR1 [, EXPR2 ...]\n\
+find [/SIZE-CHAR] [/MAX-COUNT] START-ADDRESS, +LENGTH, EXPR1 [, EXPR2 ...]\n\
+SIZE-CHAR is one of b,h,w,g for 8,16,32,64 bit values respectively,\n\
 and if not specified the size is taken from the type of the expression\n\
 in the current language.\n\
+The two-address form specifies an inclusive range.\n\
 Note that this means for example that in the case of C-like languages\n\
 a search for an untyped 0x42 will search for \"(int) 0x42\"\n\
 which is typically four bytes, and a search for a string \"hello\" will\n\

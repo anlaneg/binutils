@@ -1,6 +1,6 @@
 /* XML target description support for GDB.
 
-   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+   Copyright (C) 2006-2024 Free Software Foundation, Inc.
 
    Contributed by CodeSourcery.
 
@@ -19,7 +19,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "target.h"
 #include "target-descriptions.h"
 #include "xml-support.h"
@@ -41,8 +40,7 @@
    an XML parser.  */
 
 static struct target_desc *
-tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
-		 void *fetcher_baton)
+tdesc_parse_xml (const char *document, xml_fetch_another fetcher)
 {
   static int have_warned;
 
@@ -374,7 +372,7 @@ tdesc_start_field (struct gdb_xml_parser *parser,
       tdesc_type_with_fields *t = data->current_type;
 
       /* Older versions of gdb can't handle elided end values.
-         Stick with that for now, to help ensure backward compatibility.
+	 Stick with that for now, to help ensure backward compatibility.
 	 E.g., If a newer gdbserver is talking to an older gdb.  */
       if (end == -1)
 	gdb_xml_error (parser, _("Missing end value"));
@@ -617,8 +615,7 @@ static const struct gdb_xml_element tdesc_elements[] = {
 /* Parse DOCUMENT into a target description and return it.  */
 
 static struct target_desc *
-tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
-		 void *fetcher_baton)
+tdesc_parse_xml (const char *document, xml_fetch_another fetcher)
 {
   struct tdesc_parsing_data data;
 
@@ -627,7 +624,7 @@ tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
 
   if (!xml_process_xincludes (expanded_text,
 			      _("target description"),
-			      document, fetcher, fetcher_baton, 0))
+			      document, fetcher, 0))
     {
       warning (_("Could not load XML target description; ignoring"));
       return NULL;
@@ -640,7 +637,7 @@ tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
     return it->second.get ();
 
   memset (&data, 0, sizeof (struct tdesc_parsing_data));
-  target_desc_up description (allocate_target_description ());
+  target_desc_up description = allocate_target_description ();
   data.tdesc = description.get ();
 
   if (gdb_xml_parse_quick (_("target description"), "gdb-target.dtd",
@@ -665,7 +662,7 @@ tdesc_parse_xml (const char *document, xml_fetch_another fetcher,
 const struct target_desc *
 file_read_description_xml (const char *filename)
 {
-  gdb::optional<gdb::char_vector> tdesc_str
+  std::optional<gdb::char_vector> tdesc_str
     = xml_fetch_content_from_file (filename, NULL);
   if (!tdesc_str)
     {
@@ -673,8 +670,13 @@ file_read_description_xml (const char *filename)
       return NULL;
     }
 
-  return tdesc_parse_xml (tdesc_str->data (), xml_fetch_content_from_file,
-			  (void *) ldirname (filename).c_str ());
+  const std::string dirname = ldirname (filename);
+  auto fetch_another = [&dirname] (const char *name)
+    {
+      return xml_fetch_content_from_file (name, dirname.c_str ());
+    };
+
+  return tdesc_parse_xml (tdesc_str->data (), fetch_another);
 }
 
 /* Read a string representation of available features from the target,
@@ -684,11 +686,9 @@ file_read_description_xml (const char *filename)
    is "target.xml".  Other calls may be performed for the DTD or
    for <xi:include>.  */
 
-static gdb::optional<gdb::char_vector>
-fetch_available_features_from_target (const char *name, void *baton_)
+static std::optional<gdb::char_vector>
+fetch_available_features_from_target (const char *name, target_ops *ops)
 {
-  struct target_ops *ops = (struct target_ops *) baton_;
-
   /* Read this object as a string.  This ensures that a NUL
      terminator is added.  */
   return target_read_stralloc (ops,
@@ -703,21 +703,24 @@ fetch_available_features_from_target (const char *name, void *baton_)
 const struct target_desc *
 target_read_description_xml (struct target_ops *ops)
 {
-  gdb::optional<gdb::char_vector> tdesc_str
+  std::optional<gdb::char_vector> tdesc_str
     = fetch_available_features_from_target ("target.xml", ops);
   if (!tdesc_str)
     return NULL;
 
-  return tdesc_parse_xml (tdesc_str->data (),
-			  fetch_available_features_from_target,
-			  ops);
+  auto fetch_another = [ops] (const char *name)
+    {
+      return fetch_available_features_from_target (name, ops);
+    };
+
+  return tdesc_parse_xml (tdesc_str->data (), fetch_another);
 }
 
 /* Fetches an XML target description using OPS,  processing
    includes, but not parsing it.  Used to dump whole tdesc
    as a single XML file.  */
 
-gdb::optional<std::string>
+std::optional<std::string>
 target_fetch_description_xml (struct target_ops *ops)
 {
 #if !defined(HAVE_LIBEXPAT)
@@ -732,16 +735,19 @@ target_fetch_description_xml (struct target_ops *ops)
 
   return {};
 #else
-  gdb::optional<gdb::char_vector>
+  std::optional<gdb::char_vector>
     tdesc_str = fetch_available_features_from_target ("target.xml", ops);
   if (!tdesc_str)
     return {};
 
+  auto fetch_another = [ops] (const char *name)
+    {
+      return fetch_available_features_from_target (name, ops);
+    };
   std::string output;
   if (!xml_process_xincludes (output,
 			      _("target description"),
-			      tdesc_str->data (),
-			      fetch_available_features_from_target, ops, 0))
+			      tdesc_str->data (), fetch_another, 0))
     {
       warning (_("Could not load XML target description; ignoring"));
       return {};
@@ -755,9 +761,9 @@ target_fetch_description_xml (struct target_ops *ops)
 const struct target_desc *
 string_read_description_xml (const char *xml)
 {
-  return tdesc_parse_xml (xml, [] (const char *href, void *baton)
+  return tdesc_parse_xml (xml, [] (const char *href)
     {
       error (_("xincludes are unsupported with this method"));
-      return gdb::optional<gdb::char_vector> ();
-    }, nullptr);
+      return std::optional<gdb::char_vector> ();
+    });
 }

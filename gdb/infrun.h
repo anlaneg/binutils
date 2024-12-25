@@ -1,4 +1,4 @@
-/* Copyright (C) 1986-2019 Free Software Foundation, Inc.
+/* Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,22 +15,66 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef INFRUN_H
-#define INFRUN_H 1
+#ifndef GDB_INFRUN_H
+#define GDB_INFRUN_H
 
+#include "gdbthread.h"
 #include "symtab.h"
-#include "common/byte-vector.h"
+#include "gdbsupport/byte-vector.h"
+#include "gdbsupport/intrusive_list.h"
 
 struct target_waitstatus;
-struct frame_info;
+class frame_info_ptr;
 struct address_space;
 struct return_value_info;
+struct process_stratum_target;
+struct thread_info;
 
 /* True if we are debugging run control.  */
-extern unsigned int debug_infrun;
+extern bool debug_infrun;
 
-/* True if we are debugging displaced stepping.  */
-extern int debug_displaced;
+/* Print an "infrun" debug statement.  */
+
+#define infrun_debug_printf(fmt, ...) \
+  debug_prefixed_printf_cond (debug_infrun, "infrun", fmt, ##__VA_ARGS__)
+
+/* Print "infrun" start/end debug statements.  */
+
+#define INFRUN_SCOPED_DEBUG_START_END(fmt, ...) \
+  scoped_debug_start_end (debug_infrun, "infrun", fmt, ##__VA_ARGS__)
+
+/* Print "infrun" enter/exit debug statements.  */
+
+#define INFRUN_SCOPED_DEBUG_ENTER_EXIT \
+  scoped_debug_enter_exit (debug_infrun, "infrun")
+
+/* A infrun debug helper routine to print out all the threads in the set
+   THREADS (which should be a range type that returns thread_info*
+   objects).
+
+   The TITLE is a string that is printed before the list of threads.
+
+   Output is only produced when 'set debug infrun on'.  */
+
+template<typename ThreadRange>
+static inline void
+infrun_debug_show_threads (const char *title, ThreadRange threads)
+{
+  if (debug_infrun)
+    {
+      INFRUN_SCOPED_DEBUG_ENTER_EXIT;
+
+      infrun_debug_printf ("%s:", title);
+      for (thread_info *thread : threads)
+	infrun_debug_printf ("  thread %s, executing = %d, resumed = %d, "
+			     "state = %s",
+			     thread->ptid.to_string ().c_str (),
+			     thread->executing (),
+			     thread->resumed (),
+			     thread_state_string (thread->state));
+    }
+}
+
 
 /* Nonzero if we want to give control to the user when we're notified
    of shared library events by the dynamic linker.  */
@@ -39,24 +83,24 @@ extern int stop_on_solib_events;
 /* True if execution commands resume all threads of all processes by
    default; otherwise, resume only threads of the current inferior
    process.  */
-extern int sched_multi;
+extern bool sched_multi;
 
 /* When set, stop the 'step' command if we enter a function which has
    no line number information.  The normal behavior is that we step
    over such function.  */
-extern int step_stop_if_no_debug;
+extern bool step_stop_if_no_debug;
 
 /* If set, the inferior should be controlled in non-stop mode.  In
    this mode, each thread is controlled independently.  Execution
    commands apply only to the selected thread by default, and stop
    events stop only the thread that had the event -- the other threads
    are kept running freely.  */
-extern int non_stop;
+extern bool non_stop;
 
 /* When set (default), the target should attempt to disable the
    operating system's address space randomization feature when
    starting an inferior.  */
-extern int disable_randomization;
+extern bool disable_randomization;
 
 /* Returns a unique identifier for the current stop.  This can be used
    to tell whether a command has proceeded the inferior past the
@@ -72,6 +116,13 @@ enum exec_direction_kind
 
 /* The current execution direction.  */
 extern enum exec_direction_kind execution_direction;
+
+/* Call this to point 'previous_thread' at the thread returned by
+   inferior_thread, or at nullptr, if there's no selected thread.  */
+extern void update_previous_thread ();
+
+/* Get a weak reference to 'previous_thread'.  */
+extern thread_info *get_previous_thread ();
 
 extern void start_remote (int from_tty);
 
@@ -93,26 +144,47 @@ extern void proceed (CORE_ADDR, enum gdb_signal);
    resumed.  */
 extern ptid_t user_visible_resume_ptid (int step);
 
-extern void wait_for_inferior (void);
+/* Return the process_stratum target that we will proceed, in the
+   perspective of the user/frontend.  If RESUME_PTID is
+   MINUS_ONE_PTID, then we'll resume all threads of all targets, so
+   the function returns NULL.  Otherwise, we'll be resuming a process
+   or thread of the current process, so we return the current
+   inferior's process stratum target.  */
+extern process_stratum_target *user_visible_resume_target (ptid_t resume_ptid);
 
 /* Return control to GDB when the inferior stops for real.  Print
    appropriate messages, remove breakpoints, give terminal our modes,
    and run the stop hook.  Returns true if the stop hook proceeded the
    target, false otherwise.  */
-extern int normal_stop (void);
+extern bool normal_stop ();
 
-extern void get_last_target_status (ptid_t *ptid,
+/* Return the cached copy of the last target/ptid/waitstatus returned
+   by target_wait().  The data is actually cached by handle_inferior_event(),
+   which gets called immediately after target_wait().  */
+extern void get_last_target_status (process_stratum_target **target,
+				    ptid_t *ptid,
 				    struct target_waitstatus *status);
 
-extern void set_last_target_status (ptid_t ptid,
-				    struct target_waitstatus status);
+/* Set the cached copy of the last target/ptid/waitstatus.  */
+extern void set_last_target_status (process_stratum_target *target, ptid_t ptid,
+				    const target_waitstatus &status);
 
-/* Stop all threads.  Only returns after everything is halted.  */
-extern void stop_all_threads (void);
+/* Clear the cached copy of the last ptid/waitstatus returned by
+   target_wait().  */
+extern void nullify_last_target_wait_ptid ();
+
+/* Stop all threads.  Only returns after everything is halted.
+
+   REASON is a string indicating the reason why we stop all threads, used in
+   debug messages.
+
+   If INF is non-nullptr, stop all threads of that inferior.  Otherwise, stop
+   all threads of all inferiors.  */
+extern void stop_all_threads (const char *reason, inferior *inf = nullptr);
 
 extern void prepare_for_detach (void);
 
-extern void fetch_inferior_event (void *);
+extern void fetch_inferior_event ();
 
 extern void init_wait_for_inferior (void);
 
@@ -133,8 +205,21 @@ extern int thread_is_stepping_over_breakpoint (int thread);
    triggers a non-steppable watchpoint.  */
 extern int stepping_past_nonsteppable_watchpoint (void);
 
-extern void set_step_info (struct frame_info *frame,
+/* Record in TP the frame and location we're currently stepping through.  */
+extern void set_step_info (thread_info *tp,
+			   const frame_info_ptr &frame,
 			   struct symtab_and_line sal);
+
+/* Notify interpreters and observers that the current inferior has stopped with
+   signal SIG.  */
+extern void notify_signal_received (gdb_signal sig);
+
+/* Notify interpreters and observers that the current inferior has stopped
+   normally.  */
+extern void notify_normal_stop (bpstat *bs, int print_frame);
+
+/* Notify interpreters and observers that the user focus has changed.  */
+extern void notify_user_selected_context_changed (user_selected_what selection);
 
 /* Several print_*_reason helper functions to print why the inferior
    has stopped to the passed in UIOUT.  */
@@ -142,10 +227,6 @@ extern void set_step_info (struct frame_info *frame,
 /* Signal received, print why the inferior has stopped.  */
 extern void print_signal_received_reason (struct ui_out *uiout,
 					  enum gdb_signal siggnal);
-
-/* Print why the inferior has stopped.  We are done with a
-   step/next/si/ni command, print why the inferior has stopped.  */
-extern void print_end_stepping_range_reason (struct ui_out *uiout);
 
 /* The inferior was terminated by a signal, print why it stopped.  */
 extern void print_signal_exited_reason (struct ui_out *uiout,
@@ -167,14 +248,15 @@ extern void print_return_value (struct ui_out *uiout,
 
 /* Print current location without a level number, if we have changed
    functions or hit a breakpoint.  Print source line if we have one.
-   If the execution command captured a return value, print it.  */
+   If the execution command captured a return value, print it.  If
+   DISPLAYS is false, do not call 'do_displays'.  */
 
-extern void print_stop_event (struct ui_out *uiout);
+extern void print_stop_event (struct ui_out *uiout, bool displays = true);
 
 /* Pretty print the results of target_wait, for debugging purposes.  */
 
 extern void print_target_wait_results (ptid_t waiton_ptid, ptid_t result_ptid,
-				       const struct target_waitstatus *ws);
+				       const struct target_waitstatus &ws);
 
 extern int signal_stop_state (int);
 
@@ -194,13 +276,6 @@ extern void update_signals_program_target (void);
    inferior.  Currently, those variables are $_exitcode and
    $_exitsignal.  */
 extern void clear_exit_convenience_vars (void);
-
-/* Dump LEN bytes at BUF in hex to FILE, followed by a newline.  */
-extern void displaced_step_dump_bytes (struct ui_file *file,
-				       const gdb_byte *buf, size_t len);
-
-extern struct displaced_step_closure *get_displaced_step_closure_by_addr
-    (CORE_ADDR addr);
 
 extern void update_observer_mode (void);
 
@@ -222,9 +297,9 @@ extern void infrun_async (int enable);
    loop.  */
 extern void mark_infrun_async_event_handler (void);
 
-/* The global queue of threads that need to do a step-over operation
+/* The global chain of threads that need to do a step-over operation
    to get past e.g., a breakpoint.  */
-extern struct thread_info *step_over_queue_head;
+extern thread_step_over_list global_thread_step_over_list;
 
 /* Remove breakpoints if possible (usually that means, if everything
    is stopped).  On failure, print a message.  */
@@ -240,66 +315,107 @@ extern void all_uis_check_sync_execution_done (void);
    started or re-started).  */
 extern void all_uis_on_sync_execution_starting (void);
 
-/* Base class for displaced stepping closures (the arch-specific data).  */
+/* In all-stop, restart the target if it had to be stopped to
+   detach.  */
+extern void restart_after_all_stop_detach (process_stratum_target *proc_target);
 
-struct displaced_step_closure
+/* RAII object to temporarily disable the requirement for target
+   stacks to commit their resumed threads.
+
+   On construction, set process_stratum_target::commit_resumed_state
+   to false for all process_stratum targets in all target
+   stacks.
+
+   On destruction (or if reset_and_commit() is called), set
+   process_stratum_target::commit_resumed_state to true for all
+   process_stratum targets in all target stacks, except those that:
+
+     - have no resumed threads
+     - have a resumed thread with a pending status
+
+   target_commit_resumed is not called in the destructor, because its
+   implementations could throw, and we don't to swallow that error in
+   a destructor.  Instead, the caller should call the
+   reset_and_commit_resumed() method so that an eventual exception can
+   propagate.  "reset" in the method name refers to the fact that this
+   method has the same effect as the destructor, in addition to
+   committing resumes.
+
+   The creation of nested scoped_disable_commit_resumed objects is
+   tracked, such that only the outermost instance actually does
+   something, for cases like this:
+
+     void
+     inner_func ()
+     {
+       scoped_disable_commit_resumed disable;
+
+       // do stuff
+
+       disable.reset_and_commit ();
+     }
+
+     void
+     outer_func ()
+     {
+       scoped_disable_commit_resumed disable;
+
+       for (... each thread ...)
+	 inner_func ();
+
+       disable.reset_and_commit ();
+     }
+
+   In this case, we don't want the `disable` destructor in
+   `inner_func` to require targets to commit resumed threads, so that
+   the `reset_and_commit()` call in `inner_func` doesn't actually
+   resume threads.  */
+
+struct scoped_disable_commit_resumed
 {
-  virtual ~displaced_step_closure () = 0;
+  explicit scoped_disable_commit_resumed (const char *reason);
+  ~scoped_disable_commit_resumed ();
+
+  DISABLE_COPY_AND_ASSIGN (scoped_disable_commit_resumed);
+
+  /* Undoes the disabling done by the ctor, and calls
+     maybe_call_commit_resumed_all_targets().  */
+  void reset_and_commit ();
+
+private:
+  /* Undoes the disabling done by the ctor.  */
+  void reset ();
+
+  /* Whether this object has been reset.  */
+  bool m_reset = false;
+
+  const char *m_reason;
+  bool m_prev_enable_commit_resumed;
 };
 
-/* A simple displaced step closure that contains only a byte buffer.  */
+/* Call target_commit_resumed method on all target stacks whose
+   process_stratum target layer has COMMIT_RESUME_STATE set.  */
 
-struct buf_displaced_step_closure : displaced_step_closure
+extern void maybe_call_commit_resumed_all_targets ();
+
+/* RAII object to temporarily enable the requirement for target stacks
+   to commit their resumed threads.  This is the inverse of
+   scoped_disable_commit_resumed.  The constructor calls the
+   maybe_call_commit_resumed_all_targets function itself, since it's
+   OK to throw from a constructor.  */
+
+struct scoped_enable_commit_resumed
 {
-  buf_displaced_step_closure (int buf_size)
-  : buf (buf_size)
-  {}
+  explicit scoped_enable_commit_resumed (const char *reason,
+					 bool force_p = false);
+  ~scoped_enable_commit_resumed ();
 
-  gdb::byte_vector buf;
+  DISABLE_COPY_AND_ASSIGN (scoped_enable_commit_resumed);
+
+private:
+  const char *m_reason;
+  bool m_prev_enable_commit_resumed;
 };
 
-/* Per-inferior displaced stepping state.  */
-struct displaced_step_inferior_state
-{
-  displaced_step_inferior_state ()
-  {
-    reset ();
-  }
 
-  /* Put this object back in its original state.  */
-  void reset ()
-  {
-    failed_before = 0;
-    step_thread = nullptr;
-    step_gdbarch = nullptr;
-    step_closure = nullptr;
-    step_original = 0;
-    step_copy = 0;
-    step_saved_copy.clear ();
-  }
-
-  /* True if preparing a displaced step ever failed.  If so, we won't
-     try displaced stepping for this inferior again.  */
-  int failed_before;
-
-  /* If this is not nullptr, this is the thread carrying out a
-     displaced single-step in process PID.  This thread's state will
-     require fixing up once it has completed its step.  */
-  thread_info *step_thread;
-
-  /* The architecture the thread had when we stepped it.  */
-  gdbarch *step_gdbarch;
-
-  /* The closure provided gdbarch_displaced_step_copy_insn, to be used
-     for post-step cleanup.  */
-  displaced_step_closure *step_closure;
-
-  /* The address of the original instruction, and the copy we
-     made.  */
-  CORE_ADDR step_original, step_copy;
-
-  /* Saved contents of copy area.  */
-  gdb::byte_vector step_saved_copy;
-};
-
-#endif /* INFRUN_H */
+#endif /* GDB_INFRUN_H */

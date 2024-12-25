@@ -1,5 +1,5 @@
 /* winduni.c -- unicode support for the windres program.
-   Copyright (C) 1997-2019 Free Software Foundation, Inc.
+   Copyright (C) 1997-2024 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support.
    Rewritten by Kai Tietz, Onevision.
 
@@ -771,7 +771,13 @@ wind_MultiByteToWideChar (rc_uint_type cp, const char *mb,
 
   if (!mb || !iconv_name)
     return 0;
-  iconv_t cd = iconv_open ("UTF-16LE", iconv_name);
+  iconv_t cd = iconv_open (
+#if WORDS_BIGENDIAN
+			   "UTF-16BE",
+#else
+			   "UTF-16LE",
+#endif
+			   iconv_name);
 
   while (1)
     {
@@ -832,7 +838,7 @@ wind_WideCharToMultiByte (rc_uint_type cp, const unichar *u, char *mb, rc_uint_t
 {
   rc_uint_type ret = 0;
 #if defined (_WIN32) || defined (__CYGWIN__)
-  WINBOOL used_def = FALSE;
+  WINBOOL used_def = false;
 
   ret = (rc_uint_type) WideCharToMultiByte (cp, 0, u, -1, mb, mb_len,
 				      	    NULL, & used_def);
@@ -844,7 +850,13 @@ wind_WideCharToMultiByte (rc_uint_type cp, const unichar *u, char *mb, rc_uint_t
 
   if (!u || !iconv_name)
     return 0;
-  iconv_t cd = iconv_open (iconv_name, "UTF-16LE");
+  iconv_t cd = iconv_open (iconv_name,
+#if WORDS_BIGENDIAN
+			   "UTF-16BE"
+#else
+			   "UTF-16LE"
+#endif
+			   );
 
   while (1)
     {

@@ -1,6 +1,6 @@
 /* Native-dependent code for FreeBSD/arm.
 
-   Copyright (C) 2017-2019 Free Software Foundation, Inc.
+   Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "inferior.h"
 #include "target.h"
+
+#include "elf/common.h"
 
 #include <sys/types.h>
 #include <sys/ptrace.h>
@@ -38,57 +40,25 @@ struct arm_fbsd_nat_target : public fbsd_nat_target
 
 static arm_fbsd_nat_target the_arm_fbsd_nat_target;
 
-/* Determine if PT_GETREGS fetches REGNUM.  */
-
-static bool
-getregs_supplies (struct gdbarch *gdbarch, int regnum)
-{
-  return ((regnum >= ARM_A1_REGNUM && regnum <= ARM_PC_REGNUM)
-	  || regnum == ARM_PS_REGNUM);
-}
-
-#ifdef PT_GETVFPREGS
-/* Determine if PT_GETVFPREGS fetches REGNUM.  */
-
-static bool
-getvfpregs_supplies (struct gdbarch *gdbarch, int regnum)
-{
-  return ((regnum >= ARM_D0_REGNUM && regnum <= ARM_D31_REGNUM)
-	  || regnum == ARM_FPSCR_REGNUM);
-}
-#endif
-
 /* Fetch register REGNUM from the inferior.  If REGNUM is -1, do this
    for all registers.  */
 
 void
 arm_fbsd_nat_target::fetch_registers (struct regcache *regcache, int regnum)
 {
-  pid_t pid = get_ptrace_pid (regcache->ptid ());
-
-  struct gdbarch *gdbarch = regcache->arch ();
-  if (regnum == -1 || getregs_supplies (gdbarch, regnum))
-    {
-      struct reg regs;
-
-      if (ptrace (PT_GETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-	perror_with_name (_("Couldn't get registers"));
-
-      regcache->supply_regset (&arm_fbsd_gregset, regnum, &regs,
-			       sizeof (regs));
-    }
-
+  fetch_register_set<struct reg> (regcache, regnum, PT_GETREGS,
+				  &arm_fbsd_gregset);
 #ifdef PT_GETVFPREGS
-  if (regnum == -1 || getvfpregs_supplies (gdbarch, regnum))
-    {
-      struct vfpreg vfpregs;
+  fetch_register_set<struct vfpreg> (regcache, regnum, PT_GETVFPREGS,
+				     &arm_fbsd_vfpregset);
+#endif
+#ifdef PT_GETREGSET
+  gdbarch *gdbarch = regcache->arch ();
+  arm_gdbarch_tdep *tdep = gdbarch_tdep<arm_gdbarch_tdep> (gdbarch);
 
-      if (ptrace (PT_GETVFPREGS, pid, (PTRACE_TYPE_ARG3) &vfpregs, 0) == -1)
-	perror_with_name (_("Couldn't get floating point status"));
-
-      regcache->supply_regset (&arm_fbsd_vfpregset, regnum, &vfpregs,
-			       sizeof (vfpregs));
-    }
+  if (tdep->tls_regnum > 0)
+    fetch_regset<uint32_t> (regcache, regnum, NT_ARM_TLS, &arm_fbsd_tls_regset,
+			    tdep->tls_regnum);
 #endif
 }
 
@@ -98,37 +68,19 @@ arm_fbsd_nat_target::fetch_registers (struct regcache *regcache, int regnum)
 void
 arm_fbsd_nat_target::store_registers (struct regcache *regcache, int regnum)
 {
-  pid_t pid = get_ptrace_pid (regcache->ptid ());
-
-  struct gdbarch *gdbarch = regcache->arch ();
-  if (regnum == -1 || getregs_supplies (gdbarch, regnum))
-    {
-      struct reg regs;
-
-      if (ptrace (PT_GETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-	perror_with_name (_("Couldn't get registers"));
-
-      regcache->collect_regset (&arm_fbsd_gregset, regnum, &regs,
-			       sizeof (regs));
-
-      if (ptrace (PT_SETREGS, pid, (PTRACE_TYPE_ARG3) &regs, 0) == -1)
-	perror_with_name (_("Couldn't write registers"));
-    }
-
+  store_register_set<struct reg> (regcache, regnum, PT_GETREGS, PT_SETREGS,
+				  &arm_fbsd_gregset);
 #ifdef PT_GETVFPREGS
-  if (regnum == -1 || getvfpregs_supplies (gdbarch, regnum))
-    {
-      struct vfpreg vfpregs;
+  store_register_set<struct vfpreg> (regcache, regnum, PT_GETVFPREGS,
+				     PT_SETVFPREGS, &arm_fbsd_vfpregset);
+#endif
+#ifdef PT_GETREGSET
+  gdbarch *gdbarch = regcache->arch ();
+  arm_gdbarch_tdep *tdep = gdbarch_tdep<arm_gdbarch_tdep> (gdbarch);
 
-      if (ptrace (PT_GETVFPREGS, pid, (PTRACE_TYPE_ARG3) &vfpregs, 0) == -1)
-	perror_with_name (_("Couldn't get floating point status"));
-
-      regcache->collect_regset (&arm_fbsd_vfpregset, regnum, &vfpregs,
-				sizeof (vfpregs));
-
-      if (ptrace (PT_SETVFPREGS, pid, (PTRACE_TYPE_ARG3) &vfpregs, 0) == -1)
-	perror_with_name (_("Couldn't write floating point status"));
-    }
+  if (tdep->tls_regnum > 0)
+    store_regset<uint32_t> (regcache, regnum, NT_ARM_TLS, &arm_fbsd_tls_regset,
+			    tdep->tls_regnum);
 #endif
 }
 
@@ -138,15 +90,23 @@ const struct target_desc *
 arm_fbsd_nat_target::read_description ()
 {
   const struct target_desc *desc;
+  bool tls = false;
 
-  desc = arm_fbsd_read_description_auxv (this);
+  if (inferior_ptid == null_ptid)
+    return this->beneath ()->read_description ();
+
+#ifdef PT_GETREGSET
+  tls = have_regset (inferior_ptid, NT_ARM_TLS) != 0;
+#endif
+  desc = arm_fbsd_read_description_auxv (tls);
   if (desc == NULL)
     desc = this->beneath ()->read_description ();
   return desc;
 }
 
+void _initialize_arm_fbsd_nat ();
 void
-_initialize_arm_fbsd_nat (void)
+_initialize_arm_fbsd_nat ()
 {
   add_inf_child_target (&the_arm_fbsd_nat_target);
 }

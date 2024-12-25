@@ -1,4 +1,4 @@
-# Copyright 1999-2019 Free Software Foundation, Inc.
+# Copyright 1999-2024 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,11 +22,6 @@
 load_lib mi-support.exp
 set MIFLAGS "-i=mi"
 
-gdb_exit
-if [mi_gdb_start] {
-    continue
-}
-
 standard_testfile var-cmd.c
 
 if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
@@ -34,10 +29,9 @@ if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {deb
     return -1
 }
 
-mi_delete_breakpoints
-mi_gdb_reinitialize_dir $srcdir/$subdir
-mi_gdb_load ${binfile}
-
+if {[mi_clean_restart $binfile]} {
+    return
+}
 
 #####                   #####
 #                           #
@@ -70,7 +64,9 @@ mi_gdb_test "113-var-create argc * argc" \
 	"113\\^error,msg=\"-var-create: unable to create variable object\"" \
 	"create out of scope variable"
 
-mi_runto do_locals_tests
+with_test_prefix "first run" {
+  mi_runto do_locals_tests
+}
 
 set line_dlt_first_real [gdb_get_line_number "linteger = 1234;"]
 
@@ -154,7 +150,7 @@ mi_gdb_test "-var-update *" \
 	"update all vars: linteger changed"
 
 # Step over "lpinteger = &linteger;"
-mi_step_to "do_locals_tests" "" "var-cmd.c" [expr $line_dlt_linteger + 1] "step at do_locals_tests (2)"
+mi_step_to "do_locals_tests" "" "var-cmd.c" [expr $line_dlt_linteger + 1] "step at do_locals_tests, 2"
 
 # Test: c_variable-2.3
 # Desc: check whether only lpinteger changed
@@ -163,7 +159,7 @@ mi_gdb_test "-var-update *" \
 	"update all vars: lpinteger changed"
 
 # Step over "lcharacter = 'a';"
-mi_step_to "do_locals_tests" "" "var-cmd.c" [expr $line_dlt_linteger + 2] "step at do_locals_tests (3)"
+mi_step_to "do_locals_tests" "" "var-cmd.c" [expr $line_dlt_linteger + 2] "step at do_locals_tests, 3"
 
 # Test: c_variable-2.4
 # Desc: check whether only lcharacter changed
@@ -172,7 +168,7 @@ mi_gdb_test "-var-update *" \
 	"update all vars: lcharacter changed"
 
 # Step over "lpcharacter = &lcharacter;"
-mi_step_to "do_locals_tests" "" "var-cmd.c" [expr $line_dlt_linteger + 3] "step at do_locals_tests (4)"
+mi_step_to "do_locals_tests" "" "var-cmd.c" [expr $line_dlt_linteger + 3] "step at do_locals_tests, 4"
 
 # Test: c_variable-2.5
 # Desc: check whether only lpcharacter changed
@@ -193,7 +189,7 @@ mi_gdb_test "-var-update *" \
 #  lsimple.character = 'a';
 
 mi_execute_to "exec-step 9" "end-stepping-range" "do_locals_tests" "" \
-	"var-cmd.c" [expr $line_dlt_linteger + 12] "" "step at do_locals_tests (5)"
+	"var-cmd.c" [expr $line_dlt_linteger + 12] "" "step at do_locals_tests, 5"
 
 # Test: c_variable-2.6
 # Desc: check whether llong, lplong, lfloat, lpfloat, ldouble, lpdouble, lsimple.integer,
@@ -211,7 +207,7 @@ mi_gdb_test "-var-update *" \
 set line_dlt_4321 [gdb_get_line_number "linteger = 4321;"]
 
 mi_execute_to "exec-step 4" "end-stepping-range" "do_locals_tests" "" \
-	"var-cmd.c" $line_dlt_4321 "" "step at do_locals_tests (6)"
+	"var-cmd.c" $line_dlt_4321 "" "step at do_locals_tests, 6"
 
 # Test: c_variable-2.7
 # Desc: check whether (lsimple.signed_character, lsimple.char_ptr) lpsimple, func changed
@@ -230,7 +226,7 @@ mi_gdb_test "-var-update *" \
 #  lsimple.character = 'b';
 
 mi_execute_to "exec-step 8" "end-stepping-range" "do_locals_tests" "" \
-	"var-cmd.c" [expr $line_dlt_4321 + 8] "" "step at do_locals_tests (7)"
+	"var-cmd.c" [expr $line_dlt_4321 + 8] "" "step at do_locals_tests, 7"
 
 # Test: c_variable-2.8
 # Desc: check whether linteger, lcharacter, llong, lfoat, ldouble, lsimple.integer,
@@ -253,7 +249,7 @@ mi_gdb_test "-var-assign global_simple 0" \
 
 mi_gdb_test "-var-assign linteger 3333" \
 	"\\^done,value=\"3333\"" \
-	"assign to linteger"
+	"assign to linteger, 1st"
 
 # Allow lpcharacter to update, optionally.  Because it points to a
 # char variable instead of a zero-terminated string, if linteger is
@@ -278,7 +274,7 @@ mi_gdb_test "-var-evaluate-expression linteger" \
 
 mi_gdb_test "-var-assign lpinteger \"&linteger + 3\"" \
 	"\\^done,value=\"$hex\"" \
-	"assign to lpinteger"
+	"assign to lpinteger, 1st"
 
 mi_gdb_test "-var-update *" \
 	"\\^done,changelist=\\\[\{name=\"lpinteger\",in_scope=\"true\",type_changed=\"false\",has_more=\"0\"\}\\\]" \
@@ -296,11 +292,11 @@ mi_gdb_test "-var-evaluate-expression lpinteger" \
 
 mi_gdb_test "-var-assign linteger 4321" \
 	"\\^done,value=\"4321\"" \
-	"assign to linteger"
+	"assign to linteger, 2nd"
 
 mi_gdb_test "-var-assign lpinteger &linteger" \
 	"\\^done,value=\"$hex\"" \
-	"assign to lpinteger"
+	"assign to lpinteger, 2nd"
 
 mi_gdb_test "-var-assign lcharacter 'z'" \
 	"\\^done,value=\"122 'z'\"" \
@@ -312,33 +308,33 @@ mi_gdb_test "-var-evaluate-expression lcharacter" \
 
 mi_gdb_test "-var-assign llong 1313L" \
 	"\\^done,value=\"1313\"" \
-	"assign to llong"
+	"assign to llong, 1st"
 mi_gdb_test "-var-evaluate-expression llong" \
 	"\\^done,value=\"1313\"" \
 	"eval llong"
 mi_gdb_test "-var-assign llong 1212L" \
 	"\\^done,value=\"1212\"" \
-	"assign to llong"
+	"assign to llong, 2nd"
 
 mi_gdb_test "-var-assign lplong &llong+4" \
 	"\\^done,value=\"$hex\"" \
-	"assign to lplong"
+	"assign to lplong, 1st"
 mi_gdb_test "-var-evaluate-expression lplong" \
 	"\\^done,value=\"$hex\"" \
 	"eval lplong"
 mi_gdb_test "-var-assign lplong &llong" \
 	"\\^done,value=\"$hex\"" \
-	"assign to lplong"
+	"assign to lplong, 2nd"
 
 mi_gdb_test "-var-assign lfloat 3.4567" \
 	"\\^done,value=\"3.45.*\"" \
-	"assign to lfloat"
+	"assign to lfloat, 1st"
 mi_gdb_test "-var-evaluate-expression lfloat" \
 	"\\^done,value=\"3.45.*\"" \
 	"eval lfloat"
 mi_gdb_test "-var-assign lfloat 1.2345" \
 	"\\^done,value=\"1.23.*\"" \
-	"assign to lfloat"
+	"assign to lfloat, 2nd"
 
 mi_gdb_test "-var-assign lpfloat &lfloat+4" \
 	"\\^done,value=\"$hex\"" \
@@ -378,7 +374,7 @@ mi_gdb_test "-var-assign func do_block_tests" \
 
 mi_gdb_test "-var-update *" \
 	"\\^done,changelist=\\\[\\\]" \
-	"assign same value to func (update)"
+	"assign same value to func, update"
 
 mi_gdb_test "-var-create array_ptr * array_ptr" \
 	"\\^done,name=\"array_ptr\",numchild=\"1\",value=\"$hex <array>\",type=\"int \\*\",has_more=\"0\"" \
@@ -390,7 +386,7 @@ mi_gdb_test "-var-assign array_ptr array2" \
 
 mi_gdb_test "-var-update *" \
 	"\\^done,changelist=\\\[\{name=\"array_ptr\",in_scope=\"true\",type_changed=\"false\",has_more=\"0\"\}\\\]" \
-	"assign array to pointer (update)"
+	"assign array to pointer, update"
 
 mi_gdb_test "-var-assign array_ptr array2" \
 	"\\^done,value=\"$hex <array2>\"" \
@@ -398,7 +394,7 @@ mi_gdb_test "-var-assign array_ptr array2" \
 
 mi_gdb_test "-var-update *" \
 	"\\^done,changelist=\\\[\\\]" \
-	"assign same array to pointer (update)"
+	"assign same array to pointer, update"
 
 
 ######
@@ -438,7 +434,7 @@ mi_gdb_test "-var-update *" \
 clear_xfail *-*-*
 
 mi_step_to "subroutine1" "\{name=\"i\",value=\".*\"\},\{name=\"l\",value=\".*\"\}" \
-	"var-cmd.c" [expr $line_subroutine1_body + 2] "step at subroutine1 (2)"
+	"var-cmd.c" [expr $line_subroutine1_body + 2] "step at subroutine1, 2"
 
 # Test: c_variable-2.13
 # Desc: change subroutine1 local i
@@ -447,7 +443,7 @@ mi_gdb_test "-var-update *" \
 	"update all vars: i changed"
 
 mi_step_to "subroutine1" "\{name=\"i\",value=\".*\"\},\{name=\"l\",value=\".*\"\}" \
-	"var-cmd.c" [expr $line_subroutine1_body + 3] "step at subroutine1 (3)"
+	"var-cmd.c" [expr $line_subroutine1_body + 3] "step at subroutine1, 3"
 
 # Test: c_variable-2.14
 # Desc: change do_locals_tests local llong
@@ -585,14 +581,24 @@ proc set_frozen {varobjs flag} {
 }
 
 mi_prepare_inline_tests $srcfile
-mi_run_inline_test frozen
 
-mi_run_inline_test bitfield
+set inline_tests {
+    frozen
+    bitfield
+}
+
+# Needs to be last, following tests rely on this.
+lappend inline_tests floating
+
+foreach_with_prefix inline_test $inline_tests {
+    if { [mi_run_inline_test $inline_test] < 0 } {
+	return -1
+    }
+}
 
 # Since the inline test framework does not really work with
-# function calls, first to inline tests and then do the reminder
+# function calls, first to inline tests and then do the remainder
 # manually.
-mi_run_inline_test floating
 set do_at_tests_callee_breakpoint [gdb_get_line_number "breakpoint inside callee"]
 mi_gdb_test "-break-insert var-cmd.c:$do_at_tests_callee_breakpoint" ".*" \
     "inside breakpoint inside callee"
@@ -648,12 +654,14 @@ mi_gdb_test "-var-delete endvar" \
 
 mi_delete_breakpoints
 
-mi_runto do_locals_tests
+with_test_prefix "second run" {
+  mi_runto do_locals_tests
+}
 
 mi_create_varobj "L" "lsimple" "in-and-out-of-scope: create varobj"
 mi_check_varobj_value "L" "{...}" "in-and-out-of-scope: check initial value"
 
-mi_runto main
+mi_runto_main
 
 mi_gdb_test "-var-update L" \
     {\^done,changelist=\[{name="L",in_scope="false",type_changed="false",has_more="0"}\]} \
@@ -674,4 +682,3 @@ mi_gdb_test "-var-update L" \
     "in-and-out-of-scope: in scope now, not changed"
 
 mi_gdb_exit
-return 0

@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+#   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -19,7 +19,7 @@
 # MA 02110-1301, USA.
 #
 
-# This file is sourced from elf32.em, and defines extra rx-elf
+# This file is sourced from elf.em, and defines extra rx-elf
 # specific routines.
 #
 test -z "$TARGET2_TYPE" && TARGET2_TYPE="rel"
@@ -27,15 +27,15 @@ fragment <<EOF
 
 #include "elf32-rx.h"
 
-static bfd_boolean no_flag_mismatch_warnings = TRUE;
-static bfd_boolean ignore_lma = TRUE;
+static bool no_flag_mismatch_warnings = true;
+static bool ignore_lma = true;
 
 /* This is a convenient point to tell BFD about target specific flags.
    After the output has been created, but before inputs are read.  */
 static void
 rx_elf_create_output_section_statements (void)
 {
-  extern void bfd_elf32_rx_set_target_flags (bfd_boolean, bfd_boolean);
+  extern void bfd_elf32_rx_set_target_flags (bool, bool);
 
   bfd_elf32_rx_set_target_flags (no_flag_mismatch_warnings, ignore_lma);
 }
@@ -45,13 +45,6 @@ EOF
 # Define some shell vars to insert bits of code into the standard elf
 # parse_args and list_options functions.
 #
-PARSE_AND_LIST_PROLOGUE='
-#define OPTION_NO_FLAG_MISMATCH_WARNINGS	301
-#define OPTION_IGNORE_LMA			302
-#define OPTION_NO_IGNORE_LMA			303
-#define OPTION_FLAG_MISMATCH_WARNINGS		304
-'
-
 PARSE_AND_LIST_LONGOPTS='
   { "no-flag-mismatch-warnings", no_argument, NULL, OPTION_NO_FLAG_MISMATCH_WARNINGS},
   { "flag-mismatch-warnings", no_argument, NULL, OPTION_FLAG_MISMATCH_WARNINGS},
@@ -71,19 +64,19 @@ PARSE_AND_LIST_OPTIONS='
 
 PARSE_AND_LIST_ARGS_CASES='
     case OPTION_NO_FLAG_MISMATCH_WARNINGS:
-      no_flag_mismatch_warnings = TRUE;
+      no_flag_mismatch_warnings = true;
       break;
 
     case OPTION_FLAG_MISMATCH_WARNINGS:
-      no_flag_mismatch_warnings = FALSE;
+      no_flag_mismatch_warnings = false;
       break;
 
     case OPTION_IGNORE_LMA:
-      ignore_lma = TRUE;
+      ignore_lma = true;
       break;
 
     case OPTION_NO_IGNORE_LMA:
-      ignore_lma = FALSE;
+      ignore_lma = false;
       break;
 '
 

@@ -1,6 +1,6 @@
 /* This testcase is part of GDB, the GNU debugger.
 
-   Copyright 2008-2019 Free Software Foundation, Inc.
+   Copyright 2008-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -110,6 +110,14 @@ class Fake
   {
   }
 };
+
+struct has_static_member
+{
+  static s global;
+};
+
+s has_static_member::global;
+
 #endif
 
 struct to_string_returns_value_inner
@@ -175,6 +183,8 @@ struct container
   string name;
   int len;
   int *elements;
+  int is_map_p;
+  int is_array_p;
 };
 
 typedef struct container zzz_type;
@@ -195,6 +205,8 @@ make_container (const char *s)
   result.name = make_string (s);
   result.len = 0;
   result.elements = 0;
+  result.is_map_p = 0;
+  result.is_array_p = 0;
 
   return result;
 }
@@ -352,6 +364,9 @@ main ()
   Derived derived;
   
   Fake fake (42);
+
+  init_s (&has_static_member::global, 23);
+  has_static_member has_member;
 #endif
 
   add_item (&c, 23);		/* MI breakpoint here */

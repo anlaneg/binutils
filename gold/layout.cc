@@ -1,6 +1,6 @@
 // layout.cc -- lay out output file sections for gold
 
-// Copyright (C) 2006-2019 Free Software Foundation, Inc.
+// Copyright (C) 2006-2024 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -37,6 +37,9 @@
 #ifdef __MINGW32__
 #include <windows.h>
 #include <rpcdce.h>
+#endif
+#ifdef HAVE_JANSSON
+#include <jansson.h>
 #endif
 
 #include "parameters.h"
@@ -466,6 +469,7 @@ Layout::Layout(int number_of_input_files, Script_options* script_options)
     unique_segment_for_sections_specified_(false),
     incremental_inputs_(NULL),
     record_output_section_data_from_script_(false),
+    lto_slim_object_(false),
     script_output_section_data_list_(),
     segment_states_(NULL),
     relaxation_debug_check_(NULL),
@@ -1098,7 +1102,8 @@ Layout::init_fixed_output_section(const char* name,
   typename elfcpp::Elf_types<size>::Elf_Addr sh_addr = shdr.get_sh_addr();
   typename elfcpp::Elf_types<size>::Elf_Off sh_offset = shdr.get_sh_offset();
   typename elfcpp::Elf_types<size>::Elf_WXword sh_size = shdr.get_sh_size();
-  typename elfcpp::Elf_types<size>::Elf_WXword sh_flags = shdr.get_sh_flags();
+  typename elfcpp::Elf_types<size>::Elf_WXword sh_flags =
+      this->get_output_section_flags(shdr.get_sh_flags());
   typename elfcpp::Elf_types<size>::Elf_WXword sh_addralign =
       shdr.get_sh_addralign();
 
@@ -1128,7 +1133,8 @@ Layout::special_ordering_of_input_section(const char* name)
     ".text.unlikely",
     ".text.exit",
     ".text.startup",
-    ".text.hot"
+    ".text.hot",
+    ".text.sorted"
   };
 
   for (size_t i = 0;
@@ -1170,35 +1176,38 @@ Layout::layout(Sized_relobj_file<size, big_endian>* object, unsigned int shndx,
     {
       // Some flags in the input section should not be automatically
       // copied to the output section.
-      elfcpp::Elf_Xword flags = (shdr.get_sh_flags()
-				 & ~ elfcpp::SHF_COMPRESSED);
+      elfcpp::Elf_Xword sh_flags = (shdr.get_sh_flags()
+				    & ~ elfcpp::SHF_COMPRESSED);
       name = this->namepool_.add(name, true, NULL);
-      os = this->make_output_section(name, sh_type, flags,
-				     ORDER_INVALID, false);
+      os = this->make_output_section(name, sh_type, sh_flags, ORDER_INVALID,
+				     false);
     }
   else
     {
+      // Get the section flags and mask out any flags that do not
+      // take part in section matching.
+      elfcpp::Elf_Xword sh_flags
+	  = (this->get_output_section_flags(shdr.get_sh_flags())
+	     & ~object->osabi().ignored_sh_flags());
+
       // All ".text.unlikely.*" sections can be moved to a unique
       // segment with --text-unlikely-segment option.
       bool text_unlikely_segment
-          = (parameters->options().text_unlikely_segment()
-             && is_prefix_of(".text.unlikely",
-                             object->section_name(shndx).c_str()));
+	  = (parameters->options().text_unlikely_segment()
+	     && is_prefix_of(".text.unlikely",
+			     object->section_name(shndx).c_str()));
       if (text_unlikely_segment)
-        {
-	  elfcpp::Elf_Xword flags
-	    = this->get_output_section_flags(shdr.get_sh_flags());
-
+	{
 	  Stringpool::Key name_key;
 	  const char* os_name = this->namepool_.add(".text.unlikely", true,
 						    &name_key);
-	  os = this->get_output_section(os_name, name_key, sh_type, flags,
+	  os = this->get_output_section(os_name, name_key, sh_type, sh_flags,
 					ORDER_INVALID, false);
-          // Map this output section to a unique segment.  This is done to
-          // separate "text" that is not likely to be executed from "text"
-          // that is likely executed.
+	  // Map this output section to a unique segment.  This is done to
+	  // separate "text" that is not likely to be executed from "text"
+	  // that is likely executed.
 	  os->set_is_unique_segment();
-        }
+	}
       else
 	{
 	  // Plugins can choose to place one or more subsets of sections in
@@ -1210,28 +1219,24 @@ Layout::layout(Sized_relobj_file<size, big_endian>* object, unsigned int shndx,
 	  if (it == this->section_segment_map_.end())
 	    {
 	      os = this->choose_output_section(object, name, sh_type,
-					       shdr.get_sh_flags(), true,
-					       ORDER_INVALID, false, false,
-					       true);
+					       sh_flags, true, ORDER_INVALID,
+					       false, false, true);
 	    }
 	  else
 	    {
 	      // We know the name of the output section, directly call
 	      // get_output_section here by-passing choose_output_section.
-	      elfcpp::Elf_Xword flags
-	        = this->get_output_section_flags(shdr.get_sh_flags());
-
 	      const char* os_name = it->second->name;
 	      Stringpool::Key name_key;
 	      os_name = this->namepool_.add(os_name, true, &name_key);
-	      os = this->get_output_section(os_name, name_key, sh_type, flags,
-					ORDER_INVALID, false);
+	      os = this->get_output_section(os_name, name_key, sh_type,
+					    sh_flags, ORDER_INVALID, false);
 	      if (!os->is_unique_segment())
-	        {
-	          os->set_is_unique_segment();
-	          os->set_extra_segment_flags(it->second->flags);
-	          os->set_segment_alignment(it->second->align);
-	        }
+		{
+		  os->set_is_unique_segment();
+		  os->set_extra_segment_flags(it->second->flags);
+		  os->set_segment_alignment(it->second->align);
+		}
 	    }
 	  }
       if (os == NULL)
@@ -1604,21 +1609,18 @@ Layout::add_eh_frame_for_plt(Output_data* plt, const unsigned char* cie_data,
     }
 }
 
-// Remove .eh_frame information for a PLT.  FDEs using the CIE must
-// be removed in reverse order to the order they were added.
+// Remove all post-map .eh_frame information for a PLT.
 
 void
 Layout::remove_eh_frame_for_plt(Output_data* plt, const unsigned char* cie_data,
-				size_t cie_length, const unsigned char* fde_data,
-				size_t fde_length)
+				size_t cie_length)
 {
   if (parameters->incremental())
     {
       // FIXME: Maybe this could work some day....
       return;
     }
-  this->eh_frame_data_->remove_ehframe_for_plt(plt, cie_data, cie_length,
-					       fde_data, fde_length);
+  this->eh_frame_data_->remove_ehframe_for_plt(plt, cie_data, cie_length);
 }
 
 // Scan a .debug_info or .debug_types section, and add summary
@@ -2063,12 +2065,15 @@ Layout::attach_allocated_section_to_segment(const Target* target,
   // segment.
   if (os->type() == elfcpp::SHT_NOTE)
     {
+      uint64_t os_align = os->addralign();
+
       // See if we already have an equivalent PT_NOTE segment.
       for (p = this->segment_list_.begin();
 	   p != segment_list_.end();
 	   ++p)
 	{
 	  if ((*p)->type() == elfcpp::PT_NOTE
+	      && (*p)->align() == os_align
 	      && (((*p)->flags() & elfcpp::PF_W)
 		  == (seg_flags & elfcpp::PF_W)))
 	    {
@@ -2082,6 +2087,7 @@ Layout::attach_allocated_section_to_segment(const Target* target,
 	  Output_segment* oseg = this->make_output_segment(elfcpp::PT_NOTE,
 							   seg_flags);
 	  oseg->add_output_section_to_nonload(os, seg_flags);
+	  oseg->set_align(os_align);
 	}
     }
 
@@ -2269,9 +2275,9 @@ Layout::layout_gnu_property(unsigned int note_type,
       const int size = parameters->target().get_size();
       const bool is_big_endian = parameters->target().is_big_endian();
       if (size == 32)
-        {
-          if (is_big_endian)
-            {
+	{
+	  if (is_big_endian)
+	    {
 #ifdef HAVE_TARGET_32_BIG
 	      parameters->sized_target<32, true>()->
 		  record_gnu_property(note_type, pr_type, pr_datasz, pr_data,
@@ -2279,9 +2285,9 @@ Layout::layout_gnu_property(unsigned int note_type,
 #else
 	      gold_unreachable();
 #endif
-            }
-          else
-            {
+	    }
+	  else
+	    {
 #ifdef HAVE_TARGET_32_LITTLE
 	      parameters->sized_target<32, false>()->
 		  record_gnu_property(note_type, pr_type, pr_datasz, pr_data,
@@ -2289,12 +2295,12 @@ Layout::layout_gnu_property(unsigned int note_type,
 #else
 	      gold_unreachable();
 #endif
-            }
-        }
+	    }
+	}
       else if (size == 64)
-        {
-          if (is_big_endian)
-            {
+	{
+	  if (is_big_endian)
+	    {
 #ifdef HAVE_TARGET_64_BIG
 	      parameters->sized_target<64, true>()->
 		  record_gnu_property(note_type, pr_type, pr_datasz, pr_data,
@@ -2302,9 +2308,9 @@ Layout::layout_gnu_property(unsigned int note_type,
 #else
 	      gold_unreachable();
 #endif
-            }
-          else
-            {
+	    }
+	  else
+	    {
 #ifdef HAVE_TARGET_64_LITTLE
 	      parameters->sized_target<64, false>()->
 		  record_gnu_property(note_type, pr_type, pr_datasz, pr_data,
@@ -2312,10 +2318,10 @@ Layout::layout_gnu_property(unsigned int note_type,
 #else
 	      gold_unreachable();
 #endif
-            }
-        }
+	    }
+	}
       else
-        gold_unreachable();
+	gold_unreachable();
       return;
     }
 
@@ -2434,6 +2440,7 @@ Layout::create_notes()
   this->create_gold_note();
   this->create_stack_segment();
   this->create_build_id();
+  this->create_package_metadata();
 }
 
 // Create the dynamic sections which are needed before we read the
@@ -2475,6 +2482,7 @@ Layout::create_initial_dynamic_sections(Symbol_table* symtab)
 void
 Layout::define_section_symbols(Symbol_table* symtab)
 {
+  const elfcpp::STV visibility = parameters->options().start_stop_visibility_enum();
   for (Section_list::const_iterator p = this->section_list_.begin();
        p != this->section_list_.end();
        ++p)
@@ -2496,7 +2504,7 @@ Layout::define_section_symbols(Symbol_table* symtab)
 					0, // symsize
 					elfcpp::STT_NOTYPE,
 					elfcpp::STB_GLOBAL,
-					elfcpp::STV_PROTECTED,
+					visibility,
 					0, // nonvis
 					false, // offset_is_from_end
 					true); // only_if_ref
@@ -2509,7 +2517,7 @@ Layout::define_section_symbols(Symbol_table* symtab)
 					0, // symsize
 					elfcpp::STT_NOTYPE,
 					elfcpp::STB_GLOBAL,
-					elfcpp::STV_PROTECTED,
+					visibility,
 					0, // nonvis
 					true, // offset_is_from_end
 					true); // only_if_ref
@@ -2922,6 +2930,8 @@ Layout::read_layout_from_file()
     gold_fatal(_("unable to open --section-ordering-file file %s: %s"),
 	       filename, strerror(errno));
 
+  File_read::record_file_read(filename);
+
   std::getline(in, line);   // this chops off the trailing \n, if any
   unsigned int position = 1;
   this->set_section_ordering_specified();
@@ -3182,6 +3192,10 @@ Layout::create_note(const char* name, int note_type,
 #else
   const int size = 32;
 #endif
+  // The NT_GNU_PROPERTY_TYPE_0 note is aligned to the pointer size.
+  const int addralign = ((note_type == elfcpp::NT_GNU_PROPERTY_TYPE_0
+			 ? parameters->target().get_size()
+			 : size) / 8);
 
   // The contents of the .note section.
   size_t namesz = strlen(name) + 1;
@@ -3235,7 +3249,8 @@ Layout::create_note(const char* name, int note_type,
   if (allocate)
     {
       flags = elfcpp::SHF_ALLOC;
-      order = ORDER_RO_NOTE;
+      order = (note_type == elfcpp::NT_GNU_PROPERTY_TYPE_0
+	       ?  ORDER_PROPERTY_NOTE : ORDER_RO_NOTE);
     }
   Output_section* os = this->choose_output_section(NULL, section_name,
 						   elfcpp::SHT_NOTE,
@@ -3245,7 +3260,7 @@ Layout::create_note(const char* name, int note_type,
     return NULL;
 
   Output_section_data* posd = new Output_data_const_buffer(buffer, notehdrsz,
-							   size / 8,
+							   addralign,
 							   "** note header");
   os->add_output_section_data(posd);
 
@@ -3299,7 +3314,7 @@ Layout::create_gnu_properties_note()
       write_sized_value(datasz, 4, p + 4, is_big_endian);
       memcpy(p + 8, prop->second.pr_data, datasz);
       if (aligned_datasz > datasz)
-        memset(p + 8 + datasz, 0, aligned_datasz - datasz);
+	memset(p + 8 + datasz, 0, aligned_datasz - datasz);
       p += 8 + aligned_datasz;
     }
   Output_section_data* posd = new Output_data_const(desc, descsz, 4);
@@ -3318,19 +3333,38 @@ Layout::create_gold_note()
 
   std::string desc = std::string("gold ") + gold::get_version_string();
 
-  size_t trailing_padding;
-  Output_section* os = this->create_note("GNU", elfcpp::NT_GNU_GOLD_VERSION,
-					 ".note.gnu.gold-version", desc.size(),
-					 false, &trailing_padding);
-  if (os == NULL)
-    return;
+  Output_section* os;
+  Output_section_data* posd;
 
-  Output_section_data* posd = new Output_data_const(desc, 4);
-  os->add_output_section_data(posd);
-
-  if (trailing_padding > 0)
+  if (!parameters->options().enable_linker_version())
     {
-      posd = new Output_data_zero_fill(trailing_padding, 0);
+      size_t trailing_padding;
+
+      os = this->create_note("GNU", elfcpp::NT_GNU_GOLD_VERSION,
+			     ".note.gnu.gold-version", desc.size(),
+			     false, &trailing_padding);
+      if (os == NULL)
+	return;
+
+      posd = new Output_data_const(desc, 4);
+      os->add_output_section_data(posd);
+
+      if (trailing_padding > 0)
+	{
+	  posd = new Output_data_zero_fill(trailing_padding, 0);
+	  os->add_output_section_data(posd);
+	}
+    }
+  else
+    {
+      os = this->choose_output_section(NULL, ".comment",
+				       elfcpp::SHT_PROGBITS, 0,
+				       false, ORDER_INVALID,
+				       false, false, false);
+      if (os == NULL)
+	return;
+
+      posd = new Output_data_const(desc, 1);
       os->add_output_section_data(posd);
     }
 }
@@ -3523,6 +3557,52 @@ Layout::create_build_id()
     }
 }
 
+// If --package-metadata was used, set up the package metadata note.
+// https://systemd.io/ELF_PACKAGE_METADATA/
+
+void
+Layout::create_package_metadata()
+{
+  if (!parameters->options().user_set_package_metadata())
+    return;
+
+  const char* desc = parameters->options().package_metadata();
+  if (strcmp(desc, "") == 0)
+    return;
+
+#ifdef HAVE_JANSSON
+  json_error_t json_error;
+  json_t *json = json_loads(desc, 0, &json_error);
+  if (json)
+    json_decref(json);
+  else
+    {
+      gold_fatal(_("error: --package-metadata=%s does not contain valid "
+		   "JSON: %s\n"),
+		 desc, json_error.text);
+    }
+#endif
+
+  // Create the note.
+  size_t trailing_padding;
+  // Ensure the trailing NULL byte is always included, as per specification.
+  size_t descsz = strlen(desc) + 1;
+  Output_section* os = this->create_note("FDO", elfcpp::FDO_PACKAGING_METADATA,
+					 ".note.package", descsz, true,
+					 &trailing_padding);
+  if (os == NULL)
+    return;
+
+  Output_section_data* posd = new Output_data_const(desc, descsz, 4);
+  os->add_output_section_data(posd);
+
+  if (trailing_padding != 0)
+    {
+      posd = new Output_data_zero_fill(trailing_padding, 0);
+      os->add_output_section_data(posd);
+    }
+}
+
 // If we have both .stabXX and .stabXXstr sections, then the sh_link
 // field of the former should point to the latter.  I'm not sure who
 // started this, but the GNU linker does it, and some tools depend
@@ -3703,6 +3783,11 @@ Layout::segment_precedes(const Output_segment* seg1,
     {
       if (type1 != type2)
 	return type1 < type2;
+      uint64_t align1 = seg1->align();
+      uint64_t align2 = seg2->align();
+      // Place segments with larger alignments first.
+      if (align1 != align2)
+	return align1 > align2;
       gold_assert(flags1 != flags2
 		  || this->script_options_->saw_phdrs_clause());
       return flags1 < flags2;
@@ -5053,7 +5138,8 @@ void
 Layout::add_target_dynamic_tags(bool use_rel, const Output_data* plt_got,
 				const Output_data* plt_rel,
 				const Output_data_reloc_generic* dyn_rel,
-				bool add_debug, bool dynrel_includes_plt)
+				bool add_debug, bool dynrel_includes_plt,
+				bool custom_relcount)
 {
   Output_data_dynamic* odyn = this->dynamic_data_;
   if (odyn == NULL)
@@ -5118,11 +5204,15 @@ Layout::add_target_dynamic_tags(bool use_rel, const Output_data* plt_got,
       if (parameters->options().combreloc() && have_dyn_rel)
 	{
 	  size_t c = dyn_rel->relative_reloc_count();
-	  if (c > 0)
-	    odyn->add_constant((use_rel
-				? elfcpp::DT_RELCOUNT
-				: elfcpp::DT_RELACOUNT),
-			       c);
+	  if (c != 0)
+	    {
+	      elfcpp::DT tag
+		= use_rel ? elfcpp::DT_RELCOUNT : elfcpp::DT_RELACOUNT;
+	      if (custom_relcount)
+		odyn->add_custom(tag);
+	      else
+		odyn->add_constant(tag, c);
+	    }
 	}
     }
 
@@ -5352,8 +5442,16 @@ Layout::finish_dynamic_section(const Input_objects* input_objects,
     flags |= elfcpp::DF_1_NOW;
   if (parameters->options().Bgroup())
     flags |= elfcpp::DF_1_GROUP;
+  if (parameters->options().pie())
+    flags |= elfcpp::DF_1_PIE;
   if (flags != 0)
     odyn->add_constant(elfcpp::DT_FLAGS_1, flags);
+
+  flags = 0;
+  if (parameters->options().unique())
+    flags |= elfcpp::DF_GNU_1_UNIQUE;
+  if (flags != 0)
+    odyn->add_constant(elfcpp::DT_GNU_FLAGS_1, flags);
 }
 
 // Set the size of the _DYNAMIC symbol table to be the size of the
@@ -6153,6 +6251,10 @@ Close_task_runner::run(Workqueue*, const Task*)
   // If we've been asked to create a binary file, we do so here.
   if (this->options_->oformat_enum() != General_options::OBJECT_FORMAT_ELF)
     this->layout_->write_binary(this->of_);
+
+  if (this->options_->dependency_file())
+    File_read::write_dependency_file(this->options_->dependency_file(),
+				     this->options_->output_file_name());
 
   this->of_->close();
 }
